@@ -1,0 +1,5 @@
+-- +goose Up
+ALTER TABLE games ADD COLUMN IF NOT EXISTS ended_at TIMESTAMPTZ NULL;
+
+-- +goose Down
+ALTER TABLE games DROP COLUMN IF EXISTS ended_at;
