@@ -31,6 +31,7 @@ var (
 	ErrPlayerNotFound           = errors.New("player not found for token")
 	ErrRoundNotFound            = errors.New("round not found")
 	ErrRoundNotAcceptingGuesses = errors.New("round is not accepting guesses")
+	ErrAnswerPhaseExpired       = errors.New("answer phase has expired")
 	ErrRoundAlreadyRevealed     = errors.New("round already revealed")
 	ErrRoundNotRevealed         = errors.New("round must be revealed before advancing")
 	ErrGuessAlreadySubmitted    = errors.New("guess already submitted for this round")
@@ -86,6 +87,17 @@ type OverrideMatchInput struct {
 type RoomService struct {
 	repository  RoomRepository
 	modelClient llm.ModelClient
+	clock       Clock
+}
+
+type Clock interface {
+	Now() time.Time
+}
+
+type systemClock struct{}
+
+func (systemClock) Now() time.Time {
+	return time.Now().UTC()
 }
 
 type GuessSubmission struct {
@@ -109,20 +121,28 @@ type RoomRepository interface {
 	GetRoom(ctx context.Context, code string) (models.Room, error)
 	AddPlayer(ctx context.Context, code string, player models.Player) (models.Room, error)
 	StartGame(ctx context.Context, code string, gameState models.Game) (models.Room, error)
-	SubmitGuess(ctx context.Context, code string, roundID string, submission GuessSubmission) (models.Room, error)
+	SubmitGuess(ctx context.Context, code string, roundID string, submission GuessSubmission, clock Clock) (models.Room, error)
 	RevealRound(ctx context.Context, code string, roundID string, revealStartedAt time.Time) (models.Room, error)
 	AdvanceGame(ctx context.Context, code string, gameState models.Game, nextRound *models.Round) (models.Room, error)
 	OverrideGuess(ctx context.Context, code string, roundID string, override GuessOverride) (models.Room, error)
 }
 
 func NewRoomService(repository RoomRepository, modelClient llm.ModelClient) *RoomService {
+	return NewRoomServiceWithClock(repository, modelClient, systemClock{})
+}
+
+func NewRoomServiceWithClock(repository RoomRepository, modelClient llm.ModelClient, clock Clock) *RoomService {
 	if modelClient == nil {
 		modelClient = llm.NewStaticModelClient()
+	}
+	if clock == nil {
+		clock = systemClock{}
 	}
 
 	return &RoomService{
 		repository:  repository,
 		modelClient: modelClient,
+		clock:       clock,
 	}
 }
 
@@ -143,7 +163,7 @@ func (service *RoomService) CreateRoom(ctx context.Context, input CreateRoomInpu
 	}
 
 	settings := normalizeSettings(input.Settings)
-	now := time.Now().UTC()
+	now := service.clock.Now()
 	host := models.Player{
 		ID:          newID(),
 		DisplayName: hostDisplayName,
@@ -190,7 +210,7 @@ func (service *RoomService) JoinRoom(ctx context.Context, input JoinRoomInput) (
 		ID:          newID(),
 		DisplayName: displayName,
 		IsHost:      false,
-		JoinedAt:    time.Now().UTC(),
+		JoinedAt:    service.clock.Now(),
 		Token:       newToken(),
 	}
 
@@ -219,7 +239,7 @@ func (service *RoomService) StartGame(ctx context.Context, input StartGameInput)
 		return models.Room{}, ErrUnauthorizedStart
 	}
 
-	now := time.Now().UTC()
+	now := service.clock.Now()
 	roundSeed, err := service.generateRound(ctx, room.Settings, 1, now)
 	if err != nil {
 		return models.Room{}, err
@@ -275,6 +295,10 @@ func (service *RoomService) SubmitGuess(ctx context.Context, input SubmitGuessIn
 	if round.Status != models.RoundStatusAnswering {
 		return models.Room{}, ErrRoundNotAcceptingGuesses
 	}
+	now := service.clock.Now()
+	if !now.Before(round.AnswerPhaseEndsAt) {
+		return models.Room{}, ErrAnswerPhaseExpired
+	}
 	for _, existingGuess := range round.Guesses {
 		if existingGuess.PlayerID == player.ID {
 			return models.Room{}, ErrGuessAlreadySubmitted
@@ -284,7 +308,6 @@ func (service *RoomService) SubmitGuess(ctx context.Context, input SubmitGuessIn
 		return models.Room{}, fmt.Errorf("prediction board missing for round")
 	}
 
-	now := time.Now().UTC()
 	return service.repository.SubmitGuess(ctx, code, round.ID, GuessSubmission{
 		ID:                newID(),
 		PlayerID:          player.ID,
@@ -292,7 +315,7 @@ func (service *RoomService) SubmitGuess(ctx context.Context, input SubmitGuessIn
 		RawAnswer:         answer,
 		CreatedAt:         now,
 		ScoreEventID:      newID(),
-	})
+	}, service.clock)
 }
 
 func (service *RoomService) RevealRound(ctx context.Context, input RevealRoundInput) (models.Room, error) {
@@ -317,7 +340,7 @@ func (service *RoomService) RevealRound(ctx context.Context, input RevealRoundIn
 		return models.Room{}, ErrRoundNotAcceptingGuesses
 	}
 
-	return service.repository.RevealRound(ctx, code, round.ID, time.Now().UTC())
+	return service.repository.RevealRound(ctx, code, round.ID, service.clock.Now())
 }
 
 func (service *RoomService) NextRound(ctx context.Context, input NextRoundInput) (models.Room, error) {
@@ -339,7 +362,7 @@ func (service *RoomService) NextRound(ctx context.Context, input NextRoundInput)
 		return models.Room{}, ErrRoundNotRevealed
 	}
 
-	now := time.Now().UTC()
+	now := service.clock.Now()
 	if room.CurrentGame.CurrentRoundIndex >= room.CurrentGame.TotalRounds {
 		completedGame := cloneGame(room.CurrentGame)
 		completedGame.Status = models.GameStatusCompleted
@@ -410,7 +433,7 @@ func (service *RoomService) OverrideMatch(ctx context.Context, input OverrideMat
 		GuessID:                   guessID,
 		MatchedPredictionAnswerID: input.MatchedPredictionAnswerID,
 		ScoreEventID:              newID(),
-		CreatedAt:                 time.Now().UTC(),
+		CreatedAt:                 service.clock.Now(),
 	})
 }
 

@@ -227,7 +227,7 @@ func (repository *PostgresRoomRepository) StartGame(ctx context.Context, code st
 	return room, nil
 }
 
-func (repository *PostgresRoomRepository) SubmitGuess(ctx context.Context, code string, roundID string, submission game.GuessSubmission) (models.Room, error) {
+func (repository *PostgresRoomRepository) SubmitGuess(ctx context.Context, code string, roundID string, submission game.GuessSubmission, clock game.Clock) (models.Room, error) {
 	tx, err := repository.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return models.Room{}, fmt.Errorf("begin submit guess tx: %w", err)
@@ -238,13 +238,15 @@ func (repository *PostgresRoomRepository) SubmitGuess(ctx context.Context, code 
 	var roundStatus models.RoundStatus
 	var boardID string
 	var gameID string
+	var answerPhaseEndsAt time.Time
 	err = tx.QueryRow(ctx, `
-		SELECT r.id, r.status, r.board_id, g.id
+		-- lock round for guess submission
+		SELECT r.id, r.status, r.board_id, g.id, r.answer_phase_ends_at
 		FROM rounds r
 		INNER JOIN games g ON g.id = r.game_id
 		WHERE g.room_code = $1 AND r.id = $2
 		FOR UPDATE
-	`, code, roundID).Scan(&lockedRoundID, &roundStatus, &boardID, &gameID)
+	`, code, roundID).Scan(&lockedRoundID, &roundStatus, &boardID, &gameID, &answerPhaseEndsAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return models.Room{}, game.ErrRoundNotFound
@@ -255,6 +257,9 @@ func (repository *PostgresRoomRepository) SubmitGuess(ctx context.Context, code 
 
 	if roundStatus != models.RoundStatusAnswering {
 		return models.Room{}, game.ErrRoundNotAcceptingGuesses
+	}
+	if !clock.Now().Before(answerPhaseEndsAt) {
+		return models.Room{}, game.ErrAnswerPhaseExpired
 	}
 
 	board, err := repository.loadBoard(ctx, tx, boardID)

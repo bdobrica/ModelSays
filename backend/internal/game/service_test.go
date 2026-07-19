@@ -2,10 +2,29 @@ package game
 
 import (
 	"context"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/bogdandobrica/modelsays/backend/internal/models"
 )
+
+type fakeClock struct {
+	mu  sync.RWMutex
+	now time.Time
+}
+
+func (clock *fakeClock) Now() time.Time {
+	clock.mu.RLock()
+	defer clock.mu.RUnlock()
+	return clock.now
+}
+
+func (clock *fakeClock) Set(now time.Time) {
+	clock.mu.Lock()
+	defer clock.mu.Unlock()
+	clock.now = now
+}
 
 func TestCreateRoomAndJoinRoom(t *testing.T) {
 	t.Parallel()
@@ -314,6 +333,87 @@ func TestSubmitGuessRejectsDuplicateSubmission(t *testing.T) {
 	})
 	if err != ErrGuessAlreadySubmitted {
 		t.Fatalf("expected ErrGuessAlreadySubmitted, got %v", err)
+	}
+}
+
+func TestSubmitGuessEnforcesAnswerDeadline(t *testing.T) {
+	t.Parallel()
+
+	startedAt := time.Date(2026, time.July, 19, 12, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name    string
+		now     time.Time
+		wantErr error
+	}{
+		{name: "just before deadline", now: startedAt.Add(30*time.Second - time.Nanosecond)},
+		{name: "exactly at deadline", now: startedAt.Add(30 * time.Second), wantErr: ErrAnswerPhaseExpired},
+		{name: "after deadline", now: startedAt.Add(30*time.Second + time.Nanosecond), wantErr: ErrAnswerPhaseExpired},
+	}
+
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			clock := &fakeClock{now: startedAt}
+			service := NewRoomServiceWithClock(NewInMemoryRoomRepository(), nil, clock)
+			room, host, err := service.CreateRoom(context.Background(), CreateRoomInput{
+				RoomName:        "Deadline room",
+				HostDisplayName: "Host",
+				Settings:        models.RoomSettings{AnswerTimerSeconds: 30},
+			})
+			if err != nil {
+				t.Fatalf("CreateRoom returned error: %v", err)
+			}
+			_, player, err := service.JoinRoom(context.Background(), JoinRoomInput{Code: room.Code, DisplayName: "Player"})
+			if err != nil {
+				t.Fatalf("JoinRoom returned error: %v", err)
+			}
+			startedRoom, err := service.StartGame(context.Background(), StartGameInput{Code: room.Code, PlayerToken: host.Token})
+			if err != nil {
+				t.Fatalf("StartGame returned error: %v", err)
+			}
+
+			clock.Set(test.now)
+			updatedRoom, err := service.SubmitGuess(context.Background(), SubmitGuessInput{
+				Code: room.Code, RoundID: startedRoom.CurrentGame.CurrentRound.ID, PlayerToken: player.Token, Answer: "bitcoin",
+			})
+			if err != test.wantErr {
+				t.Fatalf("expected error %v, got %v", test.wantErr, err)
+			}
+			if test.wantErr == nil && len(updatedRoom.CurrentGame.CurrentRound.Guesses) != 1 {
+				t.Fatalf("expected accepted guess just before deadline")
+			}
+		})
+	}
+}
+
+func TestRevealRoundAllowsEarlyReveal(t *testing.T) {
+	t.Parallel()
+
+	startedAt := time.Date(2026, time.July, 19, 12, 0, 0, 0, time.UTC)
+	clock := &fakeClock{now: startedAt}
+	service := NewRoomServiceWithClock(NewInMemoryRoomRepository(), nil, clock)
+	room, host, err := service.CreateRoom(context.Background(), CreateRoomInput{
+		RoomName: "Early reveal", HostDisplayName: "Host", Settings: models.RoomSettings{AnswerTimerSeconds: 30},
+	})
+	if err != nil {
+		t.Fatalf("CreateRoom returned error: %v", err)
+	}
+	startedRoom, err := service.StartGame(context.Background(), StartGameInput{Code: room.Code, PlayerToken: host.Token})
+	if err != nil {
+		t.Fatalf("StartGame returned error: %v", err)
+	}
+
+	clock.Set(startedAt.Add(time.Second))
+	revealedRoom, err := service.RevealRound(context.Background(), RevealRoundInput{
+		Code: room.Code, RoundID: startedRoom.CurrentGame.CurrentRound.ID, PlayerToken: host.Token,
+	})
+	if err != nil {
+		t.Fatalf("RevealRound returned error before deadline: %v", err)
+	}
+	if revealedRoom.CurrentGame.CurrentRound.Status != models.RoundStatusRevealed {
+		t.Fatalf("expected early reveal to reveal round")
 	}
 }
 

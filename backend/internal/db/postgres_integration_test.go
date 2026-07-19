@@ -102,6 +102,72 @@ func TestPostgresAtomicAnswerClaimsAndReload(t *testing.T) {
 	}
 }
 
+func TestPostgresRejectsSubmissionThatCrossesDeadlineWaitingForLock(t *testing.T) {
+	pool := integrationPool(t)
+	repository := db.NewPostgresRoomRepository(pool)
+	startedAt := time.Date(2026, time.July, 19, 12, 0, 0, 0, time.UTC)
+	clock := &integrationClock{now: startedAt}
+	service := game.NewRoomServiceWithClock(repository, nil, clock)
+	ctx := context.Background()
+
+	room, host, err := service.CreateRoom(ctx, game.CreateRoomInput{
+		RoomName: "Deadline lock", HostDisplayName: "Host", Settings: models.RoomSettings{AnswerTimerSeconds: 30},
+	})
+	if err != nil {
+		t.Fatalf("CreateRoom returned error: %v", err)
+	}
+	_, player, err := service.JoinRoom(ctx, game.JoinRoomInput{Code: room.Code, DisplayName: "Player"})
+	if err != nil {
+		t.Fatalf("JoinRoom returned error: %v", err)
+	}
+	startedRoom, err := service.StartGame(ctx, game.StartGameInput{Code: room.Code, PlayerToken: host.Token})
+	if err != nil {
+		t.Fatalf("StartGame returned error: %v", err)
+	}
+	round := startedRoom.CurrentGame.CurrentRound
+	clock.Set(round.AnswerPhaseEndsAt.Add(-time.Nanosecond))
+
+	lockTx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin round lock transaction: %v", err)
+	}
+	defer lockTx.Rollback(ctx)
+	if _, err := lockTx.Exec(ctx, `SELECT id FROM rounds WHERE id = $1 FOR UPDATE`, round.ID); err != nil {
+		t.Fatalf("lock round: %v", err)
+	}
+
+	result := make(chan error, 1)
+	go func() {
+		_, submitErr := service.SubmitGuess(ctx, game.SubmitGuessInput{
+			Code: room.Code, RoundID: round.ID, PlayerToken: player.Token, Answer: round.Board.Answers[0].CanonicalAnswer,
+		})
+		result <- submitErr
+	}()
+
+	waitForBlockedRoundLock(t, pool)
+	clock.Set(round.AnswerPhaseEndsAt)
+	if err := lockTx.Commit(ctx); err != nil {
+		t.Fatalf("release round lock: %v", err)
+	}
+
+	select {
+	case err := <-result:
+		if err != game.ErrAnswerPhaseExpired {
+			t.Fatalf("expected ErrAnswerPhaseExpired after crossing deadline, got %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for blocked submission")
+	}
+
+	var guessCount int
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM guesses WHERE round_id = $1`, round.ID).Scan(&guessCount); err != nil {
+		t.Fatalf("count guesses: %v", err)
+	}
+	if guessCount != 0 {
+		t.Fatalf("expected no persisted guess after expiry, got %d", guessCount)
+	}
+}
+
 func TestAtomicAnswerClaimMigrationUpDown(t *testing.T) {
 	pool := integrationPool(t)
 
@@ -226,4 +292,46 @@ func totalScore(room models.Room) int {
 		total += entry.Score
 	}
 	return total
+}
+
+type integrationClock struct {
+	mu  sync.RWMutex
+	now time.Time
+}
+
+func (clock *integrationClock) Now() time.Time {
+	clock.mu.RLock()
+	defer clock.mu.RUnlock()
+	return clock.now
+}
+
+func (clock *integrationClock) Set(now time.Time) {
+	clock.mu.Lock()
+	defer clock.mu.Unlock()
+	clock.now = now
+}
+
+func waitForBlockedRoundLock(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		var blocked bool
+		err := pool.QueryRow(context.Background(), `
+			SELECT EXISTS (
+				SELECT 1
+				FROM pg_stat_activity
+				WHERE datname = current_database()
+				  AND wait_event_type = 'Lock'
+				  AND query LIKE '%lock round for guess submission%'
+			)
+		`).Scan(&blocked)
+		if err != nil {
+			t.Fatalf("query blocked round submission: %v", err)
+		}
+		if blocked {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("submission did not block on the round lock")
 }

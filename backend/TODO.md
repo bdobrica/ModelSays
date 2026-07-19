@@ -7,7 +7,7 @@ Status note:
 - Current scope changes:
   - local development still falls back to an in-process static model client when `OPENAI_API_KEY` is not set;
   - host-only authorization is currently implemented for start, reveal, next-round, and override actions, not every future host action;
-  - the round state machine currently covers round creation, guess submission, reveal, next-round transition, and final completion, but not automatic timer-driven progression.
+  - the round state machine enforces the answer deadline during submission and covers reveal, next-round transition, and final completion, but expiry does not yet trigger automatic reveal or progression.
 
 ## Phase 0 — Project Setup
 
@@ -81,8 +81,8 @@ Status note:
 - [x] Implement game creation from a room.
 - [x] Implement round creation.
 - [x] Implement current round state machine.
-- [x] Implement answer phase timer.
-- [ ] Implement automatic answer-phase close.
+- [x] Enforce the answer phase deadline when guesses are submitted.
+- [ ] Automatically reveal or progress after the answer deadline; expiry currently closes submissions and waits for the host.
 - [x] Implement reveal phase.
 - [x] Implement next-round transition.
 - [x] Implement game-ended transition.

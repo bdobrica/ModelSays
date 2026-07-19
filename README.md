@@ -220,7 +220,7 @@ The host should be able to override low-confidence matches during the reveal pha
 
 Recommended MVP mode.
 
-All players answer at the same time. After the timer expires, the board is revealed and scores are awarded.
+All players answer at the same time. The server accepts guesses only before the published `answerPhaseEndsAt` deadline. At expiry, answering closes and the host reveals the board; automatic reveal is intentionally deferred for the MVP. The host may also reveal early.
 
 For the MVP, matching is deterministic: a normalized guess must equal a canonical board answer or one of its aliases. Only the earliest committed guess that claims a board answer receives its points. Later guesses matching that same answer are recorded as duplicates and score zero.
 

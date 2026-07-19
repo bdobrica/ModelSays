@@ -83,7 +83,7 @@ func (repository *InMemoryRoomRepository) StartGame(_ context.Context, code stri
 	return cloneRoom(*room), nil
 }
 
-func (repository *InMemoryRoomRepository) SubmitGuess(_ context.Context, code string, roundID string, submission GuessSubmission) (models.Room, error) {
+func (repository *InMemoryRoomRepository) SubmitGuess(_ context.Context, code string, roundID string, submission GuessSubmission, clock Clock) (models.Room, error) {
 	repository.mu.Lock()
 	defer repository.mu.Unlock()
 
@@ -98,6 +98,9 @@ func (repository *InMemoryRoomRepository) SubmitGuess(_ context.Context, code st
 	round := room.CurrentGame.CurrentRound
 	if round.Status != models.RoundStatusAnswering {
 		return models.Room{}, ErrRoundNotAcceptingGuesses
+	}
+	if !clock.Now().Before(round.AnswerPhaseEndsAt) {
+		return models.Room{}, ErrAnswerPhaseExpired
 	}
 	for _, existingGuess := range round.Guesses {
 		if existingGuess.PlayerID == submission.PlayerID {

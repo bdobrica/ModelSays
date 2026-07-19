@@ -13,7 +13,7 @@ For each round:
 1. A question is selected.
 2. A chosen prediction model generates an answer board.
 3. The board is stored before players submit answers.
-4. Players submit answers within a timer.
+4. Players submit answers before the server-enforced deadline.
 5. A judge model matches player answers to the stored board.
 6. Scores are awarded.
 7. The board is revealed.
@@ -70,10 +70,12 @@ Flow:
 1. Everyone sees the question.
 2. Everyone submits one answer before the timer ends.
 3. Answers are matched to the hidden board.
-4. The board is revealed.
+4. The host reveals the board, either early or after answering expires.
 5. Scores are awarded.
 
 This should be the MVP mode.
+
+The `answerPhaseEndsAt` timestamp is authoritative. A guess received at or after that instant is rejected with HTTP `409` and `{"error":"answer phase has expired"}`. The repository checks the deadline again while holding the round lock, so a request that waits past the cutoff cannot be persisted. Expiry closes submissions but does not automatically reveal or advance the round in the MVP.
 
 ### Sequential Mode
 
@@ -317,6 +319,8 @@ Suggested initial endpoints:
 - `POST /api/rooms/{code}/rounds/{roundID}/guesses`
 - `POST /api/rooms/{code}/rounds/{roundID}/reveal`
 - `GET /api/rooms/{code}/state`
+
+Guess submission returns `409 Conflict` with `{"error":"answer phase has expired"}` when server time is equal to or later than the round deadline.
 
 Host-only endpoints:
 
