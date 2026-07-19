@@ -301,14 +301,24 @@ VITE_WS_URL=ws://localhost:8080/ws
 
 ## Local Development
 
-Expected commands:
+Use Node.js 22 or newer with npm. From the repository root, install the exact dependency versions from `package-lock.json`:
 
 ```bash
-npm install
+make bootstrap
+make client
+```
+
+For client-only development:
+
+```bash
+cd client
+npm ci
 npm run dev
 npm run build
 npm run test
 ```
+
+Run `make verify` from the repository root to check Go formatting, backend and client tests, and the production client build together.
 
 ## MVP Definition
 

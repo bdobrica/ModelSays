@@ -21,6 +21,7 @@ Status note:
 - [ ] Add formatting.
 - [x] Add test setup.
 - [x] Add basic app shell.
+- [x] Add reproducible dependency bootstrap and build/test targets.
 - [ ] Add loading and error components.
 
 ## Phase 1 — Design Foundation

@@ -114,10 +114,19 @@ See [`client/README.md`](client/README.md) for more details.
 
 The repository now includes a root `compose.yml` for PostgreSQL and a root `Makefile` for the common local workflows.
 
+Prerequisites:
+
+- Go 1.25 or newer;
+- Node.js 22 or newer with npm;
+- Docker Engine 24 or newer with Docker Compose v2.
+
+PostgreSQL 16 runs through Compose, so a separate local PostgreSQL installation is not required. Migrations use Goose `v3.27.2` through `go run`; Goose does not need to be installed globally.
+
 Quick start:
 
 ```bash
 cp .env.example .env
+make bootstrap
 make start
 ```
 
@@ -139,12 +148,13 @@ make backend
 make client
 ```
 
-Test targets:
+Verification:
 
 ```bash
-make test-backend
-make test-client
+make verify
 ```
+
+`make verify` checks Go formatting, runs backend and client tests, and type-checks/builds the client. Narrower targets such as `make test-backend`, `make test-client`, `make build-client`, and `make check-format` are also available.
 
 ## Suggested Tech Stack
 
@@ -296,25 +306,6 @@ See the TODO files for a more detailed implementation plan:
 
 * [`backend/TODO.md`](backend/TODO.md)
 * [`client/TODO.md`](client/TODO.md)
-
-## Local Development
-
-Detailed setup instructions will live in the backend and client READMEs.
-
-Expected local development flow:
-
-```bash
-# Backend
-cd backend
-go run ./cmd/server
-
-# Client
-cd client
-npm install
-npm run dev
-```
-
-A future Docker Compose setup should provide PostgreSQL and any supporting local services.
 
 ## Environment Variables
 

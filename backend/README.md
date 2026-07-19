@@ -370,33 +370,36 @@ DEFAULT_QUESTION_MODEL=gpt-4.1-mini
 
 ## Local Development
 
-Expected commands:
+Use Go 1.25 or newer and Docker Engine 24 or newer with Docker Compose v2. From the repository root, download locked dependencies and start the full stack:
 
 ```bash
-go mod tidy
-go run ./cmd/server
-go test ./...
-```
-
-With the repository-level Docker Compose and Makefile in place, the quickest local path is:
-
-```bash
+cp .env.example .env
+make bootstrap
 make start
 ```
 
-Useful backend-specific helpers from the repo root:
+PostgreSQL 16 is supplied by `compose.yml`. Migrations use Goose `v3.27.2` through `go run`, so Goose does not need to be installed globally.
+
+For backend-only development:
 
 ```bash
 make postgres-up
 make migrate-up
 make backend
-make test-backend
 ```
 
-Run migrations:
+Run backend tests or the complete repository verification:
 
 ```bash
-goose -dir ./migrations postgres "$DATABASE_URL" up
+make test-backend
+make verify
+```
+
+Run the backend directly from its directory when PostgreSQL and migrations are already ready:
+
+```bash
+cd backend
+go run ./cmd/server
 ```
 
 ## OpenAI Integration

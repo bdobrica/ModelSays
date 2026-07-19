@@ -13,14 +13,16 @@ DATABASE_URL ?= postgres://postgres:postgres@localhost:5432/modelsays?sslmode=di
 HTTP_ADDR ?= :8080
 APP_ENV ?= development
 CORS_ALLOWED_ORIGINS ?= http://localhost:5173
-GOOSE := go run github.com/pressly/goose/v3/cmd/goose@latest
+GOOSE_VERSION := v3.27.2
+GOOSE := go run github.com/pressly/goose/v3/cmd/goose@$(GOOSE_VERSION)
 
-.PHONY: help start dev postgres-up postgres-down postgres-logs postgres-reset migrate-up migrate-down backend client test-backend test-client
+.PHONY: help bootstrap start dev postgres-up postgres-down postgres-logs postgres-reset migrate-up migrate-down backend client format check-format test-backend test-client build-client check verify
 
 help:
 	@printf '%s\n' \
 		'Model Says development targets:' \
 		'  .env support       Root .env values are loaded automatically when present' \
+		'  make bootstrap     Download locked Go and npm dependencies' \
 		'  make start         Start Postgres, apply migrations, then run backend and client together' \
 		'  make dev           Alias for start' \
 		'  make postgres-up   Start local PostgreSQL with Docker Compose' \
@@ -31,8 +33,17 @@ help:
 		'  make migrate-down  Roll back the most recent backend migration' \
 		'  make backend       Run the backend only' \
 		'  make client        Run the client only' \
+		'  make format        Format backend Go source' \
+		'  make check-format  Check backend Go formatting' \
 		'  make test-backend  Run backend tests' \
-		'  make test-client   Run client tests'
+		'  make test-client   Run client tests' \
+		'  make build-client  Type-check and build the client' \
+		'  make check         Check formatting, tests, and client build' \
+		'  make verify        Alias for check'
+
+bootstrap:
+	cd $(BACKEND_DIR) && go mod download
+	cd $(CLIENT_DIR) && npm ci
 
 start: dev
 
@@ -66,8 +77,25 @@ backend:
 client:
 	cd $(CLIENT_DIR) && npm run dev
 
+format:
+	gofmt -w $$(find $(BACKEND_DIR) -type f -name '*.go')
+
+check-format:
+	@test -z "$$(gofmt -l $$(find $(BACKEND_DIR) -type f -name '*.go'))" || { \
+		printf '%s\n' 'Go files need formatting. Run make format:'; \
+		gofmt -l $$(find $(BACKEND_DIR) -type f -name '*.go'); \
+		exit 1; \
+	}
+
 test-backend:
 	cd $(BACKEND_DIR) && go test ./...
 
 test-client:
 	cd $(CLIENT_DIR) && npm run test
+
+build-client:
+	cd $(CLIENT_DIR) && npm run build
+
+check: check-format test-backend test-client build-client
+
+verify: check

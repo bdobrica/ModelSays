@@ -196,6 +196,7 @@ Status note:
 - [x] Add `.env.example`.
 - [x] Add Docker Compose for PostgreSQL.
 - [x] Add Makefile.
+- [x] Pin migration tooling and add reproducible bootstrap/verification targets.
 - [ ] Add seed command.
 - [ ] Add local fake LLM mode.
 - [x] Add README examples.
