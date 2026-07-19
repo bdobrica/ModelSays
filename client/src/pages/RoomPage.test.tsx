@@ -205,7 +205,7 @@ describe('RoomPage', () => {
     await act(async () => vi.advanceTimersByTime(30_000))
     expect(screen.getByText('Time expired', { selector: '[role="timer"]' })).toBeInTheDocument()
     expect(screen.getByLabelText('Your guess')).toBeDisabled()
-    expect(screen.getByText('Answering has expired. Waiting for the host to reveal.')).toBeInTheDocument()
+    expect(screen.getByText('Answering has expired. The server will reveal the round automatically.')).toBeInTheDocument()
   })
 
   it('does not let a slower earlier poll overwrite a newer room response', async () => {

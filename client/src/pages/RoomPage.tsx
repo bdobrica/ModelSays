@@ -349,10 +349,10 @@ export function RoomPage() {
             <p className="countdown" role="timer">{hasLocallyExpired ? 'Time expired' : `${secondsRemaining}s remaining`}</p>
             <p className="status-note">
               {hasSubmitted
-                ? 'Submitted. Your guess is locked while you wait for the host.'
+                ? 'Submitted. Your guess is locked while you wait for reveal.'
                 : hasLocallyExpired
-                  ? 'Answering has expired. Waiting for the host to reveal.'
-                  : 'Accepting answers. The board stays hidden until the host reveals it.'}
+                  ? 'Answering has expired. The server will reveal the round automatically.'
+                  : 'Accepting answers. The board stays hidden until reveal.'}
             </p>
             <form className="answer-form" onSubmit={handleSubmitGuess}>
               <input

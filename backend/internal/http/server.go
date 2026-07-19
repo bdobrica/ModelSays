@@ -25,6 +25,7 @@ type Server struct {
 	roomService            *game.RoomService
 	mux                    *http.ServeMux
 	activeEventConnections atomic.Int64
+	readinessCheck         func() error
 }
 
 type createRoomRequest struct {
@@ -149,8 +150,13 @@ func (server *Server) Handler() http.Handler {
 	return server.withCORS(server.mux)
 }
 
+func (server *Server) SetReadinessCheck(check func() error) {
+	server.readinessCheck = check
+}
+
 func (server *Server) routes() {
 	server.mux.HandleFunc("GET /healthz", server.handleHealth)
+	server.mux.HandleFunc("GET /readyz", server.handleReady)
 	server.mux.HandleFunc("POST /api/rooms", server.handleCreateRoom)
 	server.mux.HandleFunc("GET /api/rooms/", server.handleRoomRoutes)
 	server.mux.HandleFunc("POST /api/rooms/", server.handleRoomRoutes)
@@ -158,6 +164,16 @@ func (server *Server) routes() {
 
 func (server *Server) handleHealth(writer http.ResponseWriter, _ *http.Request) {
 	writeJSON(writer, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (server *Server) handleReady(writer http.ResponseWriter, _ *http.Request) {
+	if server.readinessCheck != nil {
+		if err := server.readinessCheck(); err != nil {
+			writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"status": "not_ready"})
+			return
+		}
+	}
+	writeJSON(writer, http.StatusOK, map[string]string{"status": "ready"})
 }
 
 func (server *Server) handleCreateRoom(writer http.ResponseWriter, request *http.Request) {

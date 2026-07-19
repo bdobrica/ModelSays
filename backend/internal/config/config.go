@@ -21,6 +21,10 @@ type Config struct {
 	EventHeartbeat      time.Duration
 	EventMaxConnections int
 	EventWriteTimeout   time.Duration
+	AutoRevealEnabled   bool
+	AutoRevealGrace     time.Duration
+	TransitionPoll      time.Duration
+	TransitionBatchSize int
 }
 
 type DefaultModels struct {
@@ -41,6 +45,10 @@ func Load() Config {
 		EventHeartbeat:      time.Duration(getEnvInt("EVENT_HEARTBEAT_SECONDS", 15)) * time.Second,
 		EventMaxConnections: getEnvInt("EVENT_MAX_CONNECTIONS", 100),
 		EventWriteTimeout:   time.Duration(getEnvInt("EVENT_WRITE_TIMEOUT_SECONDS", 5)) * time.Second,
+		AutoRevealEnabled:   !strings.EqualFold(getEnv("AUTO_REVEAL_ENABLED", "true"), "false"),
+		AutoRevealGrace:     time.Duration(getEnvNonNegativeInt("AUTO_REVEAL_GRACE_SECONDS", 0)) * time.Second,
+		TransitionPoll:      time.Duration(getEnvInt("TRANSITION_POLL_INTERVAL_MS", 250)) * time.Millisecond,
+		TransitionBatchSize: getEnvInt("TRANSITION_BATCH_SIZE", 25),
 		DefaultModels: DefaultModels{
 			Prediction: getEnv("DEFAULT_PREDICTION_MODEL", "gpt-4.1-mini"),
 			Question:   getEnv("DEFAULT_QUESTION_MODEL", "gpt-4.1-mini"),
@@ -58,6 +66,14 @@ func Load() Config {
 			MaxRawResponseBytes:     getEnvInt("MODEL_RAW_RESPONSE_MAX_BYTES", defaultPolicy.MaxRawResponseBytes),
 		}.Normalize(),
 	}
+}
+
+func getEnvNonNegativeInt(key string, fallback int) int {
+	value, err := strconv.Atoi(strings.TrimSpace(os.Getenv(key)))
+	if err != nil || value < 0 {
+		return fallback
+	}
+	return value
 }
 
 func getEnvInt(key string, fallback int) int {

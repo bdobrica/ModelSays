@@ -552,6 +552,22 @@ func TestCreateRoomRejectsInvalidSettingsAndMalformedBodies(t *testing.T) {
 	}
 }
 
+func TestReadinessReflectsTransitionWorker(t *testing.T) {
+	server := NewServer(config.Config{}, slog.New(slog.NewTextHandler(io.Discard, nil)), game.NewInMemoryRoomService())
+	server.SetReadinessCheck(func() error { return game.ErrDeadlineTransitionsUnavailable })
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("unready status = %d, want %d", response.Code, http.StatusServiceUnavailable)
+	}
+	server.SetReadinessCheck(func() error { return nil })
+	response = httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("ready status = %d, want %d", response.Code, http.StatusOK)
+	}
+}
+
 func TestCreateJoinStartHTTPFlowAndJoinClosure(t *testing.T) {
 	t.Parallel()
 

@@ -170,7 +170,7 @@ func (repository *InMemoryRoomRepository) SubmitGuess(_ context.Context, code st
 	return cloneRoom(*room), nil
 }
 
-func (repository *InMemoryRoomRepository) RevealRound(_ context.Context, code string, roundID string, revealStartedAt time.Time) (models.Room, error) {
+func (repository *InMemoryRoomRepository) RevealRound(_ context.Context, code string, roundID string, transition models.RoundTransition) (models.Room, error) {
 	repository.mu.Lock()
 	defer repository.mu.Unlock()
 
@@ -188,8 +188,12 @@ func (repository *InMemoryRoomRepository) RevealRound(_ context.Context, code st
 	}
 
 	round.Status = models.RoundStatusRevealed
-	round.RevealStartedAt = &revealStartedAt
-	room.UpdatedAt = revealStartedAt
+	round.RevealStartedAt = &transition.CreatedAt
+	room.UpdatedAt = transition.CreatedAt
+	room.Revision++
+	event := models.RoomEvent{Version: models.RoomEventVersion, ID: newID(), RoomCode: code,
+		Type: models.RoomEventRoundRevealed, RoomRevision: room.Revision, OccurredAt: transition.CreatedAt}
+	repository.events[code] = append(repository.events[code], event)
 
 	return cloneRoom(*room), nil
 }

@@ -157,7 +157,7 @@ type RoomRepository interface {
 	AddPlayer(ctx context.Context, code string, player models.Player) (models.Room, error)
 	StartGame(ctx context.Context, code string, gameState models.Game) (models.Room, error)
 	SubmitGuess(ctx context.Context, code string, roundID string, submission GuessSubmission, clock Clock) (models.Room, error)
-	RevealRound(ctx context.Context, code string, roundID string, revealStartedAt time.Time) (models.Room, error)
+	RevealRound(ctx context.Context, code string, roundID string, transition models.RoundTransition) (models.Room, error)
 	AdvanceGame(ctx context.Context, code string, gameState models.Game, nextRound *models.Round) (models.Room, error)
 	OverrideGuess(ctx context.Context, code string, roundID string, override GuessOverride) (models.Room, error)
 	ListProviderAudits(ctx context.Context, code string) ([]models.ProviderCallAudit, error)
@@ -537,11 +537,12 @@ func (service *RoomService) RevealRound(ctx context.Context, input RevealRoundIn
 		return models.Room{}, ErrRoundNotAcceptingGuesses
 	}
 
-	updated, err := service.repository.RevealRound(ctx, code, round.ID, service.clock.Now())
-	if err == nil {
-		updated = service.publishRoomEvent(ctx, updated, models.RoomEventRoundRevealed)
-	}
-	return updated, err
+	now := service.clock.Now()
+	return service.repository.RevealRound(ctx, code, round.ID, models.RoundTransition{
+		ID: newID(), RoomCode: code, GameID: room.CurrentGame.ID, RoundID: round.ID,
+		Action: "reveal", Actor: models.RoundTransitionActorHost,
+		Reason: "host_reveal", CreatedAt: now,
+	})
 }
 
 func (service *RoomService) NextRound(ctx context.Context, input NextRoundInput) (models.Room, error) {

@@ -37,7 +37,7 @@ For the two baseline passes, compare deterministic request, polling, query, and 
 | Provider cost per five-round game | ≤ US$0.10 by configured estimate | | |
 | Client production assets | ≤ 350 KiB uncompressed, ≤ 110 KiB compressed | | |
 
-The push, transition, and provider rows remain `Not measured` until their owning plan steps exist. A target is not evidence.
+Deterministic local push and deadline-transition evidence is recorded under `docs/baselines/`; staging must still measure physical-network pushed-update and deployment-load deadline p95. Provider rows remain `Not measured` until observed in an authorized environment. A target is not evidence.
 
 ## Lifecycle and recovery scenarios
 

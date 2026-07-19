@@ -40,7 +40,8 @@ make install
 The first run downloads dependencies and may take a few minutes. Keep this terminal open. When startup completes:
 
 - game: `http://localhost:5173`
-- API health check: `http://localhost:8080/health`
+- API liveness: `http://localhost:8080/healthz`
+- API readiness (including automatic reveal processing): `http://localhost:8080/readyz`
 
 Press `Ctrl+C` to stop the backend and client. PostgreSQL continues in Docker so game state survives restarts. Stop it with:
 
@@ -59,7 +60,7 @@ Use separate browser profiles, private windows, or devices so each participant h
 3. Each player opens **Join room**, enters the code and a display name, and joins the lobby.
 4. The host waits for everyone to appear, then selects **Start game**.
 5. Each participant submits one answer before the countdown expires. The answer board and round scoring stay hidden during this phase.
-6. At expiry—or earlier if desired—the host selects **Reveal round**.
+6. At expiry the server reveals automatically; the host can reveal early if desired.
 7. Everyone reviews the frozen board, matches, duplicate claims, and scores. For deterministic misses, the host may see a private semantic suggestion and can accept it, choose another answer, or retain the miss.
 8. The host selects **Next round**. After the final reveal, advancing once more opens the ranked final scoreboard.
 
@@ -80,6 +81,8 @@ Then restart `make install` or `make start`. Model output is validated, retried 
 Raw provider response capture is disabled by default. See [`docs/provider-operations.md`](docs/provider-operations.md) before changing provider limits or retention settings.
 
 The browser uses authenticated SSE invalidations for prompt updates and automatically falls back to polling if streaming is unavailable. The room page shows a non-blocking live/reconnecting/offline indicator. If it remains in reconnecting mode, verify that reverse proxies do not buffer `text/event-stream`, preserve `X-Player-Token` and `Last-Event-ID`, and allow long-lived responses. Play can continue through polling recovery. See [`docs/events.md`](docs/events.md) for the event contract and connection-limit configuration.
+
+PostgreSQL reveals expired rounds automatically. `AUTO_REVEAL_GRACE_SECONDS` may delay reveal without extending the answer cutoff. `GET /readyz` fails if the enabled transition worker cannot complete database passes. For emergency manual-only play, set `AUTO_REVEAL_ENABLED=false` and restart the backend. See [`docs/deadline-transitions.md`](docs/deadline-transitions.md) before changing worker cadence, batch size, or rolling back migration `000009`.
 
 ## Verification
 

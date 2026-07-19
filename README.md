@@ -270,7 +270,7 @@ The repeatable MVP playtest gate uses a host and two player identities across tw
 
 Recommended MVP mode.
 
-All players answer at the same time. The server accepts guesses only before the published `answerPhaseEndsAt` deadline. At expiry, answering closes and the host reveals the board; automatic reveal is intentionally deferred for the MVP. The host may also reveal early.
+All players answer at the same time. The server accepts guesses only before the published `answerPhaseEndsAt` deadline. PostgreSQL-backed servers reveal automatically at expiry (after an optional reveal-only grace period), and the host may reveal early. Next-round advancement stays manual so the host has an unbounded review window for suggestions and score corrections. The durable transition and emergency-disable contract is documented in [`docs/deadline-transitions.md`](docs/deadline-transitions.md).
 
 While a round is accepting answers, every public API response hides the frozen board, guess text, normalized answers, match and duplicate outcomes, awarded points, and the current round's score changes. Players can see who has submitted and the scoreboard through the last revealed round. Reveal publishes the frozen board and round results and applies the new totals to the public scoreboard.
 

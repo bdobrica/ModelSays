@@ -8,6 +8,7 @@ Status note:
 - Current scope changes:
 	- the current client uses a single room route that switches between lobby, answer, reveal, and completion states instead of separate screens;
 	- live room updates use authenticated SSE invalidations, sequenced authoritative refetches, bounded reconnect/resume, and slower polling recovery; hidden tabs reduce work;
+	- expiry copy reflects the PostgreSQL backend's durable automatic reveal; early reveal and next-round advancement remain host controls;
 	- same-browser refresh validates the stored token with the server; presence and cross-device transfer remain deferred;
 	- loading and error handling still exist as inline page states, not shared reusable components;
 	- the create-room flow currently fixes game mode to simultaneous instead of exposing a mode selector.
@@ -115,6 +116,7 @@ Status note:
 - [x] Show player submission progress.
 - [x] Keep board, guess, match, and current-round score data hidden until reveal (enforced by the API projection).
 - [x] Handle timer expiry locally while preserving server authority.
+- [x] Refetch and enter reveal state after the durable automatic transition event.
 - [x] Prevent duplicate local submissions.
 - [x] Handle backend rejection gracefully.
 

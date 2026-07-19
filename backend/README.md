@@ -54,13 +54,13 @@ The frontend should not be trusted for game-state decisions.
 
 ## Supported MVP
 
-The backend supports simultaneous English games with 1–5 rounds, 15–120 second answer windows, curated offline content or validated and audited OpenAI generation, PostgreSQL persistence, deterministic canonical/alias scoring, optional advisory semantic judging for misses, first-claim duplicate scoring, phase-aware response secrecy, host reveal/review/override/advance controls, and room-scoped same-browser session recovery. Provider configuration, privacy, and operations are documented in [`docs/provider-operations.md`](../docs/provider-operations.md).
+The backend supports simultaneous English games with 1–5 rounds, 15–120 second answer windows, curated offline content or validated and audited OpenAI generation, PostgreSQL persistence, deterministic canonical/alias scoring, optional advisory semantic judging for misses, first-claim duplicate scoring, phase-aware response secrecy, durable automatic reveal, host early-reveal/review/override/advance controls, and room-scoped same-browser session recovery. Provider operations are documented in [`docs/provider-operations.md`](../docs/provider-operations.md); deadline-worker behavior is documented in [`docs/deadline-transitions.md`](../docs/deadline-transitions.md).
 
 The PostgreSQL lifecycle gate runs a host plus two players through two curated rounds and covers shared board identity, session recovery during answering and reveal, equivalent guesses, deadline rejection, override, completion, and score reload after the repository/service/server are rebuilt.
 
 ## Known Limitations
 
-Updates are polled rather than pushed. Expiry does not automatically reveal. Matching has no semantic judge. Presence, cross-device session transfer, teams, non-English locales, and non-simultaneous modes are not supported. Public-launch rate limiting, moderation, general observability, and automated audit retention cleanup remain deferred.
+Clients use authenticated SSE invalidations with polling recovery. Automatic reveal requires PostgreSQL, while advancement remains host-controlled. Presence, cross-device session transfer, teams, non-English locales, and non-simultaneous modes are not supported. Public-launch rate limiting, moderation, general observability, and automated audit retention cleanup remain deferred.
 
 ## Suggested Stack
 
@@ -84,12 +84,12 @@ Flow:
 1. Everyone sees the question.
 2. Everyone submits one answer before the timer ends.
 3. Answers are matched to the hidden board.
-4. The host reveals the board, either early or after answering expires.
+4. The host reveals early or the durable worker reveals automatically after expiry.
 5. Scores are awarded.
 
 This should be the MVP mode.
 
-The `answerPhaseEndsAt` timestamp is authoritative. A guess received at or after that instant is rejected with HTTP `409` and `{"error":"answer phase has expired"}`. The repository checks the deadline again while holding the round lock, so a request that waits past the cutoff cannot be persisted. Expiry closes submissions but does not automatically reveal or advance the round in the MVP.
+The `answerPhaseEndsAt` timestamp is authoritative. A guess received at or after that instant is rejected with HTTP `409` and `{"error":"answer phase has expired"}`. The repository checks the deadline again while holding the round lock, so a request that waits past the cutoff cannot be persisted. Expiry triggers an idempotent PostgreSQL reveal transaction; it never advances the round automatically.
 
 ### Sequential Mode
 

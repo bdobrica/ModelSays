@@ -8,7 +8,7 @@ Status note:
 - Current scope changes:
   - local development still falls back to an in-process static model client when `OPENAI_API_KEY` is not set;
   - host-only authorization is currently implemented for start, reveal, next-round, and override actions, not every future host action;
-  - the round state machine enforces the answer deadline during submission and covers reveal, next-round transition, and final completion, but expiry does not yet trigger automatic reveal or progression;
+  - the round state machine enforces the answer deadline and durably auto-reveals expired PostgreSQL rounds; next-round progression intentionally remains manual for host review;
   - the public room projection hides boards, guesses, outcomes, awarded points, and current-round score changes until reveal while preserving submission progress.
   - authoritative matching is deterministic Unicode-aware normalization plus exact canonical/alias equality; optional semantic judging is advisory, post-miss, host-only after reveal, and never scores automatically.
   - model content and judging use strict schemas, provider-independent validation, one retry, and safe deterministic fallbacks; provider calls have private room-scoped audits and shared cost controls.

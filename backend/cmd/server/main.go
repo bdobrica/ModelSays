@@ -36,6 +36,7 @@ func main() {
 	}
 
 	roomRepository := game.RoomRepository(game.NewInMemoryRoomRepository())
+	var dueRepository game.DueRoundRepository
 	if cfg.DatabaseURL == "" {
 		logger.Warn("DATABASE_URL not set, using in-memory room repository")
 	} else {
@@ -46,7 +47,9 @@ func main() {
 		}
 		defer pool.Close()
 
-		roomRepository = db.NewPostgresRoomRepository(pool)
+		postgresRepository := db.NewPostgresRoomRepository(pool)
+		roomRepository = postgresRepository
+		dueRepository = postgresRepository
 		logger.Info("using postgres room repository")
 	}
 
@@ -55,6 +58,11 @@ func main() {
 	roomService.SetJudgeModel(cfg.DefaultModels.Judge)
 	roomService.SetModelPolicy(cfg.ModelPolicy)
 	server := httpapi.NewServer(cfg, logger, roomService)
+	deadlineWorker := game.NewDeadlineWorker(dueRepository, nil, game.DeadlineWorkerConfig{
+		Enabled: cfg.AutoRevealEnabled, GracePeriod: cfg.AutoRevealGrace,
+		PollInterval: cfg.TransitionPoll, BatchSize: cfg.TransitionBatchSize,
+	})
+	server.SetReadinessCheck(deadlineWorker.Ready)
 
 	httpServer := &http.Server{
 		Addr:              cfg.HTTPAddr,
@@ -64,6 +72,14 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if cfg.AutoRevealEnabled && dueRepository != nil {
+		go deadlineWorker.Run(ctx)
+		logger.Info("automatic round reveal enabled", "grace", cfg.AutoRevealGrace, "poll_interval", cfg.TransitionPoll)
+	} else if cfg.AutoRevealEnabled {
+		logger.Warn("automatic round reveal unavailable without PostgreSQL; readiness will fail")
+	} else {
+		logger.Warn("automatic round reveal disabled; host reveal remains available")
+	}
 
 	errCh := make(chan error, 1)
 	go func() {

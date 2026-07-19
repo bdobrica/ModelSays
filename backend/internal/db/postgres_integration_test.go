@@ -117,6 +117,180 @@ func TestPostgresAtomicAnswerClaimsAndReload(t *testing.T) {
 	}
 }
 
+func TestPostgresDueRevealIsExactlyOnceAcrossWorkersAndRestart(t *testing.T) {
+	pool := integrationPool(t)
+	first := db.NewPostgresRoomRepository(pool)
+	second := db.NewPostgresRoomRepository(pool)
+	service := game.NewRoomService(first, nil)
+	ctx := context.Background()
+	room, host, err := service.CreateRoom(ctx, game.CreateRoomInput{
+		RoomName: "Durable reveal", HostDisplayName: "Host",
+		Settings: models.RoomSettings{Mode: models.GameModeSimultaneous, TotalRounds: 1,
+			AnswerTimerSeconds: 15, Locale: "en", PredictionModel: "gpt-4.1-mini"},
+	})
+	if err != nil {
+		t.Fatalf("CreateRoom: %v", err)
+	}
+	started, err := service.StartGame(ctx, game.StartGameInput{Code: room.Code, PlayerToken: host.Token})
+	if err != nil {
+		t.Fatalf("StartGame: %v", err)
+	}
+	dueAt := started.CurrentGame.CurrentRound.AnswerPhaseEndsAt
+	count, err := first.RevealDueRounds(ctx, dueAt.Add(-time.Nanosecond), dueAt.Add(-time.Nanosecond), 25)
+	if err != nil || count != 0 {
+		t.Fatalf("before-cutoff delivery = (%d, %v), want (0, nil)", count, err)
+	}
+	lockTx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin simulated crashed worker: %v", err)
+	}
+	if _, err := lockTx.Exec(ctx, `SELECT id FROM rounds WHERE id = $1 FOR UPDATE`, started.CurrentGame.CurrentRound.ID); err != nil {
+		t.Fatalf("lock round for simulated crash: %v", err)
+	}
+	count, err = second.RevealDueRounds(ctx, dueAt, dueAt, 25)
+	if err != nil || count != 0 {
+		t.Fatalf("locked delivery = (%d, %v), want skipped", count, err)
+	}
+	if err := lockTx.Rollback(ctx); err != nil {
+		t.Fatalf("release simulated crashed-worker lock: %v", err)
+	}
+	start := make(chan struct{})
+	results := make(chan int, 2)
+	errs := make(chan error, 2)
+	for _, repository := range []*db.PostgresRoomRepository{first, second} {
+		go func(repository *db.PostgresRoomRepository) {
+			<-start
+			count, revealErr := repository.RevealDueRounds(ctx, dueAt, dueAt, 25)
+			results <- count
+			errs <- revealErr
+		}(repository)
+	}
+	close(start)
+	total := 0
+	for range 2 {
+		total += <-results
+		if err := <-errs; err != nil {
+			t.Fatalf("RevealDueRounds: %v", err)
+		}
+	}
+	if total != 1 {
+		t.Fatalf("transition count = %d, want exactly 1", total)
+	}
+	reloaded := db.NewPostgresRoomRepository(pool)
+	count, err = reloaded.RevealDueRounds(ctx, dueAt.Add(time.Hour), dueAt.Add(time.Hour), 25)
+	if err != nil || count != 0 {
+		t.Fatalf("restart delivery = (%d, %v), want (0, nil)", count, err)
+	}
+	reloadedRoom, err := reloaded.GetRoom(ctx, room.Code)
+	if err != nil {
+		t.Fatalf("GetRoom: %v", err)
+	}
+	if reloadedRoom.CurrentGame.CurrentRound.Status != models.RoundStatusRevealed {
+		t.Fatalf("round status = %s, want revealed", reloadedRoom.CurrentGame.CurrentRound.Status)
+	}
+	var transitions, events int
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM round_transitions WHERE round_id = $1 AND actor = 'scheduler' AND reason = 'answer_deadline_elapsed'`,
+		started.CurrentGame.CurrentRound.ID).Scan(&transitions); err != nil {
+		t.Fatalf("count transitions: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM room_events WHERE room_code = $1 AND event_type = 'round_revealed'`,
+		room.Code).Scan(&events); err != nil {
+		t.Fatalf("count events: %v", err)
+	}
+	if transitions != 1 || events != 1 {
+		t.Fatalf("transitions/events = %d/%d, want 1/1", transitions, events)
+	}
+}
+
+func TestPostgresDueRevealRepresentativeBatchMeetsLagBudget(t *testing.T) {
+	pool := integrationPool(t)
+	repository := db.NewPostgresRoomRepository(pool)
+	service := game.NewRoomService(repository, nil)
+	ctx := context.Background()
+	var latestDeadline time.Time
+	for index := range 12 {
+		room, host, err := service.CreateRoom(ctx, game.CreateRoomInput{
+			RoomName: fmt.Sprintf("Transition load %d", index), HostDisplayName: "Host",
+			Settings: models.RoomSettings{Mode: models.GameModeSimultaneous, TotalRounds: 1,
+				AnswerTimerSeconds: 15, Locale: "en", PredictionModel: "gpt-4.1-mini"},
+		})
+		if err != nil {
+			t.Fatalf("CreateRoom %d: %v", index, err)
+		}
+		started, err := service.StartGame(ctx, game.StartGameInput{Code: room.Code, PlayerToken: host.Token})
+		if err != nil {
+			t.Fatalf("StartGame %d: %v", index, err)
+		}
+		if started.CurrentGame.CurrentRound.AnswerPhaseEndsAt.After(latestDeadline) {
+			latestDeadline = started.CurrentGame.CurrentRound.AnswerPhaseEndsAt
+		}
+	}
+	startedAt := time.Now()
+	count, err := repository.RevealDueRounds(ctx, latestDeadline, latestDeadline, 25)
+	elapsed := time.Since(startedAt)
+	if err != nil {
+		t.Fatalf("RevealDueRounds: %v", err)
+	}
+	if count != 12 {
+		t.Fatalf("revealed count = %d, want 12", count)
+	}
+	// The default 250 ms discovery interval leaves 750 ms of the one-second
+	// PB-00 deadline-lag budget for the representative transition transaction.
+	if elapsed >= 750*time.Millisecond {
+		t.Fatalf("12-room transition transaction took %s, budget is <750ms", elapsed)
+	}
+}
+
+func TestPostgresManualAndAutomaticRevealRaceHasOneWinner(t *testing.T) {
+	pool := integrationPool(t)
+	repository := db.NewPostgresRoomRepository(pool)
+	service := game.NewRoomService(repository, nil)
+	ctx := context.Background()
+	room, host, err := service.CreateRoom(ctx, game.CreateRoomInput{
+		RoomName: "Reveal race", HostDisplayName: "Host",
+		Settings: models.RoomSettings{Mode: models.GameModeSimultaneous, TotalRounds: 1,
+			AnswerTimerSeconds: 15, Locale: "en", PredictionModel: "gpt-4.1-mini"},
+	})
+	if err != nil {
+		t.Fatalf("CreateRoom: %v", err)
+	}
+	started, err := service.StartGame(ctx, game.StartGameInput{Code: room.Code, PlayerToken: host.Token})
+	if err != nil {
+		t.Fatalf("StartGame: %v", err)
+	}
+	round := started.CurrentGame.CurrentRound
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	go func() {
+		<-start
+		_, revealErr := service.RevealRound(ctx, game.RevealRoundInput{
+			Code: room.Code, RoundID: round.ID, PlayerToken: host.Token,
+		})
+		errs <- revealErr
+	}()
+	go func() {
+		<-start
+		_, revealErr := repository.RevealDueRounds(ctx, round.AnswerPhaseEndsAt, round.AnswerPhaseEndsAt, 25)
+		errs <- revealErr
+	}()
+	close(start)
+	for range 2 {
+		if raceErr := <-errs; raceErr != nil && !errors.Is(raceErr, game.ErrRoundAlreadyRevealed) {
+			t.Fatalf("reveal race error = %v", raceErr)
+		}
+	}
+	var transitions, events int
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM round_transitions WHERE round_id = $1`, round.ID).Scan(&transitions); err != nil {
+		t.Fatalf("count transitions: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM room_events WHERE room_code = $1 AND event_type = 'round_revealed'`, room.Code).Scan(&events); err != nil {
+		t.Fatalf("count events: %v", err)
+	}
+	if transitions != 1 || events != 1 {
+		t.Fatalf("transitions/events = %d/%d, want 1/1", transitions, events)
+	}
+}
+
 func TestPostgresRoomEventsSurviveRepositoryReconstruction(t *testing.T) {
 	pool := integrationPool(t)
 	service := game.NewRoomService(db.NewPostgresRoomRepository(pool), nil)
@@ -152,6 +326,26 @@ func TestRoomEventsMigrationDownAndUp(t *testing.T) {
 	}
 	if !exists {
 		t.Fatal("room_events table missing after migration up")
+	}
+}
+
+func TestRoundTransitionsMigrationDownAndUp(t *testing.T) {
+	pool := integrationPool(t)
+	path := migrationPath(t, "000009_round_transitions.sql")
+	executeMigrationSection(t, pool, path, false)
+	var exists bool
+	if err := pool.QueryRow(context.Background(), `SELECT to_regclass('round_transitions') IS NOT NULL`).Scan(&exists); err != nil {
+		t.Fatalf("query transition table after down: %v", err)
+	}
+	if exists {
+		t.Fatal("round_transitions still exists after down migration")
+	}
+	executeMigrationSection(t, pool, path, true)
+	if err := pool.QueryRow(context.Background(), `SELECT to_regclass('round_transitions') IS NOT NULL`).Scan(&exists); err != nil {
+		t.Fatalf("query transition table after up: %v", err)
+	}
+	if !exists || !indexExists(t, pool, "rounds_due_answering_idx") {
+		t.Fatal("transition table or due index missing after up migration")
 	}
 }
 

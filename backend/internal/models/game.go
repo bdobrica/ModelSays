@@ -88,6 +88,24 @@ type Round struct {
 	ProviderAudits       []ProviderCallAudit `json:"-"`
 }
 
+type RoundTransitionActor string
+
+const (
+	RoundTransitionActorHost      RoundTransitionActor = "host"
+	RoundTransitionActorScheduler RoundTransitionActor = "scheduler"
+)
+
+type RoundTransition struct {
+	ID        string               `json:"id"`
+	RoomCode  string               `json:"roomCode"`
+	GameID    string               `json:"gameId"`
+	RoundID   string               `json:"roundId"`
+	Action    string               `json:"action"`
+	Actor     RoundTransitionActor `json:"actor"`
+	Reason    string               `json:"reason"`
+	CreatedAt time.Time            `json:"createdAt"`
+}
+
 type ProviderCallAudit struct {
 	ID               string    `json:"id"`
 	RoomCode         string    `json:"roomCode"`

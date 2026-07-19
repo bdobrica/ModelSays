@@ -25,6 +25,73 @@ type PostgresRoomRepository struct {
 	pool *pgxpool.Pool
 }
 
+func (repository *PostgresRoomRepository) RevealDueRounds(ctx context.Context, dueAt, occurredAt time.Time, limit int) (int, error) {
+	if limit < 1 || limit > 100 {
+		limit = 25
+	}
+	tx, err := repository.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return 0, fmt.Errorf("begin due round transition tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	rows, err := tx.Query(ctx, `
+		SELECT rooms.code, games.id, rounds.id
+		FROM rounds
+		INNER JOIN games ON games.id = rounds.game_id
+		INNER JOIN rooms ON rooms.code = games.room_code
+		WHERE rounds.status = $1 AND games.status = $2
+		  AND rounds.answer_phase_ends_at <= $3
+		ORDER BY rounds.answer_phase_ends_at, rounds.id
+		FOR UPDATE OF rounds SKIP LOCKED
+		LIMIT $4
+	`, models.RoundStatusAnswering, models.GameStatusInProgress, dueAt, limit)
+	if err != nil {
+		return 0, fmt.Errorf("claim due rounds: %w", err)
+	}
+	type dueRound struct{ code, gameID, roundID string }
+	var due []dueRound
+	for rows.Next() {
+		var item dueRound
+		if err := rows.Scan(&item.code, &item.gameID, &item.roundID); err != nil {
+			rows.Close()
+			return 0, fmt.Errorf("scan due round: %w", err)
+		}
+		due = append(due, item)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, fmt.Errorf("iterate due rounds: %w", err)
+	}
+	rows.Close()
+
+	for _, item := range due {
+		tag, err := tx.Exec(ctx, `UPDATE rounds SET status = $2, reveal_started_at = $3 WHERE id = $1 AND status = $4`,
+			item.roundID, models.RoundStatusRevealed, occurredAt, models.RoundStatusAnswering)
+		if err != nil {
+			return 0, fmt.Errorf("automatically reveal round: %w", err)
+		}
+		if tag.RowsAffected() != 1 {
+			continue
+		}
+		transition := models.RoundTransition{
+			ID: newEventID(), RoomCode: item.code, GameID: item.gameID, RoundID: item.roundID,
+			Action: "reveal", Actor: models.RoundTransitionActorScheduler,
+			Reason: "answer_deadline_elapsed", CreatedAt: occurredAt,
+		}
+		if err := insertRoundTransition(ctx, tx, transition); err != nil {
+			return 0, err
+		}
+		if _, err := appendRoomEventTx(ctx, tx, item.code, models.RoomEventRoundRevealed, occurredAt); err != nil {
+			return 0, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("commit due round transitions: %w", err)
+	}
+	return len(due), nil
+}
+
 func OpenPostgresPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 	pool, err := pgxpool.New(ctx, databaseURL)
 	if err != nil {
@@ -485,7 +552,7 @@ func (repository *PostgresRoomRepository) SubmitGuess(ctx context.Context, code 
 	return room, nil
 }
 
-func (repository *PostgresRoomRepository) RevealRound(ctx context.Context, code string, roundID string, revealStartedAt time.Time) (models.Room, error) {
+func (repository *PostgresRoomRepository) RevealRound(ctx context.Context, code string, roundID string, transition models.RoundTransition) (models.Room, error) {
 	tx, err := repository.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return models.Room{}, fmt.Errorf("begin reveal round tx: %w", err)
@@ -497,7 +564,7 @@ func (repository *PostgresRoomRepository) RevealRound(ctx context.Context, code 
 		SET status = $3, reveal_started_at = $4
 		FROM games g
 		WHERE r.game_id = g.id AND g.room_code = $1 AND r.id = $2 AND r.status = $5
-	`, code, roundID, models.RoundStatusRevealed, revealStartedAt, models.RoundStatusAnswering)
+	`, code, roundID, models.RoundStatusRevealed, transition.CreatedAt, models.RoundStatusAnswering)
 	if err != nil {
 		return models.Room{}, fmt.Errorf("update round reveal state: %w", err)
 	}
@@ -520,6 +587,12 @@ func (repository *PostgresRoomRepository) RevealRound(ctx context.Context, code 
 		}
 		return models.Room{}, game.ErrRoundNotAcceptingGuesses
 	}
+	if err := insertRoundTransition(ctx, tx, transition); err != nil {
+		return models.Room{}, err
+	}
+	if _, err := appendRoomEventTx(ctx, tx, code, models.RoomEventRoundRevealed, transition.CreatedAt); err != nil {
+		return models.Room{}, err
+	}
 
 	room, err := repository.loadRoom(ctx, tx, code)
 	if err != nil {
@@ -531,6 +604,35 @@ func (repository *PostgresRoomRepository) RevealRound(ctx context.Context, code 
 	}
 
 	return room, nil
+}
+
+func insertRoundTransition(ctx context.Context, tx pgx.Tx, transition models.RoundTransition) error {
+	_, err := tx.Exec(ctx, `
+		INSERT INTO round_transitions (id, room_code, game_id, round_id, action, actor, reason, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+	`, transition.ID, transition.RoomCode, transition.GameID, transition.RoundID, transition.Action,
+		transition.Actor, transition.Reason, transition.CreatedAt)
+	if err != nil {
+		return fmt.Errorf("insert round transition: %w", err)
+	}
+	return nil
+}
+
+func appendRoomEventTx(ctx context.Context, tx pgx.Tx, code string, eventType models.RoomEventType, occurredAt time.Time) (models.RoomEvent, error) {
+	var revision int64
+	if err := tx.QueryRow(ctx, `UPDATE rooms SET revision = revision + 1, updated_at = $2 WHERE code = $1 RETURNING revision`, code, occurredAt).Scan(&revision); err != nil {
+		return models.RoomEvent{}, fmt.Errorf("increment room revision: %w", err)
+	}
+	event := models.RoomEvent{Version: models.RoomEventVersion, ID: newEventID(), RoomCode: code,
+		Type: eventType, RoomRevision: revision, OccurredAt: occurredAt}
+	if _, err := tx.Exec(ctx, `INSERT INTO room_events (id, room_code, event_type, room_revision, occurred_at) VALUES ($1,$2,$3,$4,$5)`,
+		event.ID, event.RoomCode, event.Type, event.RoomRevision, event.OccurredAt); err != nil {
+		return models.RoomEvent{}, fmt.Errorf("insert room event: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM room_events WHERE room_code = $1 AND room_revision <= $2`, code, revision-1000); err != nil {
+		return models.RoomEvent{}, fmt.Errorf("prune room events: %w", err)
+	}
+	return event, nil
 }
 
 func (repository *PostgresRoomRepository) AdvanceGame(ctx context.Context, code string, gameState models.Game, nextRound *models.Round) (models.Room, error) {
