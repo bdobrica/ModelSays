@@ -60,7 +60,7 @@ The PostgreSQL lifecycle gate runs a host plus two players through two curated r
 
 ## Known Limitations
 
-Clients use authenticated SSE invalidations with polling recovery. Automatic reveal requires PostgreSQL, while advancement remains host-controlled. Presence, cross-device session transfer, teams, non-English locales, and non-simultaneous modes are not supported. Abuse limits are process-local, so public deployments must use one API replica (or compensate at the edge) until shared limiting is added. General observability and automated audit retention cleanup remain deferred.
+Clients use authenticated SSE invalidations with polling recovery. Automatic reveal requires PostgreSQL, while advancement remains host-controlled. Presence, cross-device session transfer, teams, non-English locales, and non-simultaneous modes are not supported. Abuse limits are process-local, so public deployments must use one API replica. Privacy-safe JSON logs, authenticated bounded metrics, dependency-aware readiness, graceful drain, and opt-in recovery/retention tooling are implemented; environment-specific staging evidence remains an operator responsibility. See [`docs/operations.md`](../docs/operations.md).
 
 ## Suggested Stack
 

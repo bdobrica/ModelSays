@@ -15,7 +15,7 @@ Status note:
   - room creation enforces narrow settings and bounded JSON; public endpoints now add bounded IP/room/player/action limits, explicit proxy trust, English whole-word moderation, and paid-provider circuit breakers.
   - same-browser refresh validates the stored token through the room session endpoint; heartbeat/presence and cross-device transfer remain deferred.
   - CI now gates formatting, vetting, backend/client tests, the production client build, and a PostgreSQL-backed full API lifecycle that uses only curated content.
-  - a local PostgreSQL/HTTP baseline now measures representative 3-, 8-, and 12-player polling workloads; production telemetry, concurrency load, and query-plan analysis remain future hardening.
+  - a local PostgreSQL/HTTP baseline measures representative workloads; bounded operational telemetry, readiness, drain, and recovery tooling are implemented, while environment-specific load/query-plan evidence remains future hardening.
 
 ## Phase 0 — Project Setup
 
@@ -88,7 +88,7 @@ Status note:
 - [x] Implement round creation.
 - [x] Implement current round state machine.
 - [x] Enforce the answer phase deadline when guesses are submitted.
-- [ ] Automatically reveal or progress after the answer deadline; expiry currently closes submissions and waits for the host.
+- [x] Automatically reveal after the answer deadline with durable multi-worker claims; progression remains host-controlled.
 - [x] Implement reveal phase.
 - [x] Implement next-round transition.
 - [x] Implement game-ended transition.
@@ -187,7 +187,7 @@ Status note:
 - [x] Add bounded rate limiting by hashed IP/room/player/action and paid-provider circuits.
 - [ ] Add request size limits.
 - [x] Add CORS config.
-- [ ] Add privacy-safe abuse decision logging and metrics without high-cardinality IP, room, or token labels.
+- [x] Add privacy-safe abuse decision logging and metrics without high-cardinality IP, room, or token labels.
 
 ## Phase 12 — Tests
 

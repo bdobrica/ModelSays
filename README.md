@@ -262,7 +262,7 @@ The repeatable MVP playtest gate uses a host and two player identities across tw
 - Reconnect is limited to the same browser’s stored room token; there is no presence heartbeat or cross-device transfer.
 - Only simultaneous English games are supported; teams, sequential play, play-again, and shareable results are deferred.
 - The responsive UI is automated at the component/CSS level, but physical-device and external-participant playtesting remains a release follow-up.
-- Public API, room/player/action, event-attempt, moderation, and paid-provider circuit limits are enabled with explicit proxy trust. Production observability, retention operations, multi-replica shared limiting, and staging recovery evidence remain outstanding.
+- Public API/provider abuse boundaries, privacy-safe logs and bounded metrics, dependency-aware readiness, graceful drain, and recovery controls are documented and tested. The supported public-beta topology remains one API replica; an operator-controlled TLS/proxy and physical-network staging drill is still required before uncontrolled public traffic.
 
 ## Game Modes
 
@@ -367,6 +367,8 @@ PROVIDER_LIMIT_GLOBAL_WINDOW_SECONDS=3600
 ```
 
 The complete limiter matrix, proxy rules, threat model, privacy behavior, and `429` contract are in [`docs/security.md`](docs/security.md). Keep `TRUSTED_PROXY_CIDRS` empty unless the API is directly behind a proxy network you control.
+
+The selected single-host deployment lifecycle, metrics/log contract, secret rotation, backup/restore, retention, and incident runbook are in [`docs/operations.md`](docs/operations.md). Local drill evidence is in [`docs/baselines/future-04b.md`](docs/baselines/future-04b.md); it does not claim a production deployment.
 
 Example client variables:
 

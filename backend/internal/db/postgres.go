@@ -112,6 +112,34 @@ func NewPostgresRoomRepository(pool *pgxpool.Pool) *PostgresRoomRepository {
 	return &PostgresRoomRepository{pool: pool}
 }
 
+func (repository *PostgresRoomRepository) Ready(ctx context.Context) error {
+	checkCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if err := repository.pool.Ping(checkCtx); err != nil {
+		return fmt.Errorf("database ping: %w", err)
+	}
+	var version int64
+	var dirty bool
+	if err := repository.pool.QueryRow(checkCtx, `SELECT version_id, is_applied = false FROM goose_db_version ORDER BY id DESC LIMIT 1`).Scan(&version, &dirty); err != nil {
+		return fmt.Errorf("migration compatibility: %w", err)
+	}
+	if dirty || version != 9 {
+		return fmt.Errorf("migration compatibility: database version %d dirty=%t, want 9 clean", version, dirty)
+	}
+	return nil
+}
+
+func (repository *PostgresRoomRepository) PoolStats() (acquired, idle, max int32) {
+	stats := repository.pool.Stat()
+	return stats.AcquiredConns(), stats.IdleConns(), stats.MaxConns()
+}
+
+func (repository *PostgresRoomRepository) ActiveRoomCount(ctx context.Context) (int, error) {
+	var count int
+	err := repository.pool.QueryRow(ctx, `SELECT COUNT(*) FROM rooms WHERE status IN ($1, $2)`, models.RoomStatusLobby, models.RoomStatusInGame).Scan(&count)
+	return count, err
+}
+
 func (repository *PostgresRoomRepository) AppendRoomEvent(ctx context.Context, code string, eventType models.RoomEventType, occurredAt time.Time) (models.RoomEvent, error) {
 	tx, err := repository.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {

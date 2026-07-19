@@ -122,6 +122,7 @@ type RoomService struct {
 	judgeModel      string
 	modelPolicy     llm.Policy
 	providerGate    ProviderGate
+	providerObserve func(models.ProviderCallAudit)
 }
 
 type ProviderGate interface {
@@ -207,6 +208,10 @@ func (service *RoomService) SetModelPolicy(policy llm.Policy) {
 
 func (service *RoomService) SetProviderGate(gate ProviderGate) {
 	service.providerGate = gate
+}
+
+func (service *RoomService) SetProviderObserver(observer func(models.ProviderCallAudit)) {
+	service.providerObserve = observer
 }
 
 func (service *RoomService) SetPredictionModel(model string) {
@@ -1359,7 +1364,7 @@ func (service *RoomService) appendProviderAudit(audits *[]models.ProviderCallAud
 	if service.modelPolicy.CaptureRawResponses {
 		raw = llm.RedactRawResponse(metadata.RawResponse, service.modelPolicy.MaxRawResponseBytes)
 	}
-	*audits = append(*audits, models.ProviderCallAudit{
+	audit := models.ProviderCallAudit{
 		ID: newID(), RoomCode: roomCode, GameID: gameID, RoundID: roundID,
 		Purpose: purpose, Provider: metadata.Provider, Model: metadata.Model,
 		PromptVersion: metadata.PromptVersion, RequestID: metadata.RequestID,
@@ -1368,7 +1373,11 @@ func (service *RoomService) appendProviderAudit(audits *[]models.ProviderCallAud
 		EstimatedCostUSD: metadata.EstimatedCostUSD, Attempt: attempt, Path: path,
 		ErrorCategory: category, RawResponse: raw, RetentionClass: "provider_audit_30d",
 		StartedAt: started, CompletedAt: completed,
-	})
+	}
+	*audits = append(*audits, audit)
+	if service.providerObserve != nil {
+		service.providerObserve(audit)
+	}
 }
 
 func validateQuestion(question models.Question, locale string, excluded []string) error {

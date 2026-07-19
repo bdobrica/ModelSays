@@ -43,6 +43,8 @@ The first run downloads dependencies and may take a few minutes. Keep this termi
 - API liveness: `http://localhost:8080/healthz`
 - API readiness (including automatic reveal processing): `http://localhost:8080/readyz`
 
+Local installation is not a production deployment. Production mode validates database, CORS, metrics authentication, and raw-provider-capture safety at startup. Follow [`docs/operations.md`](docs/operations.md) for migration order, graceful drain, secrets, backup/restore, retention, and incident handling.
+
 Press `Ctrl+C` to stop the backend and client. PostgreSQL continues in Docker so game state survives restarts. Stop it with:
 
 ```bash

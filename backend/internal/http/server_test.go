@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -19,6 +20,43 @@ import (
 	"github.com/bogdandobrica/modelsays/backend/internal/models"
 	"github.com/bogdandobrica/modelsays/backend/internal/security"
 )
+
+func TestObservabilityAddsRequestIDMetricsAndRedactsSecrets(t *testing.T) {
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+	cfg := config.Config{MetricsToken: "metrics-secret"}
+	server := NewServer(cfg, logger, game.NewInMemoryRoomService())
+	request := httptest.NewRequest(http.MethodPost, "/api/rooms", strings.NewReader(`{"playerToken":"never-log-token","answer":"hidden guess"}`))
+	request.Header.Set("X-Request-ID", "request-123")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Header().Get("X-Request-ID") != "request-123" {
+		t.Fatalf("request id = %q", response.Header().Get("X-Request-ID"))
+	}
+	for _, secret := range []string{"never-log-token", "hidden guess", "metrics-secret"} {
+		if strings.Contains(logs.String(), secret) {
+			t.Fatalf("log leaked %q: %s", secret, logs.String())
+		}
+	}
+
+	unauthorized := httptest.NewRecorder()
+	server.Handler().ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("metrics without token = %d", unauthorized.Code)
+	}
+	metricsRequest := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	metricsRequest.Header.Set("Authorization", "Bearer metrics-secret")
+	metricsResponse := httptest.NewRecorder()
+	server.Handler().ServeHTTP(metricsResponse, metricsRequest)
+	if metricsResponse.Code != http.StatusOK || !strings.Contains(metricsResponse.Body.String(), "modelsays_http_requests_total") {
+		t.Fatalf("metrics response = %d %s", metricsResponse.Code, metricsResponse.Body.String())
+	}
+	for _, secret := range []string{"request-123", "never-log-token", "ROOMAA"} {
+		if strings.Contains(metricsResponse.Body.String(), secret) {
+			t.Fatalf("metrics leaked %q", secret)
+		}
+	}
+}
 
 func TestAbuseLimitsReturnDeterministicMetadataAndExcludeHealth(t *testing.T) {
 	cfg := config.Config{Abuse: security.DefaultConfig()}

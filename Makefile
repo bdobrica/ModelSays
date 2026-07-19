@@ -16,7 +16,7 @@ CORS_ALLOWED_ORIGINS ?= http://localhost:5173
 GOOSE_VERSION := v3.27.2
 GOOSE := go run github.com/pressly/goose/v3/cmd/goose@$(GOOSE_VERSION)
 
-.PHONY: help install bootstrap start dev postgres-up postgres-down postgres-logs postgres-reset migrate-up migrate-down backend client baseline format check-format vet-backend test-backend test-client build-client check verify
+.PHONY: help install bootstrap start dev postgres-up postgres-down postgres-logs postgres-reset migrate-up migrate-down backend client baseline ops-backup ops-restore ops-retention format check-format vet-backend test-backend test-client build-client check verify
 
 help:
 	@printf '%s\n' \
@@ -35,6 +35,9 @@ help:
 		'  make backend       Run the backend only' \
 		'  make client        Run the client only' \
 		'  make baseline      Measure 3-, 8-, and 12-player PostgreSQL gameplay workloads' \
+		'  make ops-backup    Create a timestamped PostgreSQL custom-format backup' \
+		'  make ops-restore   Restore BACKUP_FILE into disposable RESTORE_DATABASE (confirmation required)' \
+		'  make ops-retention Preview retention cleanup; set APPLY_RETENTION=yes to execute' \
 		'  make format        Format backend Go source' \
 		'  make check-format  Check backend Go formatting' \
 		'  make vet-backend   Run Go static analysis' \
@@ -85,6 +88,15 @@ client:
 
 baseline: build-client
 	cd $(BACKEND_DIR) && go run ./cmd/baseline -database-url '$(DATABASE_URL)' -client-dist ../client/dist
+
+ops-backup:
+	./scripts/ops-backup.sh '$(DATABASE_URL)' '$(BACKUP_DIR)'
+
+ops-restore:
+	./scripts/ops-restore.sh '$(DATABASE_URL)' '$(BACKUP_FILE)' '$(RESTORE_DATABASE)' '$(CONFIRM_RESTORE)'
+
+ops-retention:
+	./scripts/ops-retention.sh '$(DATABASE_URL)' '$(RETENTION_DAYS)' '$(APPLY_RETENTION)'
 
 format:
 	gofmt -w $$(find $(BACKEND_DIR) -type f -name '*.go')

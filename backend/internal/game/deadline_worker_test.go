@@ -76,3 +76,29 @@ func TestDeadlineWorkerReportsRepositoryFailure(t *testing.T) {
 		t.Fatalf("Ready = %v, want %v", worker.Ready(), expected)
 	}
 }
+
+func TestDeadlineWorkerReportsDrainAndPassMetrics(t *testing.T) {
+	block := make(chan struct{})
+	entered := make(chan struct{})
+	worker := NewDeadlineWorker(&recordingDueRepository{block: block, entered: entered, result: 2}, nil,
+		DeadlineWorkerConfig{Enabled: true})
+	observed := make(chan int, 1)
+	worker.SetObserver(func(processed int, _ time.Duration, err error) {
+		if err != nil {
+			t.Errorf("observer error = %v", err)
+		}
+		observed <- processed
+	})
+	go worker.process(context.Background())
+	<-entered
+	if worker.Drained() {
+		t.Fatal("worker reported drained during an active transition lease")
+	}
+	close(block)
+	if got := <-observed; got != 2 {
+		t.Fatalf("processed = %d, want 2", got)
+	}
+	if !worker.Drained() {
+		t.Fatal("worker did not drain after repository pass")
+	}
+}

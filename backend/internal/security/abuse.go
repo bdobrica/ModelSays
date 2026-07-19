@@ -124,6 +124,7 @@ type Controller struct {
 	limiter *Limiter
 	trusted []*net.IPNet
 	salt    []byte
+	observe func(scope string, allowed bool)
 }
 
 func NewController(config Config) *Controller {
@@ -227,10 +228,18 @@ func (controller *Controller) isTrusted(ip net.IP) bool {
 }
 
 func (controller *Controller) Allow(scope, key string, policy Policy) (bool, time.Duration) {
-	return controller.limiter.Allow(scope+":"+key, policy)
+	allowed, retry := controller.limiter.Allow(scope+":"+key, policy)
+	if controller.observe != nil {
+		controller.observe(scope, allowed)
+	}
+	return allowed, retry
 }
 
 func (controller *Controller) Config() Config { return controller.config }
+
+func (controller *Controller) SetObserver(observer func(scope string, allowed bool)) {
+	controller.observe = observer
+}
 
 func (controller *Controller) AllowProvider(roomCode string) (bool, time.Duration) {
 	if allowed, retry := controller.Allow("provider-room", strings.ToUpper(strings.TrimSpace(roomCode)), controller.config.ProviderRoom); !allowed {

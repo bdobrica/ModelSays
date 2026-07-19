@@ -47,8 +47,8 @@ Deterministic local push and deadline-transition evidence is recorded under `doc
 - [ ] Client polling/refetch fallback works.
 - [ ] Client reconnects after a backend restart.
 - [ ] Provider timeout/failure falls back safely.
-- [ ] Deadline transition survives concurrent workers and restart.
-- [ ] Backup/restore rehearsal preserves an active and a completed room.
+- [x] Deadline transition survives concurrent workers, process reconstruction, and drain.
+- [x] Local disposable backup/restore rehearsal preserves lifecycle records and migration compatibility. Evidence: [`baselines/future-04b.md`](baselines/future-04b.md).
 
 ## Human playtest
 

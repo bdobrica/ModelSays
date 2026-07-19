@@ -28,6 +28,8 @@ type DeadlineWorker struct {
 	started    bool
 	lastOK     time.Time
 	lastErr    error
+	inFlight   bool
+	observe    func(processed int, lag time.Duration, err error)
 }
 
 func NewDeadlineWorker(repository DueRoundRepository, clock Clock, config DeadlineWorkerConfig) *DeadlineWorker {
@@ -68,13 +70,34 @@ func (worker *DeadlineWorker) Run(ctx context.Context) {
 
 func (worker *DeadlineWorker) process(ctx context.Context) {
 	now := worker.clock.Now()
-	_, err := worker.repository.RevealDueRounds(ctx, now.Add(-worker.config.GracePeriod), now, worker.config.BatchSize)
 	worker.mu.Lock()
-	defer worker.mu.Unlock()
+	worker.inFlight = true
+	worker.mu.Unlock()
+	started := time.Now()
+	processed, err := worker.repository.RevealDueRounds(ctx, now.Add(-worker.config.GracePeriod), now, worker.config.BatchSize)
+	worker.mu.Lock()
+	worker.inFlight = false
 	worker.lastErr = err
 	if err == nil {
 		worker.lastOK = now
 	}
+	observer := worker.observe
+	worker.mu.Unlock()
+	if observer != nil {
+		observer(processed, time.Since(started), err)
+	}
+}
+
+func (worker *DeadlineWorker) SetObserver(observer func(processed int, lag time.Duration, err error)) {
+	worker.mu.Lock()
+	defer worker.mu.Unlock()
+	worker.observe = observer
+}
+
+func (worker *DeadlineWorker) Drained() bool {
+	worker.mu.RLock()
+	defer worker.mu.RUnlock()
+	return !worker.inFlight
 }
 
 func (worker *DeadlineWorker) Ready() error {

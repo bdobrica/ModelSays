@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -17,6 +18,7 @@ import (
 	"github.com/bogdandobrica/modelsays/backend/internal/config"
 	"github.com/bogdandobrica/modelsays/backend/internal/game"
 	"github.com/bogdandobrica/modelsays/backend/internal/models"
+	"github.com/bogdandobrica/modelsays/backend/internal/ops"
 	"github.com/bogdandobrica/modelsays/backend/internal/security"
 )
 
@@ -30,6 +32,7 @@ type Server struct {
 	activeEventConnections atomic.Int64
 	readinessCheck         func() error
 	abuse                  *security.Controller
+	metrics                *ops.Metrics
 }
 
 type createRoomRequest struct {
@@ -145,17 +148,27 @@ func NewServer(cfg config.Config, logger *slog.Logger, roomService *game.RoomSer
 		roomService: roomService,
 		mux:         http.NewServeMux(),
 		abuse:       security.NewController(cfg.Abuse),
+		metrics:     ops.NewMetrics(),
 	}
+	server.abuse.SetObserver(func(scope string, allowed bool) {
+		decision := "allowed"
+		if !allowed {
+			decision = "rejected"
+			logger.Warn("rate limit decision", "scope", scope, "decision", decision)
+		}
+		server.metrics.Inc("modelsays_limiter_decisions_total", "scope", scope, "decision", decision)
+	})
 
 	server.routes()
 	return server
 }
 
 func (server *Server) Handler() http.Handler {
-	return server.withCORS(server.withAbuseLimits(server.mux))
+	return server.withObservability(server.withCORS(server.withAbuseLimits(server.mux)))
 }
 
 func (server *Server) AbuseController() *security.Controller { return server.abuse }
+func (server *Server) Metrics() *ops.Metrics                 { return server.metrics }
 
 func (server *Server) SetReadinessCheck(check func() error) {
 	server.readinessCheck = check
@@ -164,9 +177,20 @@ func (server *Server) SetReadinessCheck(check func() error) {
 func (server *Server) routes() {
 	server.mux.HandleFunc("GET /healthz", server.handleHealth)
 	server.mux.HandleFunc("GET /readyz", server.handleReady)
+	server.mux.HandleFunc("GET /metrics", server.handleMetrics)
 	server.mux.HandleFunc("POST /api/rooms", server.handleCreateRoom)
 	server.mux.HandleFunc("GET /api/rooms/", server.handleRoomRoutes)
 	server.mux.HandleFunc("POST /api/rooms/", server.handleRoomRoutes)
+}
+
+func (server *Server) handleMetrics(writer http.ResponseWriter, request *http.Request) {
+	if server.config.MetricsToken != "" && request.Header.Get("Authorization") != "Bearer "+server.config.MetricsToken {
+		writeError(writer, http.StatusUnauthorized, "metrics authorization required")
+		return
+	}
+	writer.Header().Set("Content-Type", "text/plain; version=0.0.4")
+	server.metrics.Set("modelsays_event_connections", float64(server.activeEventConnections.Load()))
+	server.metrics.WritePrometheus(writer)
 }
 
 func (server *Server) handleHealth(writer http.ResponseWriter, _ *http.Request) {
@@ -265,6 +289,7 @@ func (server *Server) handleRoomEvents(writer http.ResponseWriter, request *http
 		return
 	}
 	defer server.activeEventConnections.Add(-1)
+	server.metrics.Inc("modelsays_event_subscriptions_total", "resume", strconv.FormatBool(request.Header.Get("Last-Event-ID") != ""))
 
 	if err := server.roomService.AuthenticateEventSubscription(request.Context(), code, request.Header.Get("X-Player-Token")); err != nil {
 		server.writeDomainError(writer, err)
@@ -327,6 +352,90 @@ func (server *Server) handleRoomEvents(writer http.ResponseWriter, request *http
 				flusher.Flush()
 			}
 		}
+	}
+}
+
+type responseRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (recorder *responseRecorder) WriteHeader(status int) {
+	if recorder.status != 0 {
+		return
+	}
+	recorder.status = status
+	recorder.ResponseWriter.WriteHeader(status)
+}
+
+func (recorder *responseRecorder) Write(body []byte) (int, error) {
+	if recorder.status == 0 {
+		recorder.WriteHeader(http.StatusOK)
+	}
+	return recorder.ResponseWriter.Write(body)
+}
+
+func (recorder *responseRecorder) Unwrap() http.ResponseWriter { return recorder.ResponseWriter }
+func (recorder *responseRecorder) Flush() {
+	_ = http.NewResponseController(recorder.ResponseWriter).Flush()
+}
+
+func (server *Server) withObservability(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requestID := strings.TrimSpace(request.Header.Get("X-Request-ID"))
+		if !validRequestID(requestID) {
+			var value [16]byte
+			_, _ = rand.Read(value[:])
+			requestID = hex.EncodeToString(value[:])
+		}
+		writer.Header().Set("X-Request-ID", requestID)
+		recorder := &responseRecorder{ResponseWriter: writer}
+		started := time.Now()
+		next.ServeHTTP(recorder, request)
+		status := recorder.status
+		if status == 0 {
+			status = http.StatusOK
+		}
+		route := metricRoute(request)
+		statusClass := strconv.Itoa(status/100) + "xx"
+		elapsed := time.Since(started)
+		server.metrics.Inc("modelsays_http_requests_total", "method", request.Method, "route", route, "status_class", statusClass)
+		server.metrics.Observe("modelsays_http_request_duration_seconds", elapsed.Seconds(), ops.HTTPDurationBuckets, "route", route)
+		server.logger.Info("http request", "request_id", requestID, "method", request.Method, "route", route, "status", status, "duration_ms", elapsed.Milliseconds())
+	})
+}
+
+func validRequestID(value string) bool {
+	if len(value) < 8 || len(value) > 128 {
+		return false
+	}
+	for _, character := range value {
+		if (character < 'a' || character > 'z') && (character < 'A' || character > 'Z') &&
+			(character < '0' || character > '9') && character != '-' && character != '_' {
+			return false
+		}
+	}
+	return true
+}
+
+func metricRoute(request *http.Request) string {
+	switch {
+	case request.URL.Path == "/healthz":
+		return "health"
+	case request.URL.Path == "/readyz":
+		return "ready"
+	case request.URL.Path == "/metrics":
+		return "metrics"
+	case request.URL.Path == "/api/rooms" && request.Method == http.MethodPost:
+		return "room_create"
+	case strings.HasSuffix(request.URL.Path, "/events"):
+		return "room_events"
+	case strings.Contains(request.URL.Path, "/rounds/"):
+		return "round_action"
+	case strings.HasPrefix(request.URL.Path, "/api/rooms/"):
+		return "room"
+	default:
+		return "not_found"
 	}
 }
 

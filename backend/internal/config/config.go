@@ -1,6 +1,8 @@
 package config
 
 import (
+	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -27,6 +29,8 @@ type Config struct {
 	TransitionPoll      time.Duration
 	TransitionBatchSize int
 	Abuse               security.Config
+	MetricsToken        string
+	ShutdownTimeout     time.Duration
 }
 
 type DefaultModels struct {
@@ -52,6 +56,8 @@ func Load() Config {
 		AutoRevealGrace:     time.Duration(getEnvNonNegativeInt("AUTO_REVEAL_GRACE_SECONDS", 0)) * time.Second,
 		TransitionPoll:      time.Duration(getEnvInt("TRANSITION_POLL_INTERVAL_MS", 250)) * time.Millisecond,
 		TransitionBatchSize: getEnvInt("TRANSITION_BATCH_SIZE", 25),
+		MetricsToken:        getEnv("METRICS_TOKEN", ""),
+		ShutdownTimeout:     time.Duration(getEnvInt("SHUTDOWN_TIMEOUT_SECONDS", 15)) * time.Second,
 		Abuse: security.Config{
 			TrustedProxyCIDRs:   splitCSV(getEnv("TRUSTED_PROXY_CIDRS", "")),
 			MaxKeys:             getEnvInt("RATE_LIMIT_MAX_KEYS", defaultAbuse.MaxKeys),
@@ -86,6 +92,34 @@ func Load() Config {
 			MaxRawResponseBytes:     getEnvInt("MODEL_RAW_RESPONSE_MAX_BYTES", defaultPolicy.MaxRawResponseBytes),
 		}.Normalize(),
 	}
+}
+
+func (config Config) Validate() error {
+	if config.AppEnv != "development" && config.AppEnv != "test" && config.AppEnv != "production" {
+		return fmt.Errorf("APP_ENV must be development, test, or production")
+	}
+	if len(config.CORSAllowedOrigins) == 0 {
+		return fmt.Errorf("CORS_ALLOWED_ORIGINS must contain at least one origin")
+	}
+	for _, origin := range config.CORSAllowedOrigins {
+		parsed, err := url.Parse(origin)
+		if err != nil || parsed.Scheme == "" || parsed.Host == "" || parsed.Path != "" ||
+			parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+			return fmt.Errorf("CORS_ALLOWED_ORIGINS contains invalid origin %q", origin)
+		}
+	}
+	if config.AppEnv == "production" {
+		if config.DatabaseURL == "" {
+			return fmt.Errorf("DATABASE_URL is required in production")
+		}
+		if config.MetricsToken == "" {
+			return fmt.Errorf("METRICS_TOKEN is required in production")
+		}
+		if config.OpenAIAPIKey != "" && config.ModelPolicy.CaptureRawResponses {
+			return fmt.Errorf("MODEL_CAPTURE_RAW_RESPONSES must be false in production")
+		}
+	}
+	return nil
 }
 
 func ratePolicy(prefix string, fallback security.Policy) security.Policy {

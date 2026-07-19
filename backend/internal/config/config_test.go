@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -16,6 +17,26 @@ func TestLoadDeadlineTransitionConfiguration(t *testing.T) {
 	}
 	if cfg.AutoRevealGrace != 3*time.Second || cfg.TransitionPoll != 400*time.Millisecond || cfg.TransitionBatchSize != 12 {
 		t.Fatalf("transition config = grace %s poll %s batch %d", cfg.AutoRevealGrace, cfg.TransitionPoll, cfg.TransitionBatchSize)
+	}
+}
+
+func TestProductionConfigurationValidation(t *testing.T) {
+	cfg := Load()
+	cfg.AppEnv = "production"
+	cfg.DatabaseURL = ""
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "DATABASE_URL") {
+		t.Fatalf("Validate() = %v, want DATABASE_URL failure", err)
+	}
+	cfg.DatabaseURL = "postgres://example"
+	cfg.MetricsToken = "secret"
+	cfg.ModelPolicy.CaptureRawResponses = true
+	cfg.OpenAIAPIKey = "secret"
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "MODEL_CAPTURE") {
+		t.Fatalf("Validate() = %v, want raw response failure", err)
+	}
+	cfg.ModelPolicy.CaptureRawResponses = false
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("valid production config: %v", err)
 	}
 }
 

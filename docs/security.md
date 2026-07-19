@@ -62,4 +62,4 @@ Each policy has `<PREFIX>_REQUESTS` and `<PREFIX>_WINDOW_SECONDS`. Defaults are:
 
 `MODERATION_DENY_WORDS` is a comma-separated English whole-word list. Replacing it is an operator decision: test locale-specific false positives before deployment. Do not put private user data in this list.
 
-The limit store and provider circuit breakers are process-local. This is bounded and fail-open across restarts, which preserves party play, but limits are multiplied by the number of API replicas. Until a shared limiter is implemented, deploy one API replica or divide configured limits by the replica count and enforce an additional edge limit. FUTURE-04B owns limiter metrics, privacy-safe rejection logs, and multi-instance operational evidence.
+The limit store and provider circuit breakers are process-local. This is bounded and fail-open across restarts, which preserves party play, but limits are multiplied by the number of API replicas. Deploy one API replica and optionally enforce an additional trusted-edge limit. Privacy-safe rejection logs and bounded decision metrics are implemented; shared multi-replica limiting is not.
