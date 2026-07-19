@@ -4,6 +4,7 @@ Status note:
 
 - Checked items are implemented in the current codebase.
 - Some nearby items are only partially implemented and remain unchecked.
+- The controlled simultaneous MVP flow is complete and CI-gated. Unchecked items are known limitations or post-MVP polish, not prerequisites for the current playable scope.
 - Current scope changes:
 	- the current client uses a single room route that switches between lobby, answer, reveal, and completion states instead of separate screens;
 	- live room updates use sequenced, non-overlapping 3-second polling (slower in hidden tabs), not WebSockets;
@@ -172,11 +173,12 @@ Status note:
 - [ ] Adjust scoreboard views.
 - [ ] Add team-building copy.
 
-## Phase 11 — Mobile and Zoom Polish
+## Phase 11 — Mobile and Zoom Polish (post-MVP)
 
-- [ ] Make join flow mobile-friendly.
-- [ ] Make answer input phone-friendly.
-- [ ] Make host board readable on screen share.
+- [x] Provide a responsive single-column layout below 900 px for the supported room flow.
+- [ ] Validate the join flow on physical mobile devices.
+- [ ] Validate answer input on physical mobile devices.
+- [ ] Validate the host board on a real screen share.
 - [ ] Increase reveal-screen text size.
 - [ ] Add fullscreen-friendly layout.
 - [ ] Add reduced-motion option.

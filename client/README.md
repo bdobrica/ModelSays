@@ -1,12 +1,22 @@
 # Model Says — Client
 
-Model Says is a real-time party game where players try to guess what an AI model thinks the most common answers are.
+Model Says is a polling-based party game where players try to guess what an AI model thinks the most common answers are.
 
 This client is a React app for joining rooms, playing rounds, submitting answers, watching reveals, and viewing scores. It should be optimized for parties, Zoom/team-building sessions, and casual play.
 
 The current creation form follows the backend MVP contract: simultaneous mode, 1–5 rounds, a 15–120 second timer, English locale, and the default `gpt-4.1-mini` prediction model. Room and display-name inputs are capped at the server's 48- and 24-character limits. Invite links stop accepting new players once the host starts the game.
 
 The playable client uses one request at a time with sequenced polling, refetches after every mutation, slows polling in a hidden tab, and stops it after completion. It validates a matching local token with the backend on refresh instead of trusting the stored host role. The answering view derives its countdown from the server deadline and disables local input at expiry; the server remains authoritative. Final scores are ranked with winners and ties identified. WebSockets, presence heartbeats, and cross-device session transfer are deferred.
+
+## Supported MVP
+
+The client supports the complete simultaneous game path on one room route: create/join, lobby polling, host start, a server-deadline countdown, one locked answer, expiry state, reveal and host override, next round, final ranked winners/ties, and server-validated same-browser refresh recovery. The layout collapses to one column below 900 px for phone-sized player views.
+
+The room-flow component suite covers host and player states, expiry, stale polling responses, reveal/override, final ties, and session recovery. The PostgreSQL lifecycle gate separately exercises one host and two player identities across the persisted API flow.
+
+## Known Limitations
+
+Room updates use three-second polling, not WebSockets. Reveal and advancement require the host. Matching corrections happen only after reveal. Sessions do not transfer across devices, and presence is not tracked. Teams, sequential mode, animations, round deltas, play-again/share controls, and a dedicated browser end-to-end harness are deferred. Physical-device and external-player usability testing is still recommended before public release.
 
 ## Core Experience
 
@@ -303,7 +313,6 @@ Example:
 
 ```bash
 VITE_API_BASE_URL=http://localhost:8080
-VITE_WS_URL=ws://localhost:8080/ws
 ```
 
 ## Local Development
@@ -333,7 +342,7 @@ The client MVP is complete when:
 
 - a host can create a room;
 - players can join by code;
-- the lobby updates in real time;
+- the lobby updates through safe polling;
 - the host can start a game;
 - players see the current question;
 - players can submit one answer per round;

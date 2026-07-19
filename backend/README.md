@@ -2,7 +2,7 @@
 
 Model Says is a real-time party game where players try to guess what an AI model thinks the most common answers are.
 
-This backend provides the game engine, room management, persistent AI-generated answer boards, scoring, player sessions, and API/WebSocket gateway used by the React client.
+This backend provides the game engine, room management, persistent generated answer boards, scoring, player sessions, and REST API used by the React client.
 
 The key idea is not to simulate a real survey. The game is explicitly about guessing the model’s predicted cultural priors.
 
@@ -42,11 +42,21 @@ The backend owns:
 - scoring;
 - timers;
 - persistence;
-- WebSocket updates;
+- polling-friendly room state;
 - model/provider configuration;
 - replay/debug metadata.
 
 The frontend should not be trusted for game-state decisions.
+
+## Supported MVP
+
+The backend supports simultaneous English games with 1–5 rounds, 15–120 second answer windows, curated offline content or validated OpenAI generation, PostgreSQL persistence, deterministic canonical/alias matching, first-claim duplicate scoring, phase-aware response secrecy, host reveal/override/advance controls, and room-scoped same-browser session recovery.
+
+The PostgreSQL lifecycle gate runs a host plus two players through two curated rounds and covers shared board identity, session recovery during answering and reveal, equivalent guesses, deadline rejection, override, completion, and score reload after the repository/service/server are rebuilt.
+
+## Known Limitations
+
+Updates are polled rather than pushed. Expiry does not automatically reveal. Matching has no semantic judge. Presence, cross-device session transfer, teams, non-English locales, and non-simultaneous modes are not supported. Public-launch rate limiting, moderation, observability, retention, and provider cost controls remain deferred.
 
 ## Suggested Stack
 
@@ -483,7 +493,7 @@ cd backend
 TEST_DATABASE_URL='postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable' go test -race ./...
 ```
 
-Each integration test creates a unique schema, applies all migrations, and removes the schema afterward. The suite includes concurrency and migration checks plus a two-round HTTP lifecycle covering create, join, start, hidden answering state, submission, deadline rejection, reveal, override, next round, completion, and reload through a reconstructed repository and service. It always uses curated content and never needs an OpenAI key. Without `TEST_DATABASE_URL`, PostgreSQL integration tests are skipped while unit tests still run.
+Each integration test creates a unique schema, applies all migrations, and removes the schema afterward. The suite includes concurrency and migration checks plus a two-round HTTP lifecycle with a host and two players covering create, joins, start, shared board identity, hidden answering state, session recovery, equivalent-answer duplicate scoring, deadline rejection, reveal, override, next round, completion, and reload through a reconstructed repository and service. It always uses curated content and never needs an OpenAI key. Without `TEST_DATABASE_URL`, PostgreSQL integration tests are skipped while unit tests still run.
 
 ## Testing Priorities
 
@@ -513,5 +523,5 @@ The backend MVP is complete when:
 - players can submit answers;
 - guesses are matched to the board;
 - scores are computed and persisted;
-- clients receive real-time state updates;
+- clients receive polling-friendly authoritative state;
 - the final scoreboard is available.

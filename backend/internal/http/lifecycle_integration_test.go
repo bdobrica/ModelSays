@@ -38,21 +38,32 @@ func TestPostgresAPIFullLifecycleSurvivesReload(t *testing.T) {
 	hostToken := nestedString(t, created, "player", "token")
 	joined := performRoomRequest(t, server, http.MethodPost, fmt.Sprintf("/api/rooms/%s/join", code), `{"displayName":"Player"}`)
 	playerToken := nestedString(t, joined, "player", "token")
+	secondJoined := performRoomRequest(t, server, http.MethodPost, fmt.Sprintf("/api/rooms/%s/join", code), `{"displayName":"Second player"}`)
+	secondPlayerToken := nestedString(t, secondJoined, "player", "token")
 
 	started := performRoomRequest(t, server, http.MethodPost, fmt.Sprintf("/api/rooms/%s/start", code), fmt.Sprintf(`{"playerToken":%q}`, hostToken))
 	firstRoundID := nestedString(t, started, "room", "currentGame", "currentRound", "id")
+	firstBoardHash := nestedString(t, started, "room", "currentGame", "currentRound", "boardHash")
 	if round := nestedMap(t, started, "room", "currentGame", "currentRound"); round["board"] != nil || round["guesses"] != nil {
 		t.Fatalf("answering response leaked board or guesses: %#v", round)
 	}
+	assertLifecycleSession(t, server, code, hostToken, "Host", firstRoundID, firstBoardHash, "answering")
+	assertLifecycleSession(t, server, code, playerToken, "Player", firstRoundID, firstBoardHash, "answering")
+	assertLifecycleSession(t, server, code, secondPlayerToken, "Second player", firstRoundID, firstBoardHash, "answering")
 
 	submitted := performRoomRequest(
 		t, server, http.MethodPost,
 		fmt.Sprintf("/api/rooms/%s/rounds/%s/guesses", code, firstRoundID),
-		fmt.Sprintf(`{"playerToken":%q,"answer":"definitely not a board answer"}`, playerToken),
+		fmt.Sprintf(`{"playerToken":%q,"answer":"crypto"}`, playerToken),
 	)
 	if round := nestedMap(t, submitted, "room", "currentGame", "currentRound"); round["board"] != nil || round["guesses"] != nil {
 		t.Fatalf("submission response leaked board or guesses: %#v", round)
 	}
+	performRoomRequest(
+		t, server, http.MethodPost,
+		fmt.Sprintf("/api/rooms/%s/rounds/%s/guesses", code, firstRoundID),
+		fmt.Sprintf(`{"playerToken":%q,"answer":"bitcoin"}`, secondPlayerToken),
+	)
 
 	deadline, err := time.Parse(time.RFC3339Nano, nestedString(t, started, "room", "currentGame", "currentRound", "answerPhaseEndsAt"))
 	if err != nil {
@@ -76,20 +87,43 @@ func TestPostgresAPIFullLifecycleSurvivesReload(t *testing.T) {
 	guesses := nestedSlice(t, firstRound, "guesses")
 	board := nestedMap(t, firstRound, "board")
 	answers := nestedSlice(t, board, "answers")
-	if len(guesses) != 1 || len(answers) == 0 {
+	if len(guesses) != 2 || len(answers) == 0 {
 		t.Fatalf("revealed state has guesses=%d answers=%d", len(guesses), len(answers))
 	}
-	guessID := guesses[0].(map[string]any)["id"].(string)
-	answerID := answers[0].(map[string]any)["id"].(string)
+	assertLifecycleSession(t, server, code, secondPlayerToken, "Second player", firstRoundID, firstBoardHash, "revealed")
+
+	playerID := nestedString(t, joined, "player", "id")
+	secondPlayerID := nestedString(t, secondJoined, "player", "id")
+	var duplicateGuessID string
+	for _, rawGuess := range guesses {
+		guess := rawGuess.(map[string]any)
+		if guess["playerId"] == playerID {
+			if guess["duplicate"] != false || guess["scoreAwarded"].(float64) <= 0 {
+				t.Fatalf("first equivalent claim did not score: %#v", guess)
+			}
+		}
+		if guess["playerId"] == secondPlayerID {
+			if guess["duplicate"] != true || guess["scoreAwarded"].(float64) != 0 {
+				t.Fatalf("second equivalent claim was not a zero-point duplicate: %#v", guess)
+			}
+			duplicateGuessID = guess["id"].(string)
+		}
+	}
+	if duplicateGuessID == "" {
+		t.Fatal("second player's duplicate guess was not found")
+	}
+	secondAnswerID := answers[1].(map[string]any)["id"].(string)
 	overridden := performRoomRequest(
 		t, server, http.MethodPost, fmt.Sprintf("/api/rooms/%s/override-match", code),
 		fmt.Sprintf(
 			`{"playerToken":%q,"roundId":%q,"guessId":%q,"matchedPredictionAnswerId":%q}`,
-			hostToken, firstRoundID, guessID, answerID,
+			hostToken, firstRoundID, duplicateGuessID, secondAnswerID,
 		),
 	)
-	playerID := nestedString(t, joined, "player", "id")
 	if score := scoreboardEntry(t, nestedMap(t, overridden, "room", "currentGame"), playerID)["score"].(float64); score <= 0 {
+		t.Fatalf("first player's score = %v, want a positive score", score)
+	}
+	if score := scoreboardEntry(t, nestedMap(t, overridden, "room", "currentGame"), secondPlayerID)["score"].(float64); score <= 0 {
 		t.Fatalf("host override score = %v, want a positive score", score)
 	}
 
@@ -122,6 +156,41 @@ func TestPostgresAPIFullLifecycleSurvivesReload(t *testing.T) {
 	}
 	if score := scoreboardEntry(t, nestedMap(t, reloaded, "room", "currentGame"), playerID)["score"].(float64); score <= 0 {
 		t.Fatalf("reloaded player score = %v, want persisted positive score", score)
+	}
+	if score := scoreboardEntry(t, nestedMap(t, reloaded, "room", "currentGame"), secondPlayerID)["score"].(float64); score <= 0 {
+		t.Fatalf("reloaded second player score = %v, want persisted positive score", score)
+	}
+}
+
+func assertLifecycleSession(
+	t *testing.T,
+	server *Server,
+	code string,
+	playerToken string,
+	displayName string,
+	roundID string,
+	boardHash string,
+	roundStatus string,
+) {
+	t.Helper()
+	session := performRoomRequest(
+		t,
+		server,
+		http.MethodPost,
+		fmt.Sprintf("/api/rooms/%s/session", code),
+		fmt.Sprintf(`{"playerToken":%q}`, playerToken),
+	)
+	if got := nestedString(t, session, "player", "displayName"); got != displayName {
+		t.Fatalf("recovered display name = %q, want %q", got, displayName)
+	}
+	if got := nestedString(t, session, "room", "currentGame", "currentRound", "id"); got != roundID {
+		t.Fatalf("recovered round = %q, want %q", got, roundID)
+	}
+	if got := nestedString(t, session, "room", "currentGame", "currentRound", "boardHash"); got != boardHash {
+		t.Fatalf("recovered board hash = %q, want %q", got, boardHash)
+	}
+	if got := nestedString(t, session, "room", "currentGame", "currentRound", "status"); got != roundStatus {
+		t.Fatalf("recovered round status = %q, want %q", got, roundStatus)
 	}
 }
 

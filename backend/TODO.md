@@ -4,6 +4,7 @@ Status note:
 
 - Checked items are implemented in the current codebase.
 - Some nearby items are only partially implemented and remain unchecked.
+- The controlled simultaneous MVP lifecycle is complete and CI-gated. Unchecked items are known limitations or post-MVP roadmap work, not prerequisites for the current playable scope.
 - Current scope changes:
   - local development still falls back to an in-process static model client when `OPENAI_API_KEY` is not set;
   - host-only authorization is currently implemented for start, reveal, next-round, and override actions, not every future host action;
@@ -66,7 +67,7 @@ Status note:
 - [x] Implement authenticated same-browser session recovery.
 - [ ] Implement player heartbeat.
 - [x] Implement basic room state response.
-- [ ] Implement host-only authorization checks.
+- [x] Implement host-only authorization checks for every supported MVP host mutation.
 
 ## Phase 3 — Real-Time Gateway
 

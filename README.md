@@ -1,6 +1,6 @@
 # Model Says
 
-**Model Says** is a real-time party game where players try to guess what an AI model thinks the most common answers are.
+**Model Says** is a playable polling-based party game where players try to guess what an AI model thinks the most common answers are.
 
 It is inspired by survey-answer party games, but with a different premise:
 
@@ -90,7 +90,7 @@ The backend is responsible for:
 * answer matching;
 * scoring;
 * timers;
-* WebSocket or real-time updates;
+* polling-based room updates;
 * host controls.
 
 See [`backend/README.md`](backend/README.md) for more details.
@@ -156,15 +156,15 @@ make verify
 
 `make verify` matches the complete CI gate: it checks Go formatting and vetting, runs backend and client tests, and type-checks/builds the client. Set `TEST_DATABASE_URL` when running it to include the isolated PostgreSQL integration suite; without that variable, those tests skip. Narrower targets such as `make vet-backend`, `make test-backend`, `make test-client`, `make build-client`, and `make check-format` are also available.
 
-GitHub Actions runs separate backend, client, and PostgreSQL integration jobs on pushes and pull requests. The database job covers the complete two-round HTTP lifecycle—including secrecy, deadline rejection, reveal, host override, completion, and reload—using curated content, so verification never needs an OpenAI key or external model request.
+GitHub Actions runs separate backend, client, and PostgreSQL integration jobs on pushes and pull requests. The database job covers a host-and-two-player, two-round HTTP lifecycle—including secrecy, equivalent claims, deadline rejection, session recovery, reveal, host override, completion, and reload—using curated content, so verification never needs an OpenAI key or external model request.
 
-The required automated smoke gate stays at the API boundary to keep CI small and deterministic. Before an MVP release, run this manual browser check:
+The required automated smoke gate stays at the API boundary to keep CI small and deterministic. For a human usability/fun check before wider distribution, run:
 
-1. Run `make start`, open `http://localhost:5173` in two separate browser sessions, and create a two-round room in the first.
-2. Join from the second session, start as host, and confirm both sessions show the same question and countdown without revealing the board.
-3. Submit from the player, wait for expiry, confirm further input is disabled/rejected, then reveal as host.
-4. Correct the player's result with the host override controls, advance, play and reveal round two, and confirm both sessions show the same final ranking.
-5. Refresh both sessions during the flow and confirm each restores its own validated identity and current room state.
+1. Run `make start`, open `http://localhost:5173` in three separate browser sessions (one at a phone-sized viewport), and create a two-round room in the first.
+2. Join from both player sessions, start as host, and confirm all sessions show the same question and board hash without revealing the board.
+3. Submit equivalent aliases from both players, refresh during answering, wait for expiry, confirm further input is disabled/rejected, then reveal as host.
+4. Confirm the first claim scored and the later equivalent is a duplicate, correct the duplicate to another answer with the host override controls, and refresh during reveal.
+5. Advance, play and reveal round two, confirm all sessions show the same final ranking, restart the backend, and confirm refresh preserves the completed game and identities.
 
 Without `OPENAI_API_KEY`, games use a five-question English curated bank and support the full 1–5 round MVP flow. With OpenAI enabled, question and board responses use strict JSON schemas and are validated independently of the provider. Invalid or failed generation is retried once, then the server selects the unused curated entry for that round. Only failure of both paths returns a temporary content-unavailable response.
 
@@ -185,7 +185,7 @@ The supported MVP room contract is intentionally narrow: simultaneous mode, 1–
 * React
 * TypeScript
 * Vite
-* WebSocket client
+* resilient polling
 * Responsive UI for desktop and mobile
 
 ## Core Design Principles
@@ -227,6 +227,31 @@ Deterministic matching will sometimes miss a reasonable semantic equivalent that
 That is part of the fun, but it should not break the game.
 
 The host can correct a match or miss after reveal.
+
+## Supported MVP
+
+The controlled MVP is playable with one host and at least two players:
+
+- simultaneous English games with 1–5 rounds and 15–120 second timers;
+- PostgreSQL-persisted rooms, frozen boards, guesses, score events, and final rankings;
+- a five-round curated bank that works without an OpenAI key, plus validated OpenAI generation when configured;
+- deterministic canonical/alias matching with first committed claim wins;
+- server-enforced deadlines, hidden answering-state outcomes, host-triggered reveal, and post-reveal overrides;
+- three-second collision-safe polling and server-validated same-browser session recovery;
+- responsive host/player layouts, including the single-column layout below 900 px;
+- automated backend, client, and PostgreSQL lifecycle gates through `make verify`.
+
+The repeatable MVP playtest gate uses a host and two player identities across two curated rounds. It verifies a shared board hash, refresh/session recovery during answering and reveal, equivalent-answer duplicate handling, expiry rejection, host override, final ranking, and score recovery after backend reconstruction. This technical operator simulation passed on 2026-07-19. The browser room-flow suite covers the corresponding UI states; an external-player fun/usability session is still recommended before a public launch.
+
+## Known Limitations
+
+- Room changes arrive by three-second polling rather than WebSockets or SSE.
+- Matching is deterministic, not semantic; the host resolves reasonable unlisted equivalents after reveal.
+- Expiry closes answering, but reveal and round advancement remain manual host actions.
+- Reconnect is limited to the same browser’s stored room token; there is no presence heartbeat or cross-device transfer.
+- Only simultaneous English games are supported; teams, sequential play, play-again, and shareable results are deferred.
+- The responsive UI is automated at the component/CSS level, but physical-device and external-participant playtesting remains a release follow-up.
+- The application is suitable for a controlled MVP playtest, not an untrusted public launch; rate limits, moderation, observability, retention policy, and provider cost controls remain outstanding.
 
 ## Game Modes
 
@@ -303,20 +328,7 @@ Semantic model-based matching is not active in the MVP. It is a post-MVP option 
 
 This project has a working simultaneous-game browser flow with deadline countdowns, safe non-overlapping polling, same-browser session recovery, host controls, and ranked final scores. WebSockets, cross-device session transfer, presence/heartbeat, and automatic deadline reveal remain outside the polling MVP.
 
-Recommended implementation order:
-
-1. Backend room and lobby API.
-2. PostgreSQL schema and migrations.
-3. React room creation and join flow.
-4. WebSocket room updates.
-5. Simultaneous game mode.
-6. Static questions and static boards.
-7. OpenAI-generated boards.
-8. Deterministic canonical/alias matching.
-9. Scoring and reveal UI.
-10. Host override.
-11. Team mode.
-12. Sequential mode.
+The controlled MVP implementation is complete. The next work should be chosen from measured playtest feedback; likely candidates are semantic match suggestions, pushed updates, automatic round progression, and public-launch hardening.
 
 See the TODO files for a more detailed implementation plan:
 
@@ -338,7 +350,6 @@ Example client variables:
 
 ```bash
 VITE_API_BASE_URL=http://localhost:8080
-VITE_WS_URL=ws://localhost:8080/ws
 ```
 
 ## Safety Notes
