@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/bogdandobrica/modelsays/backend/internal/llm"
+	"github.com/bogdandobrica/modelsays/backend/internal/security"
 )
 
 type Config struct {
@@ -25,6 +26,7 @@ type Config struct {
 	AutoRevealGrace     time.Duration
 	TransitionPoll      time.Duration
 	TransitionBatchSize int
+	Abuse               security.Config
 }
 
 type DefaultModels struct {
@@ -35,6 +37,7 @@ type DefaultModels struct {
 
 func Load() Config {
 	defaultPolicy := llm.DefaultPolicy()
+	defaultAbuse := security.DefaultConfig()
 	return Config{
 		AppEnv:              getEnv("APP_ENV", "development"),
 		DatabaseURL:         getEnv("DATABASE_URL", ""),
@@ -49,6 +52,23 @@ func Load() Config {
 		AutoRevealGrace:     time.Duration(getEnvNonNegativeInt("AUTO_REVEAL_GRACE_SECONDS", 0)) * time.Second,
 		TransitionPoll:      time.Duration(getEnvInt("TRANSITION_POLL_INTERVAL_MS", 250)) * time.Millisecond,
 		TransitionBatchSize: getEnvInt("TRANSITION_BATCH_SIZE", 25),
+		Abuse: security.Config{
+			TrustedProxyCIDRs:   splitCSV(getEnv("TRUSTED_PROXY_CIDRS", "")),
+			MaxKeys:             getEnvInt("RATE_LIMIT_MAX_KEYS", defaultAbuse.MaxKeys),
+			IP:                  ratePolicy("RATE_LIMIT_IP", defaultAbuse.IP),
+			Create:              ratePolicy("RATE_LIMIT_CREATE", defaultAbuse.Create),
+			Lookup:              ratePolicy("RATE_LIMIT_LOOKUP", defaultAbuse.Lookup),
+			JoinIP:              ratePolicy("RATE_LIMIT_JOIN_IP", defaultAbuse.JoinIP),
+			JoinRoom:            ratePolicy("RATE_LIMIT_JOIN_ROOM", defaultAbuse.JoinRoom),
+			PlayerAction:        ratePolicy("RATE_LIMIT_PLAYER_ACTION", defaultAbuse.PlayerAction),
+			GuessPlayer:         ratePolicy("RATE_LIMIT_GUESS_PLAYER", defaultAbuse.GuessPlayer),
+			GuessRoom:           ratePolicy("RATE_LIMIT_GUESS_ROOM", defaultAbuse.GuessRoom),
+			EventIP:             ratePolicy("RATE_LIMIT_EVENT_IP", defaultAbuse.EventIP),
+			EventRoom:           ratePolicy("RATE_LIMIT_EVENT_ROOM", defaultAbuse.EventRoom),
+			ProviderGlobal:      ratePolicy("PROVIDER_LIMIT_GLOBAL", defaultAbuse.ProviderGlobal),
+			ProviderRoom:        ratePolicy("PROVIDER_LIMIT_ROOM", defaultAbuse.ProviderRoom),
+			ModerationDenyWords: splitCSV(getEnv("MODERATION_DENY_WORDS", strings.Join(defaultAbuse.ModerationDenyWords, ","))),
+		},
 		DefaultModels: DefaultModels{
 			Prediction: getEnv("DEFAULT_PREDICTION_MODEL", "gpt-4.1-mini"),
 			Question:   getEnv("DEFAULT_QUESTION_MODEL", "gpt-4.1-mini"),
@@ -65,6 +85,13 @@ func Load() Config {
 			CaptureRawResponses:     strings.EqualFold(getEnv("MODEL_CAPTURE_RAW_RESPONSES", "false"), "true"),
 			MaxRawResponseBytes:     getEnvInt("MODEL_RAW_RESPONSE_MAX_BYTES", defaultPolicy.MaxRawResponseBytes),
 		}.Normalize(),
+	}
+}
+
+func ratePolicy(prefix string, fallback security.Policy) security.Policy {
+	return security.Policy{
+		Limit:  getEnvInt(prefix+"_REQUESTS", fallback.Limit),
+		Window: time.Duration(getEnvInt(prefix+"_WINDOW_SECONDS", int(fallback.Window/time.Second))) * time.Second,
 	}
 }
 

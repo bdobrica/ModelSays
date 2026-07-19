@@ -41,6 +41,13 @@ type judgeModelClient struct {
 	calls     int
 }
 
+type denyProviderGate struct{ calls int }
+
+func (gate *denyProviderGate) AllowProvider(string) (bool, time.Duration) {
+	gate.calls++
+	return false, time.Minute
+}
+
 func (client *judgeModelClient) JudgeGuess(ctx context.Context, _ llm.JudgeGuessRequest) (*llm.JudgeGuessResponse, error) {
 	index := client.calls
 	client.calls++
@@ -879,6 +886,36 @@ func TestProviderBudgetExhaustionMakesNoFurtherPaidCall(t *testing.T) {
 	}
 	if started.CurrentGame.CurrentRound.Board.Provider != "static" {
 		t.Fatalf("budget exhaustion did not preserve curated play: %#v", started.CurrentGame.CurrentRound.Board)
+	}
+}
+
+func TestProviderCircuitMakesNoPaidCallAndFallsBackToCurated(t *testing.T) {
+	client := &scriptedModelClient{}
+	gate := &denyProviderGate{}
+	service := NewRoomService(NewInMemoryRoomRepository(), client)
+	service.SetProviderGate(gate)
+	room, host, err := service.CreateRoom(context.Background(), CreateRoomInput{
+		RoomName: "Circuit fallback", HostDisplayName: "Host",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, err := service.StartGame(context.Background(), StartGameInput{Code: room.Code, PlayerToken: host.Token})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client.questionCalls != 0 || client.boardCalls != 0 {
+		t.Fatalf("paid client was called: questions=%d boards=%d", client.questionCalls, client.boardCalls)
+	}
+	if gate.calls == 0 || started.CurrentGame.CurrentRound.Board.Provider != "static" {
+		t.Fatalf("circuit calls=%d provider=%q", gate.calls, started.CurrentGame.CurrentRound.Board.Provider)
+	}
+	audits, err := service.GetProviderAudits(context.Background(), room.Code, host.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(audits) < 3 || audits[0].Outcome != "budget_exhausted" || audits[0].ErrorCategory != "circuit_breaker" {
+		t.Fatalf("circuit and fallback audits = %#v", audits)
 	}
 }
 

@@ -17,7 +17,82 @@ import (
 	"github.com/bogdandobrica/modelsays/backend/internal/config"
 	"github.com/bogdandobrica/modelsays/backend/internal/game"
 	"github.com/bogdandobrica/modelsays/backend/internal/models"
+	"github.com/bogdandobrica/modelsays/backend/internal/security"
 )
+
+func TestAbuseLimitsReturnDeterministicMetadataAndExcludeHealth(t *testing.T) {
+	cfg := config.Config{Abuse: security.DefaultConfig()}
+	cfg.Abuse.Create = security.Policy{Limit: 1, Window: time.Minute}
+	server := NewServer(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)), game.NewInMemoryRoomService())
+	payload := `{"roomName":"Party","hostDisplayName":"Host","settings":{"mode":"simultaneous","totalRounds":1,"answerTimerSeconds":30,"locale":"en","predictionModel":"gpt-4.1-mini","teamSafeMode":true}}`
+
+	first := httptest.NewRequest(http.MethodPost, "/api/rooms", strings.NewReader(payload))
+	first.RemoteAddr = "203.0.113.5:1234"
+	firstResponse := httptest.NewRecorder()
+	server.Handler().ServeHTTP(firstResponse, first)
+	if firstResponse.Code != http.StatusCreated {
+		t.Fatalf("first create status = %d body=%s", firstResponse.Code, firstResponse.Body.String())
+	}
+
+	second := httptest.NewRequest(http.MethodPost, "/api/rooms", strings.NewReader(payload))
+	second.RemoteAddr = first.RemoteAddr
+	secondResponse := httptest.NewRecorder()
+	server.Handler().ServeHTTP(secondResponse, second)
+	if secondResponse.Code != http.StatusTooManyRequests || secondResponse.Header().Get("Retry-After") != "60" {
+		t.Fatalf("limited status=%d headers=%v body=%s", secondResponse.Code, secondResponse.Header(), secondResponse.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(secondResponse.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["code"] != "rate_limited" || body["scope"] != "create" || body["retryAfterSeconds"] != float64(60) {
+		t.Fatalf("rate response = %#v", body)
+	}
+
+	for index := 0; index < 3; index++ {
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+		if response.Code != http.StatusOK {
+			t.Fatalf("health request %d was limited: %d", index, response.Code)
+		}
+	}
+}
+
+func TestModerationRejectsBeforeMutation(t *testing.T) {
+	service := game.NewInMemoryRoomService()
+	server := NewServer(config.Config{}, slog.New(slog.NewTextHandler(io.Discard, nil)), service)
+	request := httptest.NewRequest(http.MethodPost, "/api/rooms", strings.NewReader(
+		`{"roomName":"Party","hostDisplayName":"nigger","settings":{"mode":"simultaneous","totalRounds":1,"answerTimerSeconds":30,"locale":"en","predictionModel":"gpt-4.1-mini","teamSafeMode":true}}`,
+	))
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), "party-safe") {
+		t.Fatalf("moderation status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	room, host, err := service.CreateRoom(context.Background(), game.CreateRoomInput{RoomName: "Safe party", HostDisplayName: "Host"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, err := service.StartGame(context.Background(), game.StartGameInput{Code: room.Code, PlayerToken: host.Token})
+	if err != nil {
+		t.Fatal(err)
+	}
+	guess := fmt.Sprintf(`{"playerToken":%q,"answer":"nigger"}`, host.Token)
+	guessRequest := httptest.NewRequest(http.MethodPost, "/api/rooms/"+room.Code+"/rounds/"+started.CurrentGame.CurrentRound.ID+"/guesses", strings.NewReader(guess))
+	guessResponse := httptest.NewRecorder()
+	server.Handler().ServeHTTP(guessResponse, guessRequest)
+	if guessResponse.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("answer moderation status=%d body=%s", guessResponse.Code, guessResponse.Body.String())
+	}
+	reloaded, err := service.GetRoom(context.Background(), room.Code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reloaded.CurrentGame.CurrentRound.Guesses) != 0 {
+		t.Fatalf("moderated answer mutated guesses: %#v", reloaded.CurrentGame.CurrentRound.Guesses)
+	}
+}
 
 type streamingResponseWriter struct {
 	header http.Header

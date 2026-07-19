@@ -12,7 +12,7 @@ Status note:
   - the public room projection hides boards, guesses, outcomes, awarded points, and current-round score changes until reveal while preserving submission progress.
   - authoritative matching is deterministic Unicode-aware normalization plus exact canonical/alias equality; optional semantic judging is advisory, post-miss, host-only after reveal, and never scores automatically.
   - model content and judging use strict schemas, provider-independent validation, one retry, and safe deterministic fallbacks; provider calls have private room-scoped audits and shared cost controls.
-  - room creation now enforces the narrow MVP settings and name/code bounds, strict bounded JSON decoding, and lobby-only joins in both repositories; public-launch rate limiting remains deferred.
+  - room creation enforces narrow settings and bounded JSON; public endpoints now add bounded IP/room/player/action limits, explicit proxy trust, English whole-word moderation, and paid-provider circuit breakers.
   - same-browser refresh validates the stored token through the room session endpoint; heartbeat/presence and cross-device transfer remain deferred.
   - CI now gates formatting, vetting, backend/client tests, the production client build, and a PostgreSQL-backed full API lifecycle that uses only curated content.
   - a local PostgreSQL/HTTP baseline now measures representative 3-, 8-, and 12-player polling workloads; production telemetry, concurrency load, and query-plan analysis remain future hardening.
@@ -183,11 +183,11 @@ Status note:
 - [ ] Add stricter team-building safety mode.
 - [ ] Add banned topic list.
 - [ ] Add model-output validation.
-- [ ] Add profanity or harassment handling for player display names.
-- [ ] Add rate limiting by IP/room/player.
+- [x] Add bounded English whole-word moderation for room/display names and answers; broader locale/context moderation remains future work.
+- [x] Add bounded rate limiting by hashed IP/room/player/action and paid-provider circuits.
 - [ ] Add request size limits.
 - [x] Add CORS config.
-- [ ] Add basic abuse logging.
+- [ ] Add privacy-safe abuse decision logging and metrics without high-cardinality IP, room, or token labels.
 
 ## Phase 12 — Tests
 

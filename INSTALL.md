@@ -29,7 +29,7 @@ Create your local configuration:
 cp .env.example .env
 ```
 
-The defaults work with the included Docker Compose database. To use generated questions and boards, set `OPENAI_API_KEY` in `.env`; leave it empty to use the curated offline content. Provider calls remain bounded by the allowlist, timeout, retry, and per-game budget settings in `.env.example`.
+The defaults work with the included Docker Compose database. To use generated questions and boards, set `OPENAI_API_KEY` in `.env`; leave it empty to use the curated offline content. Provider calls remain bounded by allowlist, timeout, retry, per-game budgets, and process-wide/room circuit breakers. Public API limits and English whole-word moderation are enabled by default. Leave `TRUSTED_PROXY_CIDRS` empty for direct local access; configure it only for exact proxy networks you control. See [`docs/security.md`](docs/security.md).
 
 Install the locked Go and npm dependencies, start PostgreSQL, apply migrations, and launch both servers:
 

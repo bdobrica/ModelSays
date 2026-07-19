@@ -247,7 +247,7 @@ The controlled MVP is playable with one host and at least two players:
 - PostgreSQL-persisted rooms, frozen boards, guesses, score events, and final rankings;
 - a five-round curated bank that works without an OpenAI key, plus validated OpenAI generation when configured;
 - deterministic canonical/alias matching with first committed claim wins;
-- server-enforced deadlines, hidden answering-state outcomes, host-triggered reveal, and post-reveal overrides;
+- server-enforced deadlines, hidden answering-state outcomes, durable automatic reveal, early host reveal, and post-reveal overrides;
 - authenticated ordered SSE invalidations, authoritative sequenced refetches, bounded reconnect/resume, polling recovery, and server-validated same-browser session recovery;
 - responsive host/player layouts, including the single-column layout below 900 px;
 - automated backend, client, and PostgreSQL lifecycle gates through `make verify`.
@@ -258,11 +258,11 @@ The repeatable MVP playtest gate uses a host and two player identities across tw
 
 - Live invalidations contain no game content and only trigger authoritative room refetches. Streaming failures automatically retain five-second polling recovery and a visible non-blocking connection status.
 - Automatic scoring remains deterministic. Optional semantic suggestions still require an explicit post-reveal host decision.
-- Expiry closes answering, but reveal and round advancement remain manual host actions.
+- Expiry closes answering and the PostgreSQL worker automatically reveals; round advancement remains a manual host action.
 - Reconnect is limited to the same browser’s stored room token; there is no presence heartbeat or cross-device transfer.
 - Only simultaneous English games are supported; teams, sequential play, play-again, and shareable results are deferred.
 - The responsive UI is automated at the component/CSS level, but physical-device and external-participant playtesting remains a release follow-up.
-- The application is suitable for a controlled MVP playtest, not an untrusted public launch; rate limits, moderation, observability, retention policy, and provider cost controls remain outstanding.
+- Public API, room/player/action, event-attempt, moderation, and paid-provider circuit limits are enabled with explicit proxy trust. Production observability, retention operations, multi-replica shared limiting, and staging recovery evidence remain outstanding.
 
 ## Game Modes
 
@@ -359,7 +359,14 @@ ALLOWED_PREDICTION_MODELS=gpt-4.1-mini
 MODEL_TIMEOUT_SECONDS=10
 MODEL_MAX_ATTEMPTS=2
 MODEL_MAX_COST_USD_PER_GAME=0.10
+TRUSTED_PROXY_CIDRS=
+RATE_LIMIT_CREATE_REQUESTS=10
+RATE_LIMIT_CREATE_WINDOW_SECONDS=60
+PROVIDER_LIMIT_GLOBAL_REQUESTS=120
+PROVIDER_LIMIT_GLOBAL_WINDOW_SECONDS=3600
 ```
+
+The complete limiter matrix, proxy rules, threat model, privacy behavior, and `429` contract are in [`docs/security.md`](docs/security.md). Keep `TRUSTED_PROXY_CIDRS` empty unless the API is directly behind a proxy network you control.
 
 Example client variables:
 

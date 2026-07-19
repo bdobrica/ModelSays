@@ -58,6 +58,9 @@ func main() {
 	roomService.SetJudgeModel(cfg.DefaultModels.Judge)
 	roomService.SetModelPolicy(cfg.ModelPolicy)
 	server := httpapi.NewServer(cfg, logger, roomService)
+	if cfg.OpenAIAPIKey != "" {
+		roomService.SetProviderGate(server.AbuseController())
+	}
 	deadlineWorker := game.NewDeadlineWorker(dueRepository, nil, game.DeadlineWorkerConfig{
 		Enabled: cfg.AutoRevealEnabled, GracePeriod: cfg.AutoRevealGrace,
 		PollInterval: cfg.TransitionPoll, BatchSize: cfg.TransitionBatchSize,

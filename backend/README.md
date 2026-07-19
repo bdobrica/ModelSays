@@ -54,13 +54,13 @@ The frontend should not be trusted for game-state decisions.
 
 ## Supported MVP
 
-The backend supports simultaneous English games with 1–5 rounds, 15–120 second answer windows, curated offline content or validated and audited OpenAI generation, PostgreSQL persistence, deterministic canonical/alias scoring, optional advisory semantic judging for misses, first-claim duplicate scoring, phase-aware response secrecy, durable automatic reveal, host early-reveal/review/override/advance controls, and room-scoped same-browser session recovery. Provider operations are documented in [`docs/provider-operations.md`](../docs/provider-operations.md); deadline-worker behavior is documented in [`docs/deadline-transitions.md`](../docs/deadline-transitions.md).
+The backend supports simultaneous English games with 1–5 rounds, 15–120 second answer windows, curated offline content or validated and audited OpenAI generation, PostgreSQL persistence, deterministic canonical/alias scoring, optional advisory semantic judging for misses, first-claim duplicate scoring, phase-aware response secrecy, durable automatic reveal, host early-reveal/review/override/advance controls, room-scoped same-browser session recovery, and layered public API/provider abuse controls. Provider operations are documented in [`docs/provider-operations.md`](../docs/provider-operations.md); deadline-worker behavior is documented in [`docs/deadline-transitions.md`](../docs/deadline-transitions.md); the threat model, proxy trust, limiter policies, moderation, and `429` contract are in [`docs/security.md`](../docs/security.md).
 
 The PostgreSQL lifecycle gate runs a host plus two players through two curated rounds and covers shared board identity, session recovery during answering and reveal, equivalent guesses, deadline rejection, override, completion, and score reload after the repository/service/server are rebuilt.
 
 ## Known Limitations
 
-Clients use authenticated SSE invalidations with polling recovery. Automatic reveal requires PostgreSQL, while advancement remains host-controlled. Presence, cross-device session transfer, teams, non-English locales, and non-simultaneous modes are not supported. Public-launch rate limiting, moderation, general observability, and automated audit retention cleanup remain deferred.
+Clients use authenticated SSE invalidations with polling recovery. Automatic reveal requires PostgreSQL, while advancement remains host-controlled. Presence, cross-device session transfer, teams, non-English locales, and non-simultaneous modes are not supported. Abuse limits are process-local, so public deployments must use one API replica (or compensate at the edge) until shared limiting is added. General observability and automated audit retention cleanup remain deferred.
 
 ## Suggested Stack
 
@@ -380,7 +380,15 @@ EVENT_POLL_INTERVAL_MS=250
 EVENT_HEARTBEAT_SECONDS=15
 EVENT_MAX_CONNECTIONS=100
 EVENT_WRITE_TIMEOUT_SECONDS=5
+TRUSTED_PROXY_CIDRS=
+RATE_LIMIT_MAX_KEYS=10000
+RATE_LIMIT_CREATE_REQUESTS=10
+RATE_LIMIT_CREATE_WINDOW_SECONDS=60
+PROVIDER_LIMIT_GLOBAL_REQUESTS=120
+PROVIDER_LIMIT_GLOBAL_WINDOW_SECONDS=3600
 ```
+
+All limiter prefixes and defaults are listed in [`docs/security.md`](../docs/security.md). Each prefix has `_REQUESTS` and `_WINDOW_SECONDS`. Health/readiness, CORS preflight, and the internal transition worker are deliberately exempt.
 
 ## Local Development
 

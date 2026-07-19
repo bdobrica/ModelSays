@@ -1,6 +1,8 @@
 # Model provider operations and privacy
 
-Provider calls are governed by server-owned settings. A room cannot select a model outside the prediction, question, and judge allowlists. Calls have a 10-second default timeout, each operation is attempted at most twice, and generation plus semantic judging share a game-wide bound of 20 paid calls and an estimated USD 0.10. When paid generation is unavailable, curated generation remains available; when judging is unavailable or over budget, the deterministic miss remains authoritative.
+Provider calls are governed by server-owned settings. A room cannot select a model outside the prediction, question, and judge allowlists. Calls have a 10-second default timeout, each operation is attempted at most twice, and generation plus semantic judging share a game-wide bound of 20 paid calls and an estimated USD 0.10. Process-wide and per-room fixed-window circuit breakers are checked before every paid attempt; an open circuit records a private `budget_exhausted`/`circuit_breaker` audit and makes no paid request. When paid generation is unavailable, curated generation remains available; when judging is unavailable or over budget, the deterministic miss remains authoritative.
+
+The circuit defaults are 120 paid attempts per server process per hour and 20 per room per hour. Configure them with `PROVIDER_LIMIT_GLOBAL_REQUESTS`, `PROVIDER_LIMIT_GLOBAL_WINDOW_SECONDS`, `PROVIDER_LIMIT_ROOM_REQUESTS`, and `PROVIDER_LIMIT_ROOM_WINDOW_SECONDS`. These process-local safeguards supplement, rather than replace, per-game persisted budgets. Multi-replica deployment constraints and the full abuse threat model are documented in [`security.md`](security.md).
 
 Pricing is an operational estimate, not billing authority. Review the allowlist and the estimate in `internal/llm/openai_client.go` together when adding a model or when provider pricing changes.
 

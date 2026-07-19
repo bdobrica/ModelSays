@@ -121,6 +121,11 @@ type RoomService struct {
 	predictionModel string
 	judgeModel      string
 	modelPolicy     llm.Policy
+	providerGate    ProviderGate
+}
+
+type ProviderGate interface {
+	AllowProvider(roomCode string) (bool, time.Duration)
 }
 
 type Clock interface {
@@ -198,6 +203,10 @@ func (service *RoomService) SetJudgeModel(model string) {
 
 func (service *RoomService) SetModelPolicy(policy llm.Policy) {
 	service.modelPolicy = policy.Normalize()
+}
+
+func (service *RoomService) SetProviderGate(gate ProviderGate) {
+	service.providerGate = gate
 }
 
 func (service *RoomService) SetPredictionModel(model string) {
@@ -739,6 +748,14 @@ func (service *RoomService) evaluateSemanticMiss(ctx context.Context, room model
 	var response *llm.JudgeGuessResponse
 	var callErr error
 	for attempt := 1; attempt <= service.modelPolicy.MaxAttempts; attempt++ {
+		if service.providerGate != nil {
+			if allowed, _ := service.providerGate.AllowProvider(room.Code); !allowed {
+				audit = service.newSkippedJudgeAudit(room, "circuit_breaker", service.clock.Now())
+				suggestion.Outcome = "budget_exhausted"
+				audits = append(audits, audit)
+				break
+			}
+		}
 		callCtx, cancel := llm.WithTimeout(ctx, service.modelPolicy.Timeout)
 		started := service.clock.Now()
 		response, callErr = judge.JudgeGuess(callCtx, llm.JudgeGuessRequest{
@@ -1216,6 +1233,17 @@ func providerUsage(audits []models.ProviderCallAudit) (int, float64) {
 }
 
 func (service *RoomService) generateRoundWithClient(ctx context.Context, client llm.ModelClient, settings models.RoomSettings, roundIndex int, excludedQuestions []string, now time.Time, roomCode string, gameID string, roundID string, path string, attempt int, remainingCalls int, remainingCost float64, audits *[]models.ProviderCallAudit) (generatedRound, error) {
+	if path == "primary" && service.providerGate != nil {
+		if allowed, _ := service.providerGate.AllowProvider(roomCode); !allowed {
+			*audits = append(*audits, models.ProviderCallAudit{
+				ID: newID(), RoomCode: roomCode, GameID: gameID, RoundID: roundID,
+				Purpose: "question_generation", Provider: "circuit_breaker", Model: settings.PredictionModel,
+				PromptVersion: "v1", Outcome: "budget_exhausted", ErrorCategory: "circuit_breaker",
+				Path: path, Attempt: attempt, StartedAt: now, CompletedAt: now, RetentionClass: "provider_audit_30d",
+			})
+			return generatedRound{}, llm.ErrBudgetExhausted
+		}
+	}
 	callCtx, cancel := llm.WithTimeout(ctx, service.modelPolicy.Timeout)
 	started := service.clock.Now()
 	questionResponse, err := client.GenerateQuestions(callCtx, llm.GenerateQuestionsRequest{
@@ -1255,6 +1283,17 @@ func (service *RoomService) generateRoundWithClient(ctx context.Context, client 
 		question.CreatedAt = now
 	}
 
+	if path == "primary" && service.providerGate != nil {
+		if allowed, _ := service.providerGate.AllowProvider(roomCode); !allowed {
+			*audits = append(*audits, models.ProviderCallAudit{
+				ID: newID(), RoomCode: roomCode, GameID: gameID, RoundID: roundID,
+				Purpose: "board_generation", Provider: "circuit_breaker", Model: settings.PredictionModel,
+				PromptVersion: "v1", Outcome: "budget_exhausted", ErrorCategory: "circuit_breaker",
+				Path: path, Attempt: attempt, StartedAt: service.clock.Now(), CompletedAt: service.clock.Now(), RetentionClass: "provider_audit_30d",
+			})
+			return generatedRound{}, llm.ErrBudgetExhausted
+		}
+	}
 	callCtx, cancel = llm.WithTimeout(ctx, service.modelPolicy.Timeout)
 	started = service.clock.Now()
 	boardResponse, err := client.GenerateBoard(callCtx, llm.GenerateBoardRequest{

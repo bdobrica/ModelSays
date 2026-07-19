@@ -1,6 +1,8 @@
 package httpapi
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +17,7 @@ import (
 	"github.com/bogdandobrica/modelsays/backend/internal/config"
 	"github.com/bogdandobrica/modelsays/backend/internal/game"
 	"github.com/bogdandobrica/modelsays/backend/internal/models"
+	"github.com/bogdandobrica/modelsays/backend/internal/security"
 )
 
 const maxRequestBodyBytes = 16 * 1024
@@ -26,6 +29,7 @@ type Server struct {
 	mux                    *http.ServeMux
 	activeEventConnections atomic.Int64
 	readinessCheck         func() error
+	abuse                  *security.Controller
 }
 
 type createRoomRequest struct {
@@ -140,6 +144,7 @@ func NewServer(cfg config.Config, logger *slog.Logger, roomService *game.RoomSer
 		logger:      logger,
 		roomService: roomService,
 		mux:         http.NewServeMux(),
+		abuse:       security.NewController(cfg.Abuse),
 	}
 
 	server.routes()
@@ -147,8 +152,10 @@ func NewServer(cfg config.Config, logger *slog.Logger, roomService *game.RoomSer
 }
 
 func (server *Server) Handler() http.Handler {
-	return server.withCORS(server.mux)
+	return server.withCORS(server.withAbuseLimits(server.mux))
 }
+
+func (server *Server) AbuseController() *security.Controller { return server.abuse }
 
 func (server *Server) SetReadinessCheck(check func() error) {
 	server.readinessCheck = check
@@ -180,6 +187,10 @@ func (server *Server) handleCreateRoom(writer http.ResponseWriter, request *http
 	var payload createRoomRequest
 	if err := decodeJSONBody(writer, request, &payload); err != nil {
 		writeError(writer, http.StatusBadRequest, "invalid JSON payload")
+		return
+	}
+	if server.abuse.Moderated(payload.RoomName) || server.abuse.Moderated(payload.HostDisplayName) {
+		writeError(writer, http.StatusUnprocessableEntity, "room and display names must be party-safe")
 		return
 	}
 
@@ -242,6 +253,9 @@ func (server *Server) handleRoomEvents(writer http.ResponseWriter, request *http
 	}
 	if !server.isAllowedOrigin(request.Header.Get("Origin")) {
 		writeError(writer, http.StatusForbidden, "origin is not allowed")
+		return
+	}
+	if !server.allowPlayerAction(writer, "event", code, request.Header.Get("X-Player-Token"), server.abuse.Config().EventIP) {
 		return
 	}
 	if server.activeEventConnections.Add(1) > int64(server.config.EventMaxConnections) {
@@ -369,6 +383,10 @@ func (server *Server) handleJoinRoom(writer http.ResponseWriter, request *http.R
 		writeError(writer, http.StatusBadRequest, "invalid JSON payload")
 		return
 	}
+	if server.abuse.Moderated(payload.DisplayName) {
+		writeError(writer, http.StatusUnprocessableEntity, "display name must be party-safe")
+		return
+	}
 
 	room, player, err := server.roomService.JoinRoom(request.Context(), game.JoinRoomInput{
 		Code:        code,
@@ -388,6 +406,9 @@ func (server *Server) handleStartGame(writer http.ResponseWriter, request *http.
 		writeError(writer, http.StatusBadRequest, "invalid JSON payload")
 		return
 	}
+	if !server.allowPlayerAction(writer, "start", code, payload.PlayerToken, server.abuse.Config().PlayerAction) {
+		return
+	}
 
 	room, err := server.roomService.StartGame(request.Context(), game.StartGameInput{
 		Code:        code,
@@ -405,6 +426,13 @@ func (server *Server) handleSubmitGuess(writer http.ResponseWriter, request *htt
 	var payload submitGuessRequest
 	if err := decodeJSONBody(writer, request, &payload); err != nil {
 		writeError(writer, http.StatusBadRequest, "invalid JSON payload")
+		return
+	}
+	if server.abuse.Moderated(payload.Answer) {
+		writeError(writer, http.StatusUnprocessableEntity, "answer must be party-safe")
+		return
+	}
+	if !server.allowPlayerAction(writer, "guess", code, payload.PlayerToken, server.abuse.Config().GuessPlayer) {
 		return
 	}
 
@@ -428,6 +456,9 @@ func (server *Server) handleRevealRound(writer http.ResponseWriter, request *htt
 		writeError(writer, http.StatusBadRequest, "invalid JSON payload")
 		return
 	}
+	if !server.allowPlayerAction(writer, "reveal", code, payload.PlayerToken, server.abuse.Config().PlayerAction) {
+		return
+	}
 
 	room, err := server.roomService.RevealRound(request.Context(), game.RevealRoundInput{
 		Code:        code,
@@ -446,6 +477,9 @@ func (server *Server) handleNextRound(writer http.ResponseWriter, request *http.
 	var payload nextRoundRequest
 	if err := decodeJSONBody(writer, request, &payload); err != nil {
 		writeError(writer, http.StatusBadRequest, "invalid JSON payload")
+		return
+	}
+	if !server.allowPlayerAction(writer, "next-round", code, payload.PlayerToken, server.abuse.Config().PlayerAction) {
 		return
 	}
 
@@ -467,6 +501,9 @@ func (server *Server) handleOverrideMatch(writer http.ResponseWriter, request *h
 		writeError(writer, http.StatusBadRequest, "invalid JSON payload")
 		return
 	}
+	if !server.allowPlayerAction(writer, "override", code, payload.PlayerToken, server.abuse.Config().PlayerAction) {
+		return
+	}
 
 	room, err := server.roomService.OverrideMatch(request.Context(), game.OverrideMatchInput{
 		Code:                      code,
@@ -482,6 +519,86 @@ func (server *Server) handleOverrideMatch(writer http.ResponseWriter, request *h
 	}
 
 	writeJSON(writer, http.StatusOK, roomResponse{Room: projectRoom(room)})
+}
+
+func (server *Server) allowPlayerAction(writer http.ResponseWriter, action, room, token string, policy security.Policy) bool {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(token)))
+	roomKey := strings.ToUpper(strings.TrimSpace(room))
+	key := roomKey + ":" + hex.EncodeToString(sum[:16])
+	if allowed, retry := server.abuse.Allow("room-"+action, roomKey, server.abuse.Config().PlayerAction); !allowed {
+		writeRateLimit(writer, "room_action", retry)
+		return false
+	}
+	allowed, retry := server.abuse.Allow("player-"+action, key, policy)
+	if !allowed {
+		writeRateLimit(writer, "player_action", retry)
+	}
+	return allowed
+}
+
+func (server *Server) withAbuseLimits(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/healthz" || request.URL.Path == "/readyz" || request.Method == http.MethodOptions {
+			next.ServeHTTP(writer, request)
+			return
+		}
+		client := server.abuse.ClientKey(request)
+		cfg := server.abuse.Config()
+		if allowed, retry := server.abuse.Allow("ip", client, cfg.IP); !allowed {
+			writeRateLimit(writer, "client", retry)
+			return
+		}
+		action, room, policy := requestLimit(request, cfg)
+		if action != "" {
+			key := client
+			if room != "" && action != "join-ip" {
+				key = strings.ToUpper(room)
+			}
+			if allowed, retry := server.abuse.Allow(action, key, policy); !allowed {
+				writeRateLimit(writer, action, retry)
+				return
+			}
+			if action == "join-ip" {
+				if allowed, retry := server.abuse.Allow("join-room", strings.ToUpper(room), cfg.JoinRoom); !allowed {
+					writeRateLimit(writer, "join-room", retry)
+					return
+				}
+			}
+			if action == "event-room" {
+				if allowed, retry := server.abuse.Allow("event-ip", client, cfg.EventIP); !allowed {
+					writeRateLimit(writer, "event-ip", retry)
+					return
+				}
+			}
+		}
+		next.ServeHTTP(writer, request)
+	})
+}
+
+func requestLimit(request *http.Request, cfg security.Config) (string, string, security.Policy) {
+	if request.Method == http.MethodPost && request.URL.Path == "/api/rooms" {
+		return "create", "", cfg.Create
+	}
+	trimmed := strings.Trim(strings.TrimPrefix(request.URL.Path, "/api/rooms/"), "/")
+	parts := strings.Split(trimmed, "/")
+	if len(parts) == 0 || parts[0] == "" {
+		return "", "", security.Policy{}
+	}
+	room := parts[0]
+	switch {
+	case request.Method == http.MethodPost && len(parts) == 2 && parts[1] == "join":
+		return "join-ip", room, cfg.JoinIP
+	case request.Method == http.MethodPost && len(parts) == 2 && parts[1] == "session":
+		return "session-ip", "", cfg.Lookup
+	case request.Method == http.MethodGet && len(parts) == 2 && parts[1] == "events":
+		return "event-room", room, cfg.EventRoom
+	case request.Method == http.MethodPost && len(parts) == 4 && parts[3] == "guesses":
+		return "guess-room", room, cfg.GuessRoom
+	case request.Method == http.MethodGet:
+		return "lookup", "", cfg.Lookup
+	default:
+		return "", "", security.Policy{}
+	}
 }
 
 func (server *Server) writeDomainError(writer http.ResponseWriter, err error) {
@@ -570,6 +687,18 @@ func writeJSON(writer http.ResponseWriter, status int, payload any) {
 
 func writeError(writer http.ResponseWriter, status int, message string) {
 	writeJSON(writer, status, errorResponse{Error: message})
+}
+
+func writeRateLimit(writer http.ResponseWriter, scope string, retry time.Duration) {
+	seconds := int((retry + time.Second - 1) / time.Second)
+	if seconds < 1 {
+		seconds = 1
+	}
+	writer.Header().Set("Retry-After", strconv.Itoa(seconds))
+	writeJSON(writer, http.StatusTooManyRequests, map[string]any{
+		"error": "rate limit exceeded", "code": "rate_limited",
+		"scope": scope, "retryAfterSeconds": seconds,
+	})
 }
 
 func projectRoom(room models.Room) publicRoom {

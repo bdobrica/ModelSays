@@ -41,7 +41,7 @@ Deterministic local push and deadline-transition evidence is recorded under `doc
 
 ## Lifecycle and recovery scenarios
 
-- [ ] Three-, eight-, and twelve-player curated workloads complete without provider calls.
+- [x] Three-, eight-, and twelve-player curated workloads complete without provider calls. FUTURE-04A limiter evidence: [`baselines/future-04a.md`](baselines/future-04a.md).
 - [ ] Answering data remains private until reveal.
 - [ ] Duplicate claims and overrides remain authoritative.
 - [ ] Client polling/refetch fallback works.
