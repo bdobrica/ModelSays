@@ -398,8 +398,11 @@ Run backend tests or the complete repository verification:
 
 ```bash
 make test-backend
+make vet-backend
 make verify
 ```
+
+`make verify` is the local equivalent of the CI gates. It checks formatting and vetting, runs all backend and client tests, and builds the production client.
 
 Run the backend directly from its directory when PostgreSQL and migrations are already ready:
 
@@ -471,7 +474,7 @@ The current correction mechanism is the post-reveal host override. It can turn a
 
 Submission scoring is authoritative inside the repository transaction. The transaction locks the round, resolves the match against its frozen board, and checks existing positive-scoring claims before inserting the guess and score event together. Only the earliest transaction to commit a claim receives the answer score; later equivalent guesses remain visible as duplicates and score zero. Host overrides use the same locked claim rule and append an auditable score event when they change a score.
 
-### PostgreSQL scoring tests
+### PostgreSQL integration tests
 
 Set `TEST_DATABASE_URL` to a PostgreSQL database where the test user may create schemas, then run:
 
@@ -480,7 +483,7 @@ cd backend
 TEST_DATABASE_URL='postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable' go test -race ./...
 ```
 
-Each integration test creates a unique schema, applies all migrations, and removes the schema afterward. Without `TEST_DATABASE_URL`, PostgreSQL integration tests are skipped while unit tests still run.
+Each integration test creates a unique schema, applies all migrations, and removes the schema afterward. The suite includes concurrency and migration checks plus a two-round HTTP lifecycle covering create, join, start, hidden answering state, submission, deadline rejection, reveal, override, next round, completion, and reload through a reconstructed repository and service. It always uses curated content and never needs an OpenAI key. Without `TEST_DATABASE_URL`, PostgreSQL integration tests are skipped while unit tests still run.
 
 ## Testing Priorities
 

@@ -13,6 +13,7 @@ Status note:
   - model content uses strict schemas, provider-independent validation, one retry, and a five-round curated fallback; raw response and cost auditing remain deferred.
   - room creation now enforces the narrow MVP settings and name/code bounds, strict bounded JSON decoding, and lobby-only joins in both repositories; public-launch rate limiting remains deferred.
   - same-browser refresh validates the stored token through the room session endpoint; heartbeat/presence and cross-device transfer remain deferred.
+  - CI now gates formatting, vetting, backend/client tests, the production client build, and a PostgreSQL-backed full API lifecycle that uses only curated content.
 
 ## Phase 0 — Project Setup
 
@@ -199,9 +200,9 @@ Status note:
 - [ ] Unit tests for board hash generation.
 - [x] Unit tests for duplicate handling.
 - [x] Unit tests for host override.
-- [ ] Integration tests for REST API.
+- [x] Integration tests for the supported REST API lifecycle.
 - [ ] Integration tests for WebSocket events.
-- [ ] Integration tests with mocked LLM client.
+- [x] Integration tests with a deterministic non-network model client.
 - [x] Migration tests for atomic answer claims.
 - [x] PostgreSQL concurrency and scoreboard reload tests.
 
@@ -215,8 +216,8 @@ Status note:
 - [ ] Add local fake LLM mode.
 - [x] Add README examples.
 - [ ] Add API examples.
-- [ ] Add CI workflow.
-- [ ] Add linting.
+- [x] Add CI workflow.
+- [x] Add Go vet static analysis.
 
 ## Phase 14 — MVP Acceptance Criteria
 

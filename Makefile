@@ -16,7 +16,7 @@ CORS_ALLOWED_ORIGINS ?= http://localhost:5173
 GOOSE_VERSION := v3.27.2
 GOOSE := go run github.com/pressly/goose/v3/cmd/goose@$(GOOSE_VERSION)
 
-.PHONY: help bootstrap start dev postgres-up postgres-down postgres-logs postgres-reset migrate-up migrate-down backend client format check-format test-backend test-client build-client check verify
+.PHONY: help bootstrap start dev postgres-up postgres-down postgres-logs postgres-reset migrate-up migrate-down backend client format check-format vet-backend test-backend test-client build-client check verify
 
 help:
 	@printf '%s\n' \
@@ -35,6 +35,7 @@ help:
 		'  make client        Run the client only' \
 		'  make format        Format backend Go source' \
 		'  make check-format  Check backend Go formatting' \
+		'  make vet-backend   Run Go static analysis' \
 		'  make test-backend  Run backend tests' \
 		'  make test-client   Run client tests' \
 		'  make build-client  Type-check and build the client' \
@@ -90,12 +91,15 @@ check-format:
 test-backend:
 	cd $(BACKEND_DIR) && go test ./...
 
+vet-backend:
+	cd $(BACKEND_DIR) && go vet ./...
+
 test-client:
 	cd $(CLIENT_DIR) && npm run test
 
 build-client:
 	cd $(CLIENT_DIR) && npm run build
 
-check: check-format test-backend test-client build-client
+check: check-format vet-backend test-backend test-client build-client
 
 verify: check

@@ -154,7 +154,17 @@ Verification:
 make verify
 ```
 
-`make verify` checks Go formatting, runs backend and client tests, and type-checks/builds the client. Narrower targets such as `make test-backend`, `make test-client`, `make build-client`, and `make check-format` are also available.
+`make verify` matches the complete CI gate: it checks Go formatting and vetting, runs backend and client tests, and type-checks/builds the client. Set `TEST_DATABASE_URL` when running it to include the isolated PostgreSQL integration suite; without that variable, those tests skip. Narrower targets such as `make vet-backend`, `make test-backend`, `make test-client`, `make build-client`, and `make check-format` are also available.
+
+GitHub Actions runs separate backend, client, and PostgreSQL integration jobs on pushes and pull requests. The database job covers the complete two-round HTTP lifecycle—including secrecy, deadline rejection, reveal, host override, completion, and reload—using curated content, so verification never needs an OpenAI key or external model request.
+
+The required automated smoke gate stays at the API boundary to keep CI small and deterministic. Before an MVP release, run this manual browser check:
+
+1. Run `make start`, open `http://localhost:5173` in two separate browser sessions, and create a two-round room in the first.
+2. Join from the second session, start as host, and confirm both sessions show the same question and countdown without revealing the board.
+3. Submit from the player, wait for expiry, confirm further input is disabled/rejected, then reveal as host.
+4. Correct the player's result with the host override controls, advance, play and reveal round two, and confirm both sessions show the same final ranking.
+5. Refresh both sessions during the flow and confirm each restores its own validated identity and current room state.
 
 Without `OPENAI_API_KEY`, games use a five-question English curated bank and support the full 1–5 round MVP flow. With OpenAI enabled, question and board responses use strict JSON schemas and are validated independently of the provider. Invalid or failed generation is retried once, then the server selects the unused curated entry for that round. Only failure of both paths returns a temporary content-unavailable response.
 

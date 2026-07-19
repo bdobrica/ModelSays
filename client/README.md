@@ -325,7 +325,7 @@ npm run build
 npm run test
 ```
 
-Run `make verify` from the repository root to check Go formatting, backend and client tests, and the production client build together.
+Run `make verify` from the repository root to check Go formatting and vetting, backend and client tests, and the production client build together. GitHub Actions runs the client tests and build from the locked npm dependency tree on every push and pull request.
 
 ## MVP Definition
 

@@ -11,6 +11,7 @@ Status note:
 	- loading and error handling still exist as inline page states, not shared reusable components;
 	- the create-room flow currently fixes game mode to simultaneous instead of exposing a mode selector.
 	- the creation form and backend now share the MVP bounds of 1–5 rounds, a 15–120 second timer, and bounded names.
+	- CI runs the locked client test suite and production build alongside backend and PostgreSQL lifecycle gates.
 
 ## Phase 0 — Project Setup
 
