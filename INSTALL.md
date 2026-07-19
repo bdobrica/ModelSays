@@ -60,10 +60,10 @@ Use separate browser profiles, private windows, or devices so each participant h
 4. The host waits for everyone to appear, then selects **Start game**.
 5. Each participant submits one answer before the countdown expires. The answer board and round scoring stay hidden during this phase.
 6. At expiry—or earlier if desired—the host selects **Reveal round**.
-7. Everyone reviews the frozen board, matches, duplicate claims, and scores. The host can correct a disputed result with the override controls.
+7. Everyone reviews the frozen board, matches, duplicate claims, and scores. For deterministic misses, the host may see a private semantic suggestion and can accept it, choose another answer, or retain the miss.
 8. The host selects **Next round**. After the final reveal, advancing once more opens the ranked final scoreboard.
 
-Only the earliest accepted guess matching a board answer earns its points. A later canonical or alias match for the same answer is shown as a zero-point duplicate. Matching ignores capitalization, punctuation, and repeated whitespace, but it is not semantic; the host override is the correction mechanism.
+Only the earliest accepted guess matching a board answer earns its points. A later canonical or alias match for the same answer is shown as a zero-point duplicate. Automatic matching ignores capitalization, punctuation, and repeated whitespace. Optional judge suggestions are advisory, hidden until reveal, and never score without a host override.
 
 Refreshing the same browser restores its player session. Do not clear browser storage during a game. Cross-device session transfer is not currently supported.
 

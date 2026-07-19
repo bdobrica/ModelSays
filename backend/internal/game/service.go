@@ -30,6 +30,7 @@ var (
 	ErrUnauthorizedAdvance      = errors.New("only the host can advance to the next round")
 	ErrUnauthorizedOverride     = errors.New("only the host can override a match")
 	ErrUnauthorizedAudit        = errors.New("only the host can view provider audits")
+	ErrUnauthorizedJudgeReview  = errors.New("only the host can review judge suggestions")
 	ErrGameAlreadyStarted       = errors.New("game already started")
 	ErrGameAlreadyCompleted     = errors.New("game already completed")
 	ErrNoQuestionsAvailable     = errors.New("no questions available for this room")
@@ -109,6 +110,7 @@ type OverrideMatchInput struct {
 	GuessID                   string
 	PlayerToken               string
 	MatchedPredictionAnswerID *string
+	JudgeSuggestionID         string
 }
 
 type RoomService struct {
@@ -117,6 +119,7 @@ type RoomService struct {
 	fallbackClient  llm.ModelClient
 	clock           Clock
 	predictionModel string
+	judgeModel      string
 	modelPolicy     llm.Policy
 }
 
@@ -144,6 +147,8 @@ type GuessOverride struct {
 	MatchedPredictionAnswerID *string
 	ScoreEventID              string
 	CreatedAt                 time.Time
+	JudgeSuggestionID         string
+	ReviewDecision            string
 }
 
 type RoomRepository interface {
@@ -156,6 +161,8 @@ type RoomRepository interface {
 	AdvanceGame(ctx context.Context, code string, gameState models.Game, nextRound *models.Round) (models.Room, error)
 	OverrideGuess(ctx context.Context, code string, roundID string, override GuessOverride) (models.Room, error)
 	ListProviderAudits(ctx context.Context, code string) ([]models.ProviderCallAudit, error)
+	StoreJudgeEvaluation(ctx context.Context, suggestion models.JudgeSuggestion, audits []models.ProviderCallAudit) error
+	ListJudgeSuggestions(ctx context.Context, code string, roundID string) ([]models.JudgeSuggestion, error)
 }
 
 func NewRoomService(repository RoomRepository, modelClient llm.ModelClient) *RoomService {
@@ -176,7 +183,14 @@ func NewRoomServiceWithClock(repository RoomRepository, modelClient llm.ModelCli
 		fallbackClient:  llm.NewStaticModelClient(),
 		clock:           clock,
 		predictionModel: defaultPredictionModel,
+		judgeModel:      defaultPredictionModel,
 		modelPolicy:     llm.DefaultPolicy(),
+	}
+}
+
+func (service *RoomService) SetJudgeModel(model string) {
+	if model = strings.TrimSpace(model); model != "" {
+		service.judgeModel = model
 	}
 }
 
@@ -283,6 +297,28 @@ func (service *RoomService) GetProviderAudits(ctx context.Context, code string, 
 		return nil, ErrUnauthorizedAudit
 	}
 	return service.repository.ListProviderAudits(ctx, code)
+}
+
+func (service *RoomService) GetJudgeSuggestions(ctx context.Context, code string, roundID string, playerToken string) ([]models.JudgeSuggestion, error) {
+	code, err := normalizeRoomCode(code)
+	if err != nil {
+		return nil, err
+	}
+	room, err := service.repository.GetRoom(ctx, code)
+	if err != nil {
+		return nil, err
+	}
+	if !isHostToken(room.Players, strings.TrimSpace(playerToken)) {
+		return nil, ErrUnauthorizedJudgeReview
+	}
+	round, err := currentRound(room, strings.TrimSpace(roundID))
+	if err != nil {
+		return nil, err
+	}
+	if round.Status != models.RoundStatusRevealed {
+		return nil, ErrRoundNotRevealed
+	}
+	return service.repository.ListJudgeSuggestions(ctx, code, round.ID)
 }
 
 func (service *RoomService) JoinRoom(ctx context.Context, input JoinRoomInput) (models.Room, models.Player, error) {
@@ -406,7 +442,7 @@ func (service *RoomService) SubmitGuess(ctx context.Context, input SubmitGuessIn
 		return models.Room{}, fmt.Errorf("prediction board missing for round")
 	}
 
-	return service.repository.SubmitGuess(ctx, code, round.ID, GuessSubmission{
+	updated, err := service.repository.SubmitGuess(ctx, code, round.ID, GuessSubmission{
 		ID:                newID(),
 		PlayerID:          player.ID,
 		PlayerDisplayName: player.DisplayName,
@@ -414,6 +450,24 @@ func (service *RoomService) SubmitGuess(ctx context.Context, input SubmitGuessIn
 		CreatedAt:         now,
 		ScoreEventID:      newID(),
 	}, service.clock)
+	if err != nil {
+		return models.Room{}, err
+	}
+	submittedRound := updated.CurrentGame.CurrentRound
+	var submitted models.Guess
+	for _, guess := range submittedRound.Guesses {
+		if guess.PlayerID == player.ID {
+			submitted = guess
+			break
+		}
+	}
+	if submitted.ID == "" || submitted.MatchedPredictionAnswerID != nil {
+		return updated, nil
+	}
+	if err := service.evaluateSemanticMiss(ctx, updated, submitted); err != nil {
+		return models.Room{}, err
+	}
+	return updated, nil
 }
 
 func (service *RoomService) RevealRound(ctx context.Context, input RevealRoundInput) (models.Room, error) {
@@ -542,12 +596,176 @@ func (service *RoomService) OverrideMatch(ctx context.Context, input OverrideMat
 		}
 	}
 
+	suggestionID := strings.TrimSpace(input.JudgeSuggestionID)
+	decision := reviewDecision(input.MatchedPredictionAnswerID)
+	if suggestionID != "" {
+		suggestions, err := service.repository.ListJudgeSuggestions(ctx, code, round.ID)
+		if err != nil {
+			return models.Room{}, err
+		}
+		found := false
+		for _, suggestion := range suggestions {
+			if suggestion.ID != suggestionID || suggestion.GuessID != guessID {
+				continue
+			}
+			found = true
+			if sameOptionalID(suggestion.SuggestedPredictionAnswerID, input.MatchedPredictionAnswerID) {
+				if input.MatchedPredictionAnswerID == nil {
+					decision = "retained_miss"
+				} else {
+					decision = "accepted_suggestion"
+				}
+			}
+			break
+		}
+		if !found {
+			return models.Room{}, ErrGuessNotFound
+		}
+	}
+
 	return service.repository.OverrideGuess(ctx, code, round.ID, GuessOverride{
 		GuessID:                   guessID,
 		MatchedPredictionAnswerID: input.MatchedPredictionAnswerID,
 		ScoreEventID:              newID(),
 		CreatedAt:                 service.clock.Now(),
+		JudgeSuggestionID:         suggestionID,
+		ReviewDecision:            decision,
 	})
+}
+
+func sameOptionalID(left *string, right *string) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
+}
+
+func reviewDecision(answerID *string) string {
+	if answerID == nil {
+		return "retained_miss"
+	}
+	return "selected_answer"
+}
+
+func (service *RoomService) evaluateSemanticMiss(ctx context.Context, room models.Room, guess models.Guess) error {
+	round := room.CurrentGame.CurrentRound
+	priorAudits, err := service.repository.ListProviderAudits(ctx, room.Code)
+	if err != nil {
+		return err
+	}
+	priorCalls, priorCost := providerUsage(priorAudits)
+	now := service.clock.Now()
+	suggestion := models.JudgeSuggestion{
+		ID: newID(), RoomCode: room.Code, GameID: room.CurrentGame.ID, RoundID: round.ID, GuessID: guess.ID,
+		Model: service.judgeModel, PromptVersion: "judge-v1", Outcome: "unavailable", CreatedAt: now,
+		RationaleCategory: "unavailable", ConfidenceBand: "none",
+	}
+	var audit models.ProviderCallAudit
+	audits := make([]models.ProviderCallAudit, 0, service.modelPolicy.MaxAttempts)
+	if !service.modelPolicy.AllowsJudge(service.judgeModel) {
+		audit = service.newSkippedJudgeAudit(room, "model_not_allowed", now)
+		suggestion.Outcome = "unavailable"
+		return service.repository.StoreJudgeEvaluation(ctx, suggestion, []models.ProviderCallAudit{audit})
+	}
+	if priorCalls >= service.modelPolicy.MaxCallsPerGame || priorCost >= service.modelPolicy.MaxEstimatedCostUSD {
+		audit = service.newSkippedJudgeAudit(room, "budget_exhausted", now)
+		suggestion.Outcome = "budget_exhausted"
+		return service.repository.StoreJudgeEvaluation(ctx, suggestion, []models.ProviderCallAudit{audit})
+	}
+	judge, ok := service.modelClient.(llm.JudgeClient)
+	if !ok {
+		audit = service.newSkippedJudgeAudit(room, "provider_absent", now)
+		return service.repository.StoreJudgeEvaluation(ctx, suggestion, []models.ProviderCallAudit{audit})
+	}
+	var response *llm.JudgeGuessResponse
+	var callErr error
+	for attempt := 1; attempt <= service.modelPolicy.MaxAttempts; attempt++ {
+		callCtx, cancel := llm.WithTimeout(ctx, service.modelPolicy.Timeout)
+		started := service.clock.Now()
+		response, callErr = judge.JudgeGuess(callCtx, llm.JudgeGuessRequest{
+			Question: round.Question, Board: *round.Board, Guess: guess.RawAnswer,
+			JudgeModel: service.judgeModel, PromptVersion: "judge-v1",
+		})
+		cancel()
+		metadata := metadataJudge(response, callErr)
+		attemptAudits := []models.ProviderCallAudit{}
+		service.appendProviderAudit(&attemptAudits, room.Code, room.CurrentGame.ID, round.ID, "semantic_judging", "primary", attempt, started, metadata, callErr)
+		audit = attemptAudits[0]
+		if callErr == nil && validateJudgeResponse(response, round.Board) == nil {
+			break
+		}
+		if callErr == nil {
+			audit.Outcome = "invalid_output"
+			audit.ErrorCategory = "validation"
+		}
+		audits = append(audits, audit)
+		response = nil
+		if attempt < service.modelPolicy.MaxAttempts {
+			combinedAudits := append(append([]models.ProviderCallAudit(nil), priorAudits...), audits...)
+			currentCalls, currentCost := providerUsage(combinedAudits)
+			if currentCalls >= service.modelPolicy.MaxCallsPerGame || currentCost >= service.modelPolicy.MaxEstimatedCostUSD {
+				break
+			}
+		}
+	}
+	if response != nil {
+		audits = append(audits, audit)
+		suggestion.Model = response.Metadata.Model
+		suggestion.SuggestedPredictionAnswerID = response.SuggestedPredictionAnswerID
+		suggestion.Confidence = response.Confidence
+		suggestion.ConfidenceBand = confidenceBand(response.Confidence)
+		suggestion.RationaleCategory = response.RationaleCategory
+		if response.SuggestedPredictionAnswerID == nil {
+			suggestion.Outcome = "miss"
+		} else {
+			suggestion.Outcome = "suggestion"
+		}
+	} else {
+		suggestion.Outcome = audit.Outcome
+	}
+	return service.repository.StoreJudgeEvaluation(ctx, suggestion, audits)
+}
+
+func metadataJudge(response *llm.JudgeGuessResponse, err error) llm.CallMetadata {
+	if response != nil {
+		return response.Metadata
+	}
+	return llm.MetadataFromError(err)
+}
+
+func validateJudgeResponse(response *llm.JudgeGuessResponse, board *models.PredictionBoard) error {
+	if response == nil || response.Confidence < 0 || response.Confidence > 1 {
+		return ErrGeneratedContentInvalid
+	}
+	validRationale := map[string]bool{"synonym": true, "abbreviation": true, "paraphrase": true, "broader_or_narrower": true, "ambiguous": true, "unrelated": true}
+	if !validRationale[response.RationaleCategory] {
+		return ErrGeneratedContentInvalid
+	}
+	if response.SuggestedPredictionAnswerID != nil {
+		if _, ok := findPredictionAnswer(board, *response.SuggestedPredictionAnswerID); !ok {
+			return ErrGeneratedContentInvalid
+		}
+	}
+	return nil
+}
+
+func confidenceBand(confidence float64) string {
+	if confidence >= 0.85 {
+		return "high"
+	}
+	if confidence >= 0.60 {
+		return "medium"
+	}
+	return "low"
+}
+
+func (service *RoomService) newSkippedJudgeAudit(room models.Room, category string, now time.Time) models.ProviderCallAudit {
+	return models.ProviderCallAudit{
+		ID: newID(), RoomCode: room.Code, GameID: room.CurrentGame.ID, RoundID: room.CurrentGame.CurrentRound.ID,
+		Purpose: "semantic_judging", Model: service.judgeModel, PromptVersion: "judge-v1", Outcome: "skipped",
+		Path: "deterministic_fallback", ErrorCategory: category, RetentionClass: "provider_audit_30d",
+		StartedAt: now, CompletedAt: now,
+	}
 }
 
 func normalizeSettings(settings models.RoomSettings) models.RoomSettings {

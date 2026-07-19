@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 
 import {
   getRoom,
+  getJudgeSuggestions,
   nextRound,
   overrideMatch,
   recoverSession,
@@ -10,6 +11,7 @@ import {
   startGame,
   submitGuess,
   type Player,
+  type JudgeSuggestion,
   type Room,
 } from '../lib/api'
 import { clearSession, loadSession, saveSession } from '../lib/session'
@@ -30,6 +32,7 @@ export function RoomPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [guessAnswer, setGuessAnswer] = useState('')
   const [overrideSelections, setOverrideSelections] = useState<Record<string, string>>({})
+  const [judgeSuggestions, setJudgeSuggestions] = useState<JudgeSuggestion[]>([])
   const [now, setNow] = useState(() => Date.now())
   const requestSequence = useRef(0)
   const activeRequest = useRef<AbortController | null>(null)
@@ -131,6 +134,22 @@ export function RoomPage() {
   }, [currentRound?.id])
 
   useEffect(() => {
+    if (!isHost || !activePlayerToken || currentRound?.status !== 'revealed') {
+      setJudgeSuggestions([])
+      return
+    }
+    let cancelled = false
+    void getJudgeSuggestions(code, currentRound.id, activePlayerToken)
+      .then((response) => {
+        if (!cancelled) setJudgeSuggestions(response.suggestions)
+      })
+      .catch((error) => {
+        if (!cancelled) setErrorMessage(error instanceof Error ? error.message : 'Unable to load judge suggestions')
+      })
+    return () => { cancelled = true }
+  }, [activePlayerToken, code, currentRound?.id, currentRound?.status, isHost, room?.updatedAt])
+
+  useEffect(() => {
     if (isGameCompleted) return
     let timer: number | undefined
     let cancelled = false
@@ -206,11 +225,13 @@ export function RoomPage() {
   async function handleOverrideMatch(guessId: string) {
     if (!activePlayerToken || !currentRound) return setErrorMessage('Missing player session or round state')
     const selectedValue = overrideSelections[guessId] ?? ''
+    const suggestion = judgeSuggestions.find((item) => item.guessId === guessId)
     await mutateRoom(() => overrideMatch(code, {
       playerToken: activePlayerToken,
       roundId: currentRound.id,
       guessId,
       matchedPredictionAnswerId: selectedValue || null,
+      judgeSuggestionId: suggestion?.id,
     }))
   }
 
@@ -321,6 +342,15 @@ export function RoomPage() {
                     <em>{guess.scoreAwarded} pts</em>
                     {isHost && currentRound.board ? (
                       <>
+                        {judgeSuggestions.find((item) => item.guessId === guess.id && item.outcome === 'suggestion') ? (() => {
+                          const suggestion = judgeSuggestions.find((item) => item.guessId === guess.id)!
+                          const answer = currentRound.board?.answers.find((item) => item.id === suggestion.suggestedPredictionAnswerId)
+                          return (
+                            <span className="status-note">
+                              Judge suggests {answer?.canonicalAnswer ?? 'an answer'} ({suggestion.confidenceBand}, {Math.round(suggestion.confidence * 100)}%; {suggestion.rationaleCategory})
+                            </span>
+                          )
+                        })() : null}
                         <select aria-label={`Override ${guess.playerDisplayName}`} className="override-select" onChange={(event) => setOverrideSelections((current) => ({ ...current, [guess.id]: event.target.value }))} value={overrideSelections[guess.id] ?? guess.matchedPredictionAnswerId ?? ''}>
                           <option value="">Mark as miss</option>
                           {currentRound.board.answers.map((answer) => <option key={answer.id} value={answer.id}>{answer.rank}. {answer.canonicalAnswer}</option>)}

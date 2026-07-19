@@ -6,9 +6,12 @@ import (
 )
 
 func TestPolicyAllowlistAndDefaults(t *testing.T) {
-	policy := (Policy{AllowedPredictionModels: []string{"approved"}}).Normalize()
+	policy := (Policy{AllowedPredictionModels: []string{"approved"}, AllowedJudgeModels: []string{"judge"}}).Normalize()
 	if !policy.AllowsPrediction("approved") || policy.AllowsPrediction("expensive") {
 		t.Fatal("prediction allowlist did not enforce exact configured models")
+	}
+	if !policy.AllowsJudge("judge") || policy.AllowsJudge("unapproved") {
+		t.Fatal("judge allowlist did not enforce exact configured models")
 	}
 	if policy.Timeout <= 0 || policy.MaxAttempts != 2 || policy.MaxCallsPerGame <= 0 {
 		t.Fatalf("policy defaults were not applied: %#v", policy)

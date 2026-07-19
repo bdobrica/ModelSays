@@ -22,6 +22,7 @@ type Config struct {
 type DefaultModels struct {
 	Prediction string
 	Question   string
+	Judge      string
 }
 
 func Load() Config {
@@ -35,10 +36,12 @@ func Load() Config {
 		DefaultModels: DefaultModels{
 			Prediction: getEnv("DEFAULT_PREDICTION_MODEL", "gpt-4.1-mini"),
 			Question:   getEnv("DEFAULT_QUESTION_MODEL", "gpt-4.1-mini"),
+			Judge:      getEnv("DEFAULT_JUDGE_MODEL", "gpt-4.1-mini"),
 		},
 		ModelPolicy: llm.Policy{
 			AllowedQuestionModels:   splitCSV(getEnv("ALLOWED_QUESTION_MODELS", "gpt-4.1-mini")),
 			AllowedPredictionModels: splitCSV(getEnv("ALLOWED_PREDICTION_MODELS", "gpt-4.1-mini")),
+			AllowedJudgeModels:      splitCSV(getEnv("ALLOWED_JUDGE_MODELS", "gpt-4.1-mini")),
 			Timeout:                 time.Duration(getEnvInt("MODEL_TIMEOUT_SECONDS", int(defaultPolicy.Timeout/time.Second))) * time.Second,
 			MaxAttempts:             getEnvInt("MODEL_MAX_ATTEMPTS", defaultPolicy.MaxAttempts),
 			MaxCallsPerGame:         getEnvInt("MODEL_MAX_CALLS_PER_GAME", defaultPolicy.MaxCallsPerGame),

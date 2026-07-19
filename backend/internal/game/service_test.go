@@ -34,6 +34,29 @@ type costlyQuestionClient struct {
 	boardCalls int
 }
 
+type judgeModelClient struct {
+	fixedBoardModelClient
+	responses []*llm.JudgeGuessResponse
+	errors    []error
+	calls     int
+}
+
+func (client *judgeModelClient) JudgeGuess(ctx context.Context, _ llm.JudgeGuessRequest) (*llm.JudgeGuessResponse, error) {
+	index := client.calls
+	client.calls++
+	if index < len(client.errors) && client.errors[index] != nil {
+		if errors.Is(client.errors[index], context.DeadlineExceeded) {
+			<-ctx.Done()
+			return nil, ctx.Err()
+		}
+		return nil, client.errors[index]
+	}
+	if index < len(client.responses) {
+		return client.responses[index], nil
+	}
+	return nil, errors.New("no scripted judge response")
+}
+
 type timeoutModelClient struct{}
 
 func (timeoutModelClient) GenerateQuestions(ctx context.Context, _ llm.GenerateQuestionsRequest) (*llm.GenerateQuestionsResponse, error) {
@@ -142,6 +165,180 @@ func TestCreateRoomAndJoinRoom(t *testing.T) {
 	}
 	if len(joinedRoom.Players) != 2 {
 		t.Fatalf("expected two players after join, got %d", len(joinedRoom.Players))
+	}
+}
+
+func TestSemanticJudgeRunsOnlyForDeterministicMissesAndStaysAdvisory(t *testing.T) {
+	t.Parallel()
+	board := validGeneratedBoard()
+	client := &judgeModelClient{
+		fixedBoardModelClient: fixedBoardModelClient{board: board},
+		responses: []*llm.JudgeGuessResponse{{
+			Confidence: 0.91, RationaleCategory: "paraphrase",
+			Metadata: llm.CallMetadata{Provider: "paid", Model: "gpt-4.1-mini", PromptVersion: "judge-v1"},
+		}},
+	}
+	repository := NewInMemoryRoomRepository()
+	service := NewRoomService(repository, client)
+	room, host, err := service.CreateRoom(context.Background(), CreateRoomInput{RoomName: "Judge room", HostDisplayName: "Host"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, exactPlayer, _ := service.JoinRoom(context.Background(), JoinRoomInput{Code: room.Code, DisplayName: "Exact"})
+	_, semanticPlayer, _ := service.JoinRoom(context.Background(), JoinRoomInput{Code: room.Code, DisplayName: "Semantic"})
+	started, err := service.StartGame(context.Background(), StartGameInput{Code: room.Code, PlayerToken: host.Token})
+	if err != nil {
+		t.Fatal(err)
+	}
+	round := started.CurrentGame.CurrentRound
+	answerID := round.Board.Answers[0].ID
+	client.responses[0].SuggestedPredictionAnswerID = &answerID
+	if _, err := service.SubmitGuess(context.Background(), SubmitGuessInput{
+		Code: room.Code, RoundID: round.ID, PlayerToken: exactPlayer.Token, Answer: round.Board.Answers[0].CanonicalAnswer,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if client.calls != 0 {
+		t.Fatalf("judge calls after deterministic hit = %d, want 0", client.calls)
+	}
+	updated, err := service.SubmitGuess(context.Background(), SubmitGuessInput{
+		Code: room.Code, RoundID: round.ID, PlayerToken: semanticPlayer.Token, Answer: "a semantic equivalent",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client.calls != 1 {
+		t.Fatalf("judge calls = %d, want 1", client.calls)
+	}
+	for _, guess := range updated.CurrentGame.CurrentRound.Guesses {
+		if guess.PlayerID == semanticPlayer.ID && (guess.MatchedPredictionAnswerID != nil || guess.ScoreAwarded != 0) {
+			t.Fatalf("semantic suggestion changed authoritative guess: %#v", guess)
+		}
+	}
+	if _, err := service.GetJudgeSuggestions(context.Background(), room.Code, round.ID, host.Token); !errors.Is(err, ErrRoundNotRevealed) {
+		t.Fatalf("pre-reveal suggestions error = %v, want %v", err, ErrRoundNotRevealed)
+	}
+	if _, err := service.RevealRound(context.Background(), RevealRoundInput{Code: room.Code, RoundID: round.ID, PlayerToken: host.Token}); err != nil {
+		t.Fatal(err)
+	}
+	suggestions, err := service.GetJudgeSuggestions(context.Background(), room.Code, round.ID, host.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(suggestions) != 1 || suggestions[0].SuggestedPredictionAnswerID == nil || suggestions[0].ConfidenceBand != "high" {
+		t.Fatalf("unexpected suggestions: %#v", suggestions)
+	}
+}
+
+func TestSemanticJudgeInvalidOutputRetriesAndLeavesMiss(t *testing.T) {
+	t.Parallel()
+	board := validGeneratedBoard()
+	unknown := "not-on-board"
+	client := &judgeModelClient{
+		fixedBoardModelClient: fixedBoardModelClient{board: board},
+		responses: []*llm.JudgeGuessResponse{
+			{SuggestedPredictionAnswerID: &unknown, Confidence: 0.7, RationaleCategory: "synonym", Metadata: llm.CallMetadata{Provider: "paid", Model: "gpt-4.1-mini"}},
+			{Confidence: 0.2, RationaleCategory: "ambiguous", Metadata: llm.CallMetadata{Provider: "paid", Model: "gpt-4.1-mini"}},
+		},
+	}
+	repository := NewInMemoryRoomRepository()
+	service := NewRoomService(repository, client)
+	room, host, _ := service.CreateRoom(context.Background(), CreateRoomInput{RoomName: "Retry judge", HostDisplayName: "Host"})
+	_, player, _ := service.JoinRoom(context.Background(), JoinRoomInput{Code: room.Code, DisplayName: "Player"})
+	started, err := service.StartGame(context.Background(), StartGameInput{Code: room.Code, PlayerToken: host.Token})
+	if err != nil {
+		t.Fatal(err)
+	}
+	round := started.CurrentGame.CurrentRound
+	if _, err := service.SubmitGuess(context.Background(), SubmitGuessInput{Code: room.Code, RoundID: round.ID, PlayerToken: player.Token, Answer: "miss"}); err != nil {
+		t.Fatal(err)
+	}
+	if client.calls != 2 {
+		t.Fatalf("judge calls = %d, want 2", client.calls)
+	}
+	audits, _ := repository.ListProviderAudits(context.Background(), room.Code)
+	if audits[len(audits)-2].Outcome != "invalid_output" || audits[len(audits)-1].Outcome != "success" {
+		t.Fatalf("unexpected judge audit outcomes: %#v", audits[len(audits)-2:])
+	}
+}
+
+func TestConfidenceBandsUseDocumentedBoundaries(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		value float64
+		want  string
+	}{{0, "low"}, {0.599, "low"}, {0.60, "medium"}, {0.849, "medium"}, {0.85, "high"}, {1, "high"}} {
+		if got := confidenceBand(test.value); got != test.want {
+			t.Errorf("confidenceBand(%v) = %q, want %q", test.value, got, test.want)
+		}
+	}
+}
+
+func TestSemanticJudgeBudgetExhaustionSkipsProviderAndKeepsMiss(t *testing.T) {
+	t.Parallel()
+	client := &judgeModelClient{fixedBoardModelClient: fixedBoardModelClient{board: validGeneratedBoard()}}
+	repository := NewInMemoryRoomRepository()
+	service := NewRoomService(repository, client)
+	service.SetModelPolicy(llm.Policy{
+		AllowedQuestionModels: []string{"gpt-4.1-mini"}, AllowedPredictionModels: []string{"gpt-4.1-mini"},
+		AllowedJudgeModels: []string{"gpt-4.1-mini"}, MaxCallsPerGame: 1, MaxEstimatedCostUSD: 0.10, MaxAttempts: 1,
+	})
+	room, host, _ := service.CreateRoom(context.Background(), CreateRoomInput{RoomName: "Budget judge", HostDisplayName: "Host"})
+	_, player, _ := service.JoinRoom(context.Background(), JoinRoomInput{Code: room.Code, DisplayName: "Player"})
+	started, err := service.StartGame(context.Background(), StartGameInput{Code: room.Code, PlayerToken: host.Token})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository.audits[room.Code] = append(repository.audits[room.Code], models.ProviderCallAudit{
+		Provider: "paid", EstimatedCostUSD: 0.01,
+	})
+	round := started.CurrentGame.CurrentRound
+	if _, err := service.SubmitGuess(context.Background(), SubmitGuessInput{
+		Code: room.Code, RoundID: round.ID, PlayerToken: player.Token, Answer: "miss",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if client.calls != 0 {
+		t.Fatalf("judge calls = %d, want 0 after budget exhaustion", client.calls)
+	}
+	audits, _ := repository.ListProviderAudits(context.Background(), room.Code)
+	last := audits[len(audits)-1]
+	if last.Outcome != "skipped" || last.ErrorCategory != "budget_exhausted" {
+		t.Fatalf("unexpected budget audit: %#v", last)
+	}
+}
+
+func TestSemanticJudgeTimeoutIsAuditedAndKeepsMiss(t *testing.T) {
+	t.Parallel()
+	client := &judgeModelClient{
+		fixedBoardModelClient: fixedBoardModelClient{board: validGeneratedBoard()},
+		errors:                []error{context.DeadlineExceeded},
+	}
+	repository := NewInMemoryRoomRepository()
+	service := NewRoomService(repository, client)
+	policy := llm.DefaultPolicy()
+	policy.Timeout = time.Millisecond
+	policy.MaxAttempts = 1
+	service.SetModelPolicy(policy)
+	room, host, _ := service.CreateRoom(context.Background(), CreateRoomInput{RoomName: "Timeout judge", HostDisplayName: "Host"})
+	_, player, _ := service.JoinRoom(context.Background(), JoinRoomInput{Code: room.Code, DisplayName: "Player"})
+	started, err := service.StartGame(context.Background(), StartGameInput{Code: room.Code, PlayerToken: host.Token})
+	if err != nil {
+		t.Fatal(err)
+	}
+	round := started.CurrentGame.CurrentRound
+	updated, err := service.SubmitGuess(context.Background(), SubmitGuessInput{
+		Code: room.Code, RoundID: round.ID, PlayerToken: player.Token, Answer: "miss",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.CurrentGame.CurrentRound.Guesses[0].ScoreAwarded != 0 {
+		t.Fatal("timeout changed deterministic miss")
+	}
+	audits, _ := repository.ListProviderAudits(context.Background(), room.Code)
+	if last := audits[len(audits)-1]; last.Outcome != "timeout" || last.ErrorCategory != "timeout" {
+		t.Fatalf("unexpected timeout audit: %#v", last)
 	}
 }
 

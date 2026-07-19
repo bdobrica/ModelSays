@@ -19,7 +19,7 @@ import (
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{}))
 	cfg := config.Load()
-	if !cfg.ModelPolicy.AllowsQuestion(cfg.DefaultModels.Question) || !cfg.ModelPolicy.AllowsPrediction(cfg.DefaultModels.Prediction) {
+	if !cfg.ModelPolicy.AllowsQuestion(cfg.DefaultModels.Question) || !cfg.ModelPolicy.AllowsPrediction(cfg.DefaultModels.Prediction) || !cfg.ModelPolicy.AllowsJudge(cfg.DefaultModels.Judge) {
 		logger.Error("default model is not present in its server allowlist")
 		os.Exit(1)
 	}
@@ -28,6 +28,7 @@ func main() {
 		modelClient = llm.NewOpenAIModelClient(cfg.OpenAIAPIKey, llm.ClientDefaults{
 			QuestionModel:   cfg.DefaultModels.Question,
 			PredictionModel: cfg.DefaultModels.Prediction,
+			JudgeModel:      cfg.DefaultModels.Judge,
 		})
 		logger.Info("using openai model client")
 	} else {
@@ -51,6 +52,7 @@ func main() {
 
 	roomService := game.NewRoomService(roomRepository, modelClient)
 	roomService.SetPredictionModel(cfg.DefaultModels.Prediction)
+	roomService.SetJudgeModel(cfg.DefaultModels.Judge)
 	roomService.SetModelPolicy(cfg.ModelPolicy)
 	server := httpapi.NewServer(cfg, logger, roomService)
 

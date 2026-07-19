@@ -112,6 +112,24 @@ type ProviderCallAudit struct {
 	CompletedAt      time.Time `json:"completedAt"`
 }
 
+type JudgeSuggestion struct {
+	ID                          string     `json:"id"`
+	RoomCode                    string     `json:"roomCode"`
+	GameID                      string     `json:"gameId"`
+	RoundID                     string     `json:"roundId"`
+	GuessID                     string     `json:"guessId"`
+	SuggestedPredictionAnswerID *string    `json:"suggestedPredictionAnswerId,omitempty"`
+	Confidence                  float64    `json:"confidence"`
+	ConfidenceBand              string     `json:"confidenceBand"`
+	RationaleCategory           string     `json:"rationaleCategory"`
+	Model                       string     `json:"model"`
+	PromptVersion               string     `json:"promptVersion"`
+	Outcome                     string     `json:"outcome"`
+	CreatedAt                   time.Time  `json:"createdAt"`
+	ReviewedAt                  *time.Time `json:"reviewedAt,omitempty"`
+	ReviewDecision              string     `json:"reviewDecision,omitempty"`
+}
+
 type Game struct {
 	ID                string            `json:"id"`
 	Status            GameStatus        `json:"status"`

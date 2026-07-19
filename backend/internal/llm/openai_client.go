@@ -67,6 +67,12 @@ type generatedBoardPayload struct {
 	} `json:"answers"`
 }
 
+type judgeGuessPayload struct {
+	AnswerID          *string `json:"answerId"`
+	Confidence        float64 `json:"confidence"`
+	RationaleCategory string  `json:"rationaleCategory"`
+}
+
 func NewOpenAIModelClient(apiKey string, defaults ClientDefaults) *OpenAIModelClient {
 	return &OpenAIModelClient{
 		apiKey:   strings.TrimSpace(apiKey),
@@ -160,6 +166,49 @@ func (client *OpenAIModelClient) GenerateBoard(ctx context.Context, req Generate
 	}
 
 	return &GenerateBoardResponse{Board: board, Metadata: metadata}, nil
+}
+
+func (client *OpenAIModelClient) JudgeGuess(ctx context.Context, req JudgeGuessRequest) (*JudgeGuessResponse, error) {
+	model := defaultString(strings.TrimSpace(req.JudgeModel), client.defaults.JudgeModel)
+	if model == "" {
+		model = "gpt-4.1-mini"
+	}
+	type answerInput struct {
+		ID      string   `json:"id"`
+		Answer  string   `json:"answer"`
+		Aliases []string `json:"aliases"`
+	}
+	answers := make([]answerInput, 0, len(req.Board.Answers))
+	answerIDs := make([]string, 0, len(req.Board.Answers))
+	for _, answer := range req.Board.Answers {
+		answers = append(answers, answerInput{ID: answer.ID, Answer: answer.CanonicalAnswer, Aliases: answer.Aliases})
+		answerIDs = append(answerIDs, answer.ID)
+	}
+	input, err := json.Marshal(map[string]any{
+		"question": req.Question.Text,
+		"answers":  answers,
+		"guess":    req.Guess,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("marshal judge input: %w", err)
+	}
+	promptVersion := defaultString(req.PromptVersion, "judge-v1")
+	prompt := "Decide whether the submitted guess is semantically equivalent to exactly one frozen-board answer. " +
+		"Return null when it is a miss or ambiguous. Use only the supplied IDs. Input: " + string(input)
+	body, metadata, err := client.completeJSON(ctx, model, prompt, promptVersion, judgeJSONSchema(answerIDs))
+	if err != nil {
+		return nil, err
+	}
+	var payload judgeGuessPayload
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, fmt.Errorf("decode judge payload: %w", err)
+	}
+	return &JudgeGuessResponse{
+		SuggestedPredictionAnswerID: payload.AnswerID,
+		Confidence:                  payload.Confidence,
+		RationaleCategory:           strings.TrimSpace(payload.RationaleCategory),
+		Metadata:                    metadata,
+	}, nil
 }
 
 func (client *OpenAIModelClient) completeJSON(ctx context.Context, model string, prompt string, promptVersion string, schema map[string]any) ([]byte, CallMetadata, error) {
@@ -272,6 +321,28 @@ func boardJSONSchema() map[string]any {
 			"modelName":     map[string]any{"type": "string"},
 			"promptVersion": map[string]any{"type": "string"},
 			"answers":       map[string]any{"type": "array", "minItems": 5, "maxItems": 5, "items": answer},
+		},
+	}
+}
+
+func judgeJSONSchema(answerIDs []string) map[string]any {
+	enum := make([]any, 0, len(answerIDs))
+	for _, id := range answerIDs {
+		enum = append(enum, id)
+	}
+	return map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"required":             []string{"answerId", "confidence", "rationaleCategory"},
+		"properties": map[string]any{
+			"answerId": map[string]any{
+				"anyOf": []any{map[string]any{"type": "string", "enum": enum}, map[string]any{"type": "null"}},
+			},
+			"confidence": map[string]any{"type": "number", "minimum": 0, "maximum": 1},
+			"rationaleCategory": map[string]any{
+				"type": "string",
+				"enum": []string{"synonym", "abbreviation", "paraphrase", "broader_or_narrower", "ambiguous", "unrelated"},
+			},
 		},
 	}
 }

@@ -17,6 +17,7 @@ vi.mock('../lib/api', async () => {
     revealRound: vi.fn(),
     nextRound: vi.fn(),
     overrideMatch: vi.fn(),
+    getJudgeSuggestions: vi.fn(),
   }
 })
 
@@ -122,6 +123,7 @@ function renderRoom(code = 'abc234') {
 beforeEach(() => {
   window.localStorage.clear()
   vi.resetAllMocks()
+  vi.mocked(api.getJudgeSuggestions).mockResolvedValue({ suggestions: [] })
 })
 
 afterEach(() => {
@@ -147,6 +149,17 @@ describe('RoomPage', () => {
       return { room: current }
     })
     vi.mocked(api.overrideMatch).mockResolvedValue({ room: current })
+    vi.mocked(api.getJudgeSuggestions).mockResolvedValue({ suggestions: [{
+      id: 'suggestion-1',
+      guessId: 'guess-1',
+      suggestedPredictionAnswerId: 'answer-1',
+      confidence: 0.91,
+      confidenceBand: 'high',
+      rationaleCategory: 'paraphrase',
+      model: 'gpt-4.1-mini',
+      promptVersion: 'judge-v1',
+      outcome: 'suggestion',
+    }] })
     vi.mocked(api.nextRound).mockImplementation(async () => {
       current = roomState('completed', true)
       return { room: current }
@@ -164,8 +177,10 @@ describe('RoomPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Reveal round' }))
     expect(await screen.findByText('Answers and awarded scores are now revealed.')).toBeInTheDocument()
+    expect(await screen.findByText(/Judge suggests Apple \(high, 91%; paraphrase\)/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Apply override' }))
     await waitFor(() => expect(api.overrideMatch).toHaveBeenCalled())
+    expect(api.overrideMatch).toHaveBeenCalledWith('ABC234', expect.objectContaining({ judgeSuggestionId: 'suggestion-1' }))
     fireEvent.click(screen.getByRole('button', { name: 'Next round' }))
 
     expect(await screen.findByText('Host — tied winner')).toBeInTheDocument()

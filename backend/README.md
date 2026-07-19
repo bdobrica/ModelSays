@@ -54,7 +54,7 @@ The frontend should not be trusted for game-state decisions.
 
 ## Supported MVP
 
-The backend supports simultaneous English games with 1–5 rounds, 15–120 second answer windows, curated offline content or validated and audited OpenAI generation, PostgreSQL persistence, deterministic canonical/alias matching, first-claim duplicate scoring, phase-aware response secrecy, host reveal/override/advance controls, and room-scoped same-browser session recovery. Provider configuration, privacy, and operations are documented in [`docs/provider-operations.md`](../docs/provider-operations.md).
+The backend supports simultaneous English games with 1–5 rounds, 15–120 second answer windows, curated offline content or validated and audited OpenAI generation, PostgreSQL persistence, deterministic canonical/alias scoring, optional advisory semantic judging for misses, first-claim duplicate scoring, phase-aware response secrecy, host reveal/review/override/advance controls, and room-scoped same-browser session recovery. Provider configuration, privacy, and operations are documented in [`docs/provider-operations.md`](../docs/provider-operations.md).
 
 The PostgreSQL lifecycle gate runs a host plus two players through two curated rounds and covers shared board identity, session recovery during answering and reveal, equivalent guesses, deadline rejection, override, completion, and score reload after the repository/service/server are rebuilt.
 
@@ -346,6 +346,8 @@ Host-only endpoints:
 - `POST /api/rooms/{code}/settings`
 - `POST /api/rooms/{code}/next-round`
 - `POST /api/rooms/{code}/override-match`
+- `GET /api/rooms/{code}/rounds/{roundId}/judge-suggestions` (host header, revealed rounds only)
+- `GET /api/rooms/{code}/provider-audits` (host header)
 - `POST /api/rooms/{code}/end`
 
 ### WebSocket Events
@@ -485,14 +487,13 @@ Examples:
 
 Board generation fails validation when one normalized canonical answer or alias belongs to multiple board answers. This prevents answer ordering from silently deciding an ambiguous match.
 
-Semantic judge-model matching is deferred until after the deterministic MVP. A future judge response may include:
+An optional semantic judge runs only after a guess is authoritatively stored as a deterministic miss. Its strict `judge-v1` response includes:
 
-- matched answer id or null;
-- confidence;
-- short hidden rationale;
-- whether host review is recommended.
+- one frozen-board answer ID or null;
+- confidence from 0 to 1, classified as low (`<0.60`), medium (`0.60–0.849…`), or high (`>=0.85`);
+- one bounded rationale category.
 
-The current correction mechanism is the post-reveal host override. It can turn a hit into a miss, a miss into a hit, or select a different board answer; an override cannot create a second scoring claim for an answer.
+Suggestions and their provider audits are stored separately from guesses and score events. They are absent from every room projection and available only to the authenticated host after reveal through `GET /api/rooms/{code}/rounds/{roundId}/judge-suggestions`. Even a high-confidence suggestion is advisory: the host must accept it, select another frozen answer, or retain the miss through the existing override endpoint. An override cannot create a second scoring claim for an answer. Timeout, invalid output, exhausted budget, and missing-provider paths leave the deterministic miss unchanged.
 
 Submission scoring is authoritative inside the repository transaction. The transaction locks the round, resolves the match against its frozen board, and checks existing positive-scoring claims before inserting the guess and score event together. Only the earliest transaction to commit a claim receives the answer score; later equivalent guesses remain visible as duplicates and score zero. Host overrides use the same locked claim rule and append an auditable score event when they change a score.
 

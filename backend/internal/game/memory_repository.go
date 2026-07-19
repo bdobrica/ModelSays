@@ -10,13 +10,17 @@ import (
 )
 
 type InMemoryRoomRepository struct {
-	mu     sync.RWMutex
-	rooms  map[string]*models.Room
-	audits map[string][]models.ProviderCallAudit
+	mu          sync.RWMutex
+	rooms       map[string]*models.Room
+	audits      map[string][]models.ProviderCallAudit
+	suggestions map[string][]models.JudgeSuggestion
 }
 
 func NewInMemoryRoomRepository() *InMemoryRoomRepository {
-	return &InMemoryRoomRepository{rooms: make(map[string]*models.Room), audits: make(map[string][]models.ProviderCallAudit)}
+	return &InMemoryRoomRepository{
+		rooms: make(map[string]*models.Room), audits: make(map[string][]models.ProviderCallAudit),
+		suggestions: make(map[string][]models.JudgeSuggestion),
+	}
 }
 
 func (repository *InMemoryRoomRepository) CreateRoom(_ context.Context, room models.Room) error {
@@ -182,6 +186,32 @@ func (repository *InMemoryRoomRepository) ListProviderAudits(_ context.Context, 
 	return append([]models.ProviderCallAudit(nil), repository.audits[code]...), nil
 }
 
+func (repository *InMemoryRoomRepository) StoreJudgeEvaluation(_ context.Context, suggestion models.JudgeSuggestion, audits []models.ProviderCallAudit) error {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	if _, ok := repository.rooms[suggestion.RoomCode]; !ok {
+		return ErrRoomNotFound
+	}
+	repository.suggestions[suggestion.RoomCode] = append(repository.suggestions[suggestion.RoomCode], suggestion)
+	repository.audits[suggestion.RoomCode] = append(repository.audits[suggestion.RoomCode], audits...)
+	return nil
+}
+
+func (repository *InMemoryRoomRepository) ListJudgeSuggestions(_ context.Context, code string, roundID string) ([]models.JudgeSuggestion, error) {
+	repository.mu.RLock()
+	defer repository.mu.RUnlock()
+	if _, ok := repository.rooms[code]; !ok {
+		return nil, ErrRoomNotFound
+	}
+	result := make([]models.JudgeSuggestion, 0)
+	for _, suggestion := range repository.suggestions[code] {
+		if suggestion.RoundID == roundID {
+			result = append(result, suggestion)
+		}
+	}
+	return result, nil
+}
+
 func (repository *InMemoryRoomRepository) OverrideGuess(_ context.Context, code string, roundID string, override GuessOverride) (models.Room, error) {
 	repository.mu.Lock()
 	defer repository.mu.Unlock()
@@ -211,6 +241,17 @@ func (repository *InMemoryRoomRepository) OverrideGuess(_ context.Context, code 
 		for index := range room.CurrentGame.Scoreboard {
 			if room.CurrentGame.Scoreboard[index].PlayerID == guess.PlayerID {
 				room.CurrentGame.Scoreboard[index].Score += delta
+				break
+			}
+		}
+	}
+	if override.JudgeSuggestionID != "" {
+		for index := range repository.suggestions[code] {
+			suggestion := &repository.suggestions[code][index]
+			if suggestion.ID == override.JudgeSuggestionID && suggestion.GuessID == override.GuessID {
+				reviewedAt := override.CreatedAt
+				suggestion.ReviewedAt = &reviewedAt
+				suggestion.ReviewDecision = override.ReviewDecision
 				break
 			}
 		}

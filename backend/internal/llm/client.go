@@ -32,12 +32,32 @@ type GenerateBoardResponse struct {
 	Metadata CallMetadata
 }
 
+type JudgeGuessRequest struct {
+	Question      models.Question
+	Board         models.PredictionBoard
+	Guess         string
+	JudgeModel    string
+	PromptVersion string
+}
+
+type JudgeGuessResponse struct {
+	SuggestedPredictionAnswerID *string
+	Confidence                  float64
+	RationaleCategory           string
+	Metadata                    CallMetadata
+}
+
 type ClientDefaults struct {
 	QuestionModel   string
 	PredictionModel string
+	JudgeModel      string
 }
 
 type ModelClient interface {
 	GenerateQuestions(ctx context.Context, req GenerateQuestionsRequest) (*GenerateQuestionsResponse, error)
 	GenerateBoard(ctx context.Context, req GenerateBoardRequest) (*GenerateBoardResponse, error)
+}
+
+type JudgeClient interface {
+	JudgeGuess(ctx context.Context, req JudgeGuessRequest) (*JudgeGuessResponse, error)
 }

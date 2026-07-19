@@ -14,6 +14,7 @@ var ErrBudgetExhausted = errors.New("provider budget exhausted")
 type Policy struct {
 	AllowedQuestionModels   []string
 	AllowedPredictionModels []string
+	AllowedJudgeModels      []string
 	Timeout                 time.Duration
 	MaxAttempts             int
 	MaxCallsPerGame         int
@@ -26,6 +27,7 @@ func DefaultPolicy() Policy {
 	return Policy{
 		AllowedQuestionModels:   []string{"gpt-4.1-mini"},
 		AllowedPredictionModels: []string{"gpt-4.1-mini"},
+		AllowedJudgeModels:      []string{"gpt-4.1-mini"},
 		Timeout:                 10 * time.Second,
 		MaxAttempts:             2,
 		MaxCallsPerGame:         20,
@@ -60,6 +62,10 @@ func (policy Policy) AllowsQuestion(model string) bool {
 
 func (policy Policy) AllowsPrediction(model string) bool {
 	return containsModel(policy.AllowedPredictionModels, model)
+}
+
+func (policy Policy) AllowsJudge(model string) bool {
+	return containsModel(policy.AllowedJudgeModels, model)
 }
 
 func containsModel(allowed []string, model string) bool {

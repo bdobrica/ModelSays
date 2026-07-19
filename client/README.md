@@ -10,7 +10,7 @@ The playable client uses one request at a time with sequenced polling, refetches
 
 ## Supported MVP
 
-The client supports the complete simultaneous game path on one room route: create/join, lobby polling, host start, a server-deadline countdown, one locked answer, expiry state, reveal and host override, next round, final ranked winners/ties, and server-validated same-browser refresh recovery. The layout collapses to one column below 900 px for phone-sized player views.
+The client supports the complete simultaneous game path on one room route: create/join, lobby polling, host start, a server-deadline countdown, one locked answer, expiry state, reveal and host override, private post-reveal semantic suggestions for the host, next round, final ranked winners/ties, and server-validated same-browser refresh recovery. The layout collapses to one column below 900 px for phone-sized player views.
 
 The room-flow component suite covers host and player states, expiry, stale polling responses, reveal/override, final ties, and session recovery. The PostgreSQL lifecycle gate separately exercises one host and two player identities across the persisted API flow.
 
@@ -299,7 +299,8 @@ The UI should make it clear that:
 - the board is AI-generated;
 - the game is about guessing the model;
 - MVP matching is exact after case, punctuation, and whitespace normalization;
-- the host can correct disputed matches after reveal.
+- the host can review advisory semantic suggestions and correct disputed matches after reveal;
+- no model suggestion changes a score until the host explicitly applies an override.
 
 ### Copy Ideas
 

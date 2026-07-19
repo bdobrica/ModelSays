@@ -168,6 +168,60 @@ func TestProviderAuditsRequireHostHeaderAndStayOutOfRoomProjection(t *testing.T)
 	}
 }
 
+func TestJudgeSuggestionsAreSecretUntilRevealAndHostOnly(t *testing.T) {
+	service := game.NewInMemoryRoomService()
+	room, host, err := service.CreateRoom(context.Background(), game.CreateRoomInput{RoomName: "Private judge", HostDisplayName: "Host"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, player, _ := service.JoinRoom(context.Background(), game.JoinRoomInput{Code: room.Code, DisplayName: "Player"})
+	started, err := service.StartGame(context.Background(), game.StartGameInput{Code: room.Code, PlayerToken: host.Token})
+	if err != nil {
+		t.Fatal(err)
+	}
+	roundID := started.CurrentGame.CurrentRound.ID
+	if _, err := service.SubmitGuess(context.Background(), game.SubmitGuessInput{
+		Code: room.Code, RoundID: roundID, PlayerToken: player.Token, Answer: "definitely not on the board",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(config.Config{}, slog.New(slog.NewTextHandler(io.Discard, nil)), service)
+	public := performRoomRequest(t, server, http.MethodGet, "/api/rooms/"+room.Code, "")
+	encoded, _ := json.Marshal(public)
+	if strings.Contains(string(encoded), "suggestion") || strings.Contains(string(encoded), "confidence") {
+		t.Fatalf("answering projection leaked judge data: %s", encoded)
+	}
+	path := fmt.Sprintf("/api/rooms/%s/rounds/%s/judge-suggestions", room.Code, roundID)
+	for name, token := range map[string]string{"missing": "", "player": player.Token} {
+		t.Run(name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, path, nil)
+			request.Header.Set("X-Player-Token", token)
+			response := httptest.NewRecorder()
+			server.Handler().ServeHTTP(response, request)
+			if response.Code != http.StatusForbidden {
+				t.Fatalf("status = %d, want 403", response.Code)
+			}
+		})
+	}
+	request := httptest.NewRequest(http.MethodGet, path, nil)
+	request.Header.Set("X-Player-Token", host.Token)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusConflict {
+		t.Fatalf("pre-reveal host status = %d, want 409", response.Code)
+	}
+	if _, err := service.RevealRound(context.Background(), game.RevealRoundInput{Code: room.Code, RoundID: roundID, PlayerToken: host.Token}); err != nil {
+		t.Fatal(err)
+	}
+	request = httptest.NewRequest(http.MethodGet, path, nil)
+	request.Header.Set("X-Player-Token", host.Token)
+	response = httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"outcome":"miss"`) {
+		t.Fatalf("revealed host response = %d %s", response.Code, response.Body.String())
+	}
+}
+
 func TestExpiredSubmissionReturnsStableConflictResponse(t *testing.T) {
 	t.Parallel()
 

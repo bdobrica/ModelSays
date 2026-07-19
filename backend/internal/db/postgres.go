@@ -95,6 +95,64 @@ func insertProviderAudits(ctx context.Context, executor auditExecer, audits []mo
 	return nil
 }
 
+func (repository *PostgresRoomRepository) StoreJudgeEvaluation(ctx context.Context, suggestion models.JudgeSuggestion, audits []models.ProviderCallAudit) error {
+	tx, err := repository.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin store judge evaluation tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	if err := insertProviderAudits(ctx, tx, audits); err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `
+		INSERT INTO judge_suggestions (
+			id, room_code, game_id, round_id, guess_id, suggested_prediction_answer_id,
+			confidence, confidence_band, rationale_category, model_name, prompt_version,
+			outcome, created_at, reviewed_at, review_decision
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+	`, suggestion.ID, suggestion.RoomCode, suggestion.GameID, suggestion.RoundID, suggestion.GuessID,
+		suggestion.SuggestedPredictionAnswerID, suggestion.Confidence, suggestion.ConfidenceBand,
+		suggestion.RationaleCategory, suggestion.Model, suggestion.PromptVersion, suggestion.Outcome,
+		suggestion.CreatedAt, suggestion.ReviewedAt, suggestion.ReviewDecision)
+	if err != nil {
+		return fmt.Errorf("insert judge suggestion: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit judge evaluation: %w", err)
+	}
+	return nil
+}
+
+func (repository *PostgresRoomRepository) ListJudgeSuggestions(ctx context.Context, code string, roundID string) ([]models.JudgeSuggestion, error) {
+	rows, err := repository.pool.Query(ctx, `
+		SELECT id, room_code, game_id, round_id, guess_id, suggested_prediction_answer_id,
+		       confidence, confidence_band, rationale_category, model_name, prompt_version,
+		       outcome, created_at, reviewed_at, review_decision
+		FROM judge_suggestions
+		WHERE room_code = $1 AND round_id = $2
+		ORDER BY created_at, id
+	`, code, roundID)
+	if err != nil {
+		return nil, fmt.Errorf("list judge suggestions: %w", err)
+	}
+	defer rows.Close()
+	result := make([]models.JudgeSuggestion, 0)
+	for rows.Next() {
+		var suggestion models.JudgeSuggestion
+		if err := rows.Scan(
+			&suggestion.ID, &suggestion.RoomCode, &suggestion.GameID, &suggestion.RoundID,
+			&suggestion.GuessID, &suggestion.SuggestedPredictionAnswerID, &suggestion.Confidence,
+			&suggestion.ConfidenceBand, &suggestion.RationaleCategory, &suggestion.Model,
+			&suggestion.PromptVersion, &suggestion.Outcome, &suggestion.CreatedAt,
+			&suggestion.ReviewedAt, &suggestion.ReviewDecision,
+		); err != nil {
+			return nil, fmt.Errorf("scan judge suggestion: %w", err)
+		}
+		result = append(result, suggestion)
+	}
+	return result, rows.Err()
+}
+
 func (repository *PostgresRoomRepository) CreateRoom(ctx context.Context, room models.Room) error {
 	settingsJSON, err := json.Marshal(room.Settings)
 	if err != nil {
@@ -552,6 +610,19 @@ func (repository *PostgresRoomRepository) OverrideGuess(ctx context.Context, cod
 		`, override.ScoreEventID, gameID, roundID, guess.PlayerID, delta, "host_override_match", override.CreatedAt)
 		if err != nil {
 			return models.Room{}, fmt.Errorf("insert override score event: %w", err)
+		}
+	}
+	if override.JudgeSuggestionID != "" {
+		commandTag, err := tx.Exec(ctx, `
+			UPDATE judge_suggestions
+			SET reviewed_at = $4, review_decision = $5
+			WHERE id = $1 AND room_code = $2 AND guess_id = $3
+		`, override.JudgeSuggestionID, code, override.GuessID, override.CreatedAt, override.ReviewDecision)
+		if err != nil {
+			return models.Room{}, fmt.Errorf("mark judge suggestion reviewed: %w", err)
+		}
+		if commandTag.RowsAffected() == 0 {
+			return models.Room{}, game.ErrGuessNotFound
 		}
 	}
 

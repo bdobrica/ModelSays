@@ -18,7 +18,7 @@ For each round:
 1. A question is shown to all players.
 2. Before players answer, an AI model generates a hidden answer board.
 3. Players submit their guesses.
-4. The server matches normalized guesses exactly to canonical answers or curated aliases.
+4. The server scores normalized canonical/alias matches deterministically and may privately ask an optional judge for suggestions on misses.
 5. The board is revealed.
 6. Points are awarded.
 7. The next round begins.
@@ -177,7 +177,7 @@ The required automated smoke gate stays at the API boundary to keep CI small and
 
 Without `OPENAI_API_KEY`, games use a five-question English curated bank and support the full 1–5 round MVP flow. With OpenAI enabled, question and board responses use strict JSON schemas and are validated independently of the provider. Invalid or failed generation is retried once, then the server selects the unused curated entry for that round. Only failure of both paths returns a temporary content-unavailable response.
 
-Provider calls use server-owned model allowlists, a 10-second timeout, two-attempt retry ceiling, and per-game call/cost budgets. Every generated question and board call—including zero-cost curated fallback—is recorded in a private room audit; raw response capture is disabled by default. See [`docs/provider-operations.md`](docs/provider-operations.md) for configuration, privacy, host audit access, retention, and rollback.
+Provider calls use server-owned model allowlists, a 10-second timeout, two-attempt retry ceiling, and shared per-game call/cost budgets. Every generated question, board, and semantic-judge call—including zero-cost curated behavior—is recorded in a private room audit; raw response capture is disabled by default. A judge only evaluates deterministic misses, never changes a score, and exposes its bounded suggestion to the host only after reveal. See [`docs/provider-operations.md`](docs/provider-operations.md) for configuration, privacy, host review/audit access, retention, and rollback.
 
 The supported MVP room contract is intentionally narrow: simultaneous mode, 1–5 rounds, a 15–120 second answer timer, English (`en`), and the server-configured `DEFAULT_PREDICTION_MODEL`. Room names are 3–48 Unicode characters and display names are 2–24; control characters are rejected. Room codes are six characters from the displayed invite alphabet. New players may join only while the room is in the lobby; attempting to reuse an invite after start returns a conflict response. JSON mutation requests are limited to 16 KiB and reject unknown fields, trailing values, and malformed input. The browser validates its stored player token with the server after refresh and offers a clear-session action.
 
@@ -257,7 +257,7 @@ The repeatable MVP playtest gate uses a host and two player identities across tw
 ## Known Limitations
 
 - Room changes arrive by three-second polling rather than WebSockets or SSE.
-- Matching is deterministic, not semantic; the host resolves reasonable unlisted equivalents after reveal.
+- Automatic scoring remains deterministic. Optional semantic suggestions still require an explicit post-reveal host decision.
 - Expiry closes answering, but reveal and round advancement remain manual host actions.
 - Reconnect is limited to the same browser’s stored room token; there is no presence heartbeat or cross-device transfer.
 - Only simultaneous English games are supported; teams, sequential play, play-again, and shareable results are deferred.

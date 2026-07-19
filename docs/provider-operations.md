@@ -1,6 +1,6 @@
 # Model provider operations and privacy
 
-Provider calls are governed by server-owned settings. A room cannot select a model outside `ALLOWED_PREDICTION_MODELS`. Calls have a 10-second default timeout, generation is attempted at most twice, and a game is bounded to 20 paid calls and an estimated USD 0.10. When the paid path is unavailable or its call/cost budget is consumed, curated generation remains available and is recorded as `curated_fallback` with zero provider cost.
+Provider calls are governed by server-owned settings. A room cannot select a model outside the prediction, question, and judge allowlists. Calls have a 10-second default timeout, each operation is attempted at most twice, and generation plus semantic judging share a game-wide bound of 20 paid calls and an estimated USD 0.10. When paid generation is unavailable, curated generation remains available; when judging is unavailable or over budget, the deterministic miss remains authoritative.
 
 Pricing is an operational estimate, not billing authority. Review the allowlist and the estimate in `internal/llm/openai_client.go` together when adding a model or when provider pricing changes.
 
@@ -17,6 +17,19 @@ X-Player-Token: <host player token>
 
 Missing, non-host, and wrong-room credentials receive `403`. This is a room-host operational boundary; a separate deployment-admin identity remains future work.
 
+## Semantic judge review
+
+`DEFAULT_JUDGE_MODEL` must appear in `ALLOWED_JUDGE_MODELS`. The judge receives only the frozen question/board and one submitted deterministic miss. Its `judge-v1` response is restricted to a frozen answer ID or null, confidence from 0 to 1, and a rationale category. Suggestions are stored by migration `000007_judge_suggestions.sql`, separately from authoritative guesses and score events.
+
+Room responses never include judge data. After reveal, the host retrieves review records with:
+
+```http
+GET /api/rooms/{code}/rounds/{roundId}/judge-suggestions
+X-Player-Token: <host player token>
+```
+
+High confidence starts at `0.85`, medium at `0.60`, and lower values are low. These bands affect highlighting only. The host accepts the suggestion, chooses another answer, or retains the miss through `POST /api/rooms/{code}/override-match`; the locked override transaction enforces duplicate claims and records score changes. Timeout, malformed output, budget exhaustion, and provider absence never alter the deterministic result.
+
 ## Raw responses and retention
 
 `MODEL_CAPTURE_RAW_RESPONSES` defaults to `false`, leaving `rawResponse` empty. Enabling it is an explicit privacy decision: responses are best-effort redacted, capped by `MODEL_RAW_RESPONSE_MAX_BYTES`, marked `provider_audit_30d`, and visible only through the authenticated audit endpoint. Operators must delete retained raw responses within 30 days until automated cleanup is added.
@@ -25,4 +38,4 @@ The server never logs raw provider bodies or API keys. Remote provider error mes
 
 ## Migration and rollback
 
-Apply migration 000006 before deploying code that writes audits. It is additive and does not change room projections or deterministic no-key behavior. Its down migration drops only `provider_call_audits` and its index, permanently deleting audit history; roll back the application before running it.
+Apply migrations 000006 and 000007 before deploying this code. Both are additive and do not change public room projections or deterministic no-key scoring. Rolling back 000007 deletes judge-review history; rolling back 000006 deletes provider-audit history. Roll back the application before running either down migration.

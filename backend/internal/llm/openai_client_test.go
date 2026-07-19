@@ -50,6 +50,44 @@ func TestGenerateBoardRequestsStrictSchemaAndRecordsActualMetadata(t *testing.T)
 	}
 }
 
+func TestJudgeGuessUsesFrozenAnswerIDsAndStrictOutput(t *testing.T) {
+	t.Parallel()
+	transport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		var body openAIChatRequest
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(body.Messages[1].Content, `"id":"answer-1"`) ||
+			!strings.Contains(body.Messages[1].Content, `"guess":"digital money"`) {
+			t.Fatalf("judge prompt does not contain bounded frozen input: %s", body.Messages[1].Content)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"X-Request-Id": []string{"judge_req"}},
+			Body: io.NopCloser(strings.NewReader(
+				`{"usage":{"prompt_tokens":50,"completion_tokens":10},"choices":[{"message":{"role":"assistant","content":"{\"answerId\":\"answer-1\",\"confidence\":0.88,\"rationaleCategory\":\"paraphrase\"}"}}]}`,
+			)),
+		}, nil
+	})
+	client := NewOpenAIModelClient("test-key", ClientDefaults{JudgeModel: "gpt-4.1-mini"})
+	client.http = &http.Client{Transport: transport}
+	answerID := "answer-1"
+	response, err := client.JudgeGuess(context.Background(), JudgeGuessRequest{
+		Question: generatedTestQuestion(),
+		Board: models.PredictionBoard{Answers: []models.PredictionAnswer{{
+			ID: answerID, CanonicalAnswer: "cryptocurrency", Aliases: []string{"crypto"},
+		}}},
+		Guess: "digital money", PromptVersion: "judge-v1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.SuggestedPredictionAnswerID == nil || *response.SuggestedPredictionAnswerID != answerID ||
+		response.Confidence != 0.88 || response.Metadata.RequestID != "judge_req" {
+		t.Fatalf("unexpected judge response: %#v", response)
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (function roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {

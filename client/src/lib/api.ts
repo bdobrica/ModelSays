@@ -134,6 +134,21 @@ export interface OverrideMatchPayload extends PlayerTokenPayload {
   roundId: string
   guessId: string
   matchedPredictionAnswerId: string | null
+  judgeSuggestionId?: string
+}
+
+export interface JudgeSuggestion {
+  id: string
+  guessId: string
+  suggestedPredictionAnswerId?: string
+  confidence: number
+  confidenceBand: 'none' | 'low' | 'medium' | 'high'
+  rationaleCategory: string
+  model: string
+  promptVersion: string
+  outcome: string
+  reviewedAt?: string
+  reviewDecision?: string
 }
 
 interface ApiErrorPayload {
@@ -198,6 +213,12 @@ export async function overrideMatch(code: string, payload: OverrideMatchPayload)
   return request<RoomResponse>(`/api/rooms/${code}/override-match`, {
     method: 'POST',
     body: JSON.stringify(payload),
+  })
+}
+
+export async function getJudgeSuggestions(code: string, roundId: string, playerToken: string): Promise<{ suggestions: JudgeSuggestion[] }> {
+  return request<{ suggestions: JudgeSuggestion[] }>(`/api/rooms/${code}/rounds/${roundId}/judge-suggestions`, {
+    headers: { 'X-Player-Token': playerToken },
   })
 }
 

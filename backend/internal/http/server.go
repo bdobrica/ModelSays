@@ -59,6 +59,7 @@ type overrideMatchRequest struct {
 	RoundID                   string  `json:"roundId"`
 	GuessID                   string  `json:"guessId"`
 	MatchedPredictionAnswerID *string `json:"matchedPredictionAnswerId"`
+	JudgeSuggestionID         string  `json:"judgeSuggestionId"`
 }
 
 type roomResponse struct {
@@ -178,6 +179,8 @@ func (server *Server) handleRoomRoutes(writer http.ResponseWriter, request *http
 		server.handleGetRoom(writer, request, code)
 	case request.Method == http.MethodGet && len(parts) == 2 && parts[1] == "provider-audits":
 		server.handleProviderAudits(writer, request, code)
+	case request.Method == http.MethodGet && len(parts) == 4 && parts[1] == "rounds" && parts[3] == "judge-suggestions":
+		server.handleJudgeSuggestions(writer, request, code, parts[2])
 	case request.Method == http.MethodPost && len(parts) == 2 && parts[1] == "join":
 		server.handleJoinRoom(writer, request, code)
 	case request.Method == http.MethodPost && len(parts) == 2 && parts[1] == "session":
@@ -195,6 +198,15 @@ func (server *Server) handleRoomRoutes(writer http.ResponseWriter, request *http
 	default:
 		writeError(writer, http.StatusNotFound, "room route not found")
 	}
+}
+
+func (server *Server) handleJudgeSuggestions(writer http.ResponseWriter, request *http.Request, code string, roundID string) {
+	suggestions, err := server.roomService.GetJudgeSuggestions(request.Context(), code, roundID, request.Header.Get("X-Player-Token"))
+	if err != nil {
+		server.writeDomainError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"suggestions": suggestions})
 }
 
 func (server *Server) handleProviderAudits(writer http.ResponseWriter, request *http.Request, code string) {
@@ -346,6 +358,7 @@ func (server *Server) handleOverrideMatch(writer http.ResponseWriter, request *h
 		GuessID:                   payload.GuessID,
 		PlayerToken:               payload.PlayerToken,
 		MatchedPredictionAnswerID: payload.MatchedPredictionAnswerID,
+		JudgeSuggestionID:         payload.JudgeSuggestionID,
 	})
 	if err != nil {
 		server.writeDomainError(writer, err)
@@ -363,7 +376,7 @@ func (server *Server) writeDomainError(writer http.ResponseWriter, err error) {
 		writeError(writer, http.StatusNotFound, err.Error())
 	case errors.Is(err, game.ErrUnauthorizedStart):
 		writeError(writer, http.StatusForbidden, err.Error())
-	case errors.Is(err, game.ErrUnauthorizedReveal), errors.Is(err, game.ErrUnauthorizedAdvance), errors.Is(err, game.ErrUnauthorizedOverride), errors.Is(err, game.ErrUnauthorizedAudit), errors.Is(err, game.ErrPlayerNotFound):
+	case errors.Is(err, game.ErrUnauthorizedReveal), errors.Is(err, game.ErrUnauthorizedAdvance), errors.Is(err, game.ErrUnauthorizedOverride), errors.Is(err, game.ErrUnauthorizedAudit), errors.Is(err, game.ErrUnauthorizedJudgeReview), errors.Is(err, game.ErrPlayerNotFound):
 		writeError(writer, http.StatusForbidden, err.Error())
 	case errors.Is(err, game.ErrGameAlreadyStarted), errors.Is(err, game.ErrGameAlreadyCompleted), errors.Is(err, game.ErrRoomJoinClosed):
 		writeError(writer, http.StatusConflict, err.Error())

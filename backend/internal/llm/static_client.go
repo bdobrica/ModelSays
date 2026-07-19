@@ -10,6 +10,18 @@ import (
 
 type StaticModelClient struct{}
 
+func (client *StaticModelClient) JudgeGuess(_ context.Context, req JudgeGuessRequest) (*JudgeGuessResponse, error) {
+	return &JudgeGuessResponse{
+		Confidence:        0,
+		RationaleCategory: "unrelated",
+		Metadata: CallMetadata{
+			Provider:      "static",
+			Model:         "curated-bank",
+			PromptVersion: defaultString(req.PromptVersion, "judge-v1"),
+		},
+	}, nil
+}
+
 type curatedRoundData struct {
 	question models.Question
 	board    models.PredictionBoard

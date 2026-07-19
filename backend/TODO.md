@@ -10,8 +10,8 @@ Status note:
   - host-only authorization is currently implemented for start, reveal, next-round, and override actions, not every future host action;
   - the round state machine enforces the answer deadline during submission and covers reveal, next-round transition, and final completion, but expiry does not yet trigger automatic reveal or progression;
   - the public room projection hides boards, guesses, outcomes, awarded points, and current-round score changes until reveal while preserving submission progress.
-  - MVP matching is deterministic Unicode-aware normalization plus exact canonical/alias equality; semantic judge-model matching is deferred.
-  - model content uses strict schemas, provider-independent validation, one retry, and a five-round curated fallback; provider calls now have private room-scoped audits and cost-control foundations.
+  - authoritative matching is deterministic Unicode-aware normalization plus exact canonical/alias equality; optional semantic judging is advisory, post-miss, host-only after reveal, and never scores automatically.
+  - model content and judging use strict schemas, provider-independent validation, one retry, and safe deterministic fallbacks; provider calls have private room-scoped audits and shared cost controls.
   - room creation now enforces the narrow MVP settings and name/code bounds, strict bounded JSON decoding, and lobby-only joins in both repositories; public-launch rate limiting remains deferred.
   - same-browser refresh validates the stored token through the room session endpoint; heartbeat/presence and cross-device transfer remain deferred.
   - CI now gates formatting, vetting, backend/client tests, the production client build, and a PostgreSQL-backed full API lifecycle that uses only curated content.
@@ -143,7 +143,7 @@ Status note:
 - [ ] Store judge model metadata.
 - [x] Add host override endpoint.
 - [x] Add tests for deterministic normalization and alias matching.
-- [ ] Add tests for future fuzzy/semantic matching.
+- [x] Add tests for advisory semantic matching, failures, secrecy, persistence, and host review.
 
 ## Phase 8 — Scoring
 

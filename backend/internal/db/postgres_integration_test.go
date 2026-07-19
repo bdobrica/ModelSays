@@ -14,9 +14,23 @@ import (
 
 	"github.com/bogdandobrica/modelsays/backend/internal/db"
 	"github.com/bogdandobrica/modelsays/backend/internal/game"
+	"github.com/bogdandobrica/modelsays/backend/internal/llm"
 	"github.com/bogdandobrica/modelsays/backend/internal/models"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+type semanticJudgeClient struct {
+	*llm.StaticModelClient
+}
+
+func (client semanticJudgeClient) JudgeGuess(_ context.Context, request llm.JudgeGuessRequest) (*llm.JudgeGuessResponse, error) {
+	answerID := request.Board.Answers[0].ID
+	return &llm.JudgeGuessResponse{
+		SuggestedPredictionAnswerID: &answerID,
+		Confidence:                  0.93, RationaleCategory: "paraphrase",
+		Metadata: llm.CallMetadata{Provider: "mock", Model: "gpt-4.1-mini", PromptVersion: "judge-v1"},
+	}, nil
+}
 
 func TestPostgresAtomicAnswerClaimsAndReload(t *testing.T) {
 	pool := integrationPool(t)
@@ -100,6 +114,57 @@ func TestPostgresAtomicAnswerClaimsAndReload(t *testing.T) {
 	assertSingleClaim(t, reloadedRoom, answer.ID, answer.Score)
 	if totalScore(reloadedRoom) != answer.Score {
 		t.Fatalf("expected reconstructed scoreboard total %d, got %d", answer.Score, totalScore(reloadedRoom))
+	}
+}
+
+func TestPostgresJudgeSuggestionReloadAndAuditableAcceptance(t *testing.T) {
+	pool := integrationPool(t)
+	repository := db.NewPostgresRoomRepository(pool)
+	service := game.NewRoomService(repository, semanticJudgeClient{StaticModelClient: llm.NewStaticModelClient()})
+	ctx := context.Background()
+	room, host, err := service.CreateRoom(ctx, game.CreateRoomInput{RoomName: "Judge persistence", HostDisplayName: "Host"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, player, _ := service.JoinRoom(ctx, game.JoinRoomInput{Code: room.Code, DisplayName: "Player"})
+	started, err := service.StartGame(ctx, game.StartGameInput{Code: room.Code, PlayerToken: host.Token})
+	if err != nil {
+		t.Fatal(err)
+	}
+	round := started.CurrentGame.CurrentRound
+	if _, err := service.SubmitGuess(ctx, game.SubmitGuessInput{
+		Code: room.Code, RoundID: round.ID, PlayerToken: player.Token, Answer: "a reasonable paraphrase",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.RevealRound(ctx, game.RevealRoundInput{Code: room.Code, RoundID: round.ID, PlayerToken: host.Token}); err != nil {
+		t.Fatal(err)
+	}
+	suggestions, err := db.NewPostgresRoomRepository(pool).ListJudgeSuggestions(ctx, room.Code, round.ID)
+	if err != nil || len(suggestions) != 1 {
+		t.Fatalf("reloaded suggestions = %#v, err=%v", suggestions, err)
+	}
+	suggestion := suggestions[0]
+	updated, err := service.OverrideMatch(ctx, game.OverrideMatchInput{
+		Code: room.Code, RoundID: round.ID, GuessID: suggestion.GuessID, PlayerToken: host.Token,
+		MatchedPredictionAnswerID: suggestion.SuggestedPredictionAnswerID, JudgeSuggestionID: suggestion.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if totalScore(updated) != round.Board.Answers[0].Score {
+		t.Fatalf("score after suggestion acceptance = %d", totalScore(updated))
+	}
+	reloaded, err := repository.ListJudgeSuggestions(ctx, room.Code, round.ID)
+	if err != nil || reloaded[0].ReviewedAt == nil || reloaded[0].ReviewDecision != "accepted_suggestion" {
+		t.Fatalf("review was not persisted: %#v, err=%v", reloaded, err)
+	}
+	var eventCount int
+	if err := pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM score_events
+		WHERE game_id = $1 AND round_id = $2 AND reason = 'host_override_match'
+	`, started.CurrentGame.ID, round.ID).Scan(&eventCount); err != nil || eventCount != 1 {
+		t.Fatalf("override score event count=%d err=%v", eventCount, err)
 	}
 }
 
@@ -255,6 +320,19 @@ func TestProviderAuditMigrationUpDown(t *testing.T) {
 	}
 	executeMigrationSection(t, pool, migrationPath(t, "000006_provider_call_audits.sql"), false)
 	executeMigrationSection(t, pool, migrationPath(t, "000006_provider_call_audits.sql"), true)
+}
+
+func TestJudgeSuggestionMigrationUpDown(t *testing.T) {
+	pool := integrationPool(t)
+	var exists bool
+	if err := pool.QueryRow(context.Background(), `SELECT to_regclass('judge_suggestions') IS NOT NULL`).Scan(&exists); err != nil {
+		t.Fatal(err)
+	}
+	if !exists {
+		t.Fatal("judge_suggestions table missing after migration up")
+	}
+	executeMigrationSection(t, pool, migrationPath(t, "000007_judge_suggestions.sql"), false)
+	executeMigrationSection(t, pool, migrationPath(t, "000007_judge_suggestions.sql"), true)
 }
 
 func integrationPool(t *testing.T) *pgxpool.Pool {

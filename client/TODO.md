@@ -141,10 +141,10 @@ Status note:
 ## Phase 8 — Host Review and Overrides
 
 - [x] Support post-reveal correction for deterministic matches and misses.
-- [ ] Show low-confidence matches.
+- [x] Show confidence bands for semantic suggestions.
 - [x] Show raw player answer.
 - [x] Show suggested match.
-- [ ] Show judge confidence.
+- [x] Show judge confidence and rationale category after reveal to the host only.
 - [x] Let host accept suggested match.
 - [x] Let host override to another board answer.
 - [x] Let host mark as miss.
