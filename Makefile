@@ -57,10 +57,13 @@ bootstrap:
 start: dev
 
 dev: postgres-up migrate-up
-	@trap 'kill 0' INT TERM EXIT; \
-	(cd $(BACKEND_DIR) && DATABASE_URL='$(DATABASE_URL)' HTTP_ADDR='$(HTTP_ADDR)' APP_ENV='$(APP_ENV)' CORS_ALLOWED_ORIGINS='$(CORS_ALLOWED_ORIGINS)' go run ./cmd/server) & \
-	(cd $(CLIENT_DIR) && npm run dev) & \
-	wait
+	@(cd $(BACKEND_DIR) && DATABASE_URL='$(DATABASE_URL)' HTTP_ADDR='$(HTTP_ADDR)' APP_ENV='$(APP_ENV)' CORS_ALLOWED_ORIGINS='$(CORS_ALLOWED_ORIGINS)' go run ./cmd/server) & backend_pid=$$!; \
+	(cd $(CLIENT_DIR) && npm run dev) & client_pid=$$!; \
+	trap 'kill $$backend_pid $$client_pid 2>/dev/null || true' INT TERM EXIT; \
+	wait -n $$backend_pid $$client_pid; status=$$?; \
+	kill $$backend_pid $$client_pid 2>/dev/null || true; \
+	wait $$backend_pid $$client_pid 2>/dev/null || true; \
+	exit $$status
 
 postgres-up:
 	docker compose up -d postgres

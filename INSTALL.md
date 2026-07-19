@@ -122,6 +122,8 @@ If dependencies are missing or stale:
 make bootstrap
 ```
 
+If the backend reports `default model is not present in its server allowlist`, every customized `DEFAULT_*_MODEL` in `.env` must also appear in its matching `ALLOWED_*_MODELS` comma-separated list. For example, `DEFAULT_PREDICTION_MODEL=my-model` requires `ALLOWED_PREDICTION_MODELS=my-model`. The development launcher now stops both child servers when either one exits, so the original startup error remains visible instead of leaving a client with no API.
+
 To erase all local database state and rebuild from empty migrations:
 
 ```bash
