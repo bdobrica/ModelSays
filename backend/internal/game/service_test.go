@@ -34,6 +34,17 @@ type costlyQuestionClient struct {
 	boardCalls int
 }
 
+type timeoutModelClient struct{}
+
+func (timeoutModelClient) GenerateQuestions(ctx context.Context, _ llm.GenerateQuestionsRequest) (*llm.GenerateQuestionsResponse, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func (timeoutModelClient) GenerateBoard(_ context.Context, _ llm.GenerateBoardRequest) (*llm.GenerateBoardResponse, error) {
+	panic("board generation must not run after question timeout")
+}
+
 func (client *costlyQuestionClient) GenerateQuestions(_ context.Context, _ llm.GenerateQuestionsRequest) (*llm.GenerateQuestionsResponse, error) {
 	return &llm.GenerateQuestionsResponse{
 		Questions: []models.Question{generatedQuestion("costly", "Name something costly.")},
@@ -671,6 +682,28 @@ func TestProviderBudgetExhaustionMakesNoFurtherPaidCall(t *testing.T) {
 	}
 	if started.CurrentGame.CurrentRound.Board.Provider != "static" {
 		t.Fatalf("budget exhaustion did not preserve curated play: %#v", started.CurrentGame.CurrentRound.Board)
+	}
+}
+
+func TestProviderTimeoutIsAuditedBeforeCuratedFallback(t *testing.T) {
+	service := NewRoomService(NewInMemoryRoomRepository(), timeoutModelClient{})
+	service.SetModelPolicy(llm.Policy{
+		AllowedPredictionModels: []string{"gpt-4.1-mini"},
+		Timeout:                 time.Millisecond, MaxAttempts: 1, MaxCallsPerGame: 20, MaxEstimatedCostUSD: 0.10,
+	})
+	room, host, err := service.CreateRoom(context.Background(), CreateRoomInput{RoomName: "Timeout fallback", HostDisplayName: "Host"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.StartGame(context.Background(), StartGameInput{Code: room.Code, PlayerToken: host.Token}); err != nil {
+		t.Fatal(err)
+	}
+	audits, err := service.GetProviderAudits(context.Background(), room.Code, host.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(audits) != 3 || audits[0].Outcome != "timeout" || audits[0].ErrorCategory != "timeout" {
+		t.Fatalf("timeout audit followed by fallback = %#v", audits)
 	}
 }
 
