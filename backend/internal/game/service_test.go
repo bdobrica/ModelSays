@@ -223,6 +223,51 @@ func TestSubmitGuessMatchesAliasAndScores(t *testing.T) {
 	}
 }
 
+func TestSubmitGuessMatchesCanonicalAnswer(t *testing.T) {
+	t.Parallel()
+
+	service, room, _, player, startedRoom := startedGameWithPlayer(t)
+	canonical := startedRoom.CurrentGame.CurrentRound.Board.Answers[0]
+
+	updatedRoom, err := service.SubmitGuess(context.Background(), SubmitGuessInput{
+		Code:        room.Code,
+		RoundID:     startedRoom.CurrentGame.CurrentRound.ID,
+		PlayerToken: player.Token,
+		Answer:      canonical.CanonicalAnswer,
+	})
+	if err != nil {
+		t.Fatalf("SubmitGuess returned error: %v", err)
+	}
+
+	guess := updatedRoom.CurrentGame.CurrentRound.Guesses[0]
+	if guess.MatchedPredictionAnswerID == nil || *guess.MatchedPredictionAnswerID != canonical.ID {
+		t.Fatalf("expected canonical answer %q to match %q", canonical.CanonicalAnswer, canonical.ID)
+	}
+	if guess.ScoreAwarded != canonical.Score || guess.Duplicate {
+		t.Fatalf("expected canonical score %d without duplicate, got score=%d duplicate=%t", canonical.Score, guess.ScoreAwarded, guess.Duplicate)
+	}
+}
+
+func TestSubmitGuessMissScoresZero(t *testing.T) {
+	t.Parallel()
+
+	service, room, _, player, startedRoom := startedGameWithPlayer(t)
+	updatedRoom, err := service.SubmitGuess(context.Background(), SubmitGuessInput{
+		Code:        room.Code,
+		RoundID:     startedRoom.CurrentGame.CurrentRound.ID,
+		PlayerToken: player.Token,
+		Answer:      "definitely not on this board",
+	})
+	if err != nil {
+		t.Fatalf("SubmitGuess returned error: %v", err)
+	}
+
+	guess := updatedRoom.CurrentGame.CurrentRound.Guesses[0]
+	if guess.MatchedPredictionAnswerID != nil || guess.ScoreAwarded != 0 || guess.Duplicate {
+		t.Fatalf("expected a zero-score miss, got match=%v score=%d duplicate=%t", guess.MatchedPredictionAnswerID, guess.ScoreAwarded, guess.Duplicate)
+	}
+}
+
 func TestSubmitGuessRejectsDuplicateSubmission(t *testing.T) {
 	t.Parallel()
 
@@ -528,4 +573,107 @@ func TestOverrideMatchAdjustsScore(t *testing.T) {
 	if overriddenRoom.CurrentGame.CurrentRound.Guesses[0].ScoreAwarded != 25 {
 		t.Fatalf("expected overridden score 25, got %d", overriddenRoom.CurrentGame.CurrentRound.Guesses[0].ScoreAwarded)
 	}
+}
+
+func TestOverrideCannotCreateSecondScoringClaim(t *testing.T) {
+	t.Parallel()
+
+	service := NewInMemoryRoomService()
+	room, host, err := service.CreateRoom(context.Background(), CreateRoomInput{RoomName: "Friday Night", HostDisplayName: "Bogdan"})
+	if err != nil {
+		t.Fatalf("CreateRoom returned error: %v", err)
+	}
+	_, playerOne, err := service.JoinRoom(context.Background(), JoinRoomInput{Code: room.Code, DisplayName: "Ana"})
+	if err != nil {
+		t.Fatalf("JoinRoom returned error: %v", err)
+	}
+	_, playerTwo, err := service.JoinRoom(context.Background(), JoinRoomInput{Code: room.Code, DisplayName: "Radu"})
+	if err != nil {
+		t.Fatalf("JoinRoom returned error: %v", err)
+	}
+	startedRoom, err := service.StartGame(context.Background(), StartGameInput{Code: room.Code, PlayerToken: host.Token})
+	if err != nil {
+		t.Fatalf("StartGame returned error: %v", err)
+	}
+	roundID := startedRoom.CurrentGame.CurrentRound.ID
+	claimedAnswer := startedRoom.CurrentGame.CurrentRound.Board.Answers[0]
+
+	_, err = service.SubmitGuess(context.Background(), SubmitGuessInput{Code: room.Code, RoundID: roundID, PlayerToken: playerOne.Token, Answer: claimedAnswer.CanonicalAnswer})
+	if err != nil {
+		t.Fatalf("first SubmitGuess returned error: %v", err)
+	}
+	secondRoom, err := service.SubmitGuess(context.Background(), SubmitGuessInput{Code: room.Code, RoundID: roundID, PlayerToken: playerTwo.Token, Answer: "not a match"})
+	if err != nil {
+		t.Fatalf("second SubmitGuess returned error: %v", err)
+	}
+	revealedRoom, err := service.RevealRound(context.Background(), RevealRoundInput{Code: room.Code, RoundID: roundID, PlayerToken: host.Token})
+	if err != nil {
+		t.Fatalf("RevealRound returned error: %v", err)
+	}
+
+	secondGuess := findPlayerGuess(t, secondRoom.CurrentGame.CurrentRound.Guesses, playerTwo.ID)
+	overriddenRoom, err := service.OverrideMatch(context.Background(), OverrideMatchInput{
+		Code:                      room.Code,
+		RoundID:                   roundID,
+		GuessID:                   secondGuess.ID,
+		PlayerToken:               host.Token,
+		MatchedPredictionAnswerID: &claimedAnswer.ID,
+	})
+	if err != nil {
+		t.Fatalf("OverrideMatch returned error: %v", err)
+	}
+
+	firstGuess := findPlayerGuess(t, overriddenRoom.CurrentGame.CurrentRound.Guesses, playerOne.ID)
+	secondGuess = findPlayerGuess(t, overriddenRoom.CurrentGame.CurrentRound.Guesses, playerTwo.ID)
+	if firstGuess.ScoreAwarded != claimedAnswer.Score {
+		t.Fatalf("expected original claim to retain score %d, got %d", claimedAnswer.Score, firstGuess.ScoreAwarded)
+	}
+	if secondGuess.ScoreAwarded != 0 || !secondGuess.Duplicate {
+		t.Fatalf("expected override to remain a zero-score duplicate, got score=%d duplicate=%t", secondGuess.ScoreAwarded, secondGuess.Duplicate)
+	}
+	if scoreForPlayer(overriddenRoom, playerTwo.ID) != 0 {
+		t.Fatalf("expected overridden duplicate player's scoreboard to remain zero")
+	}
+	if revealedRoom.CurrentGame == nil {
+		t.Fatal("expected revealed game")
+	}
+}
+
+func startedGameWithPlayer(t *testing.T) (*RoomService, models.Room, models.Player, models.Player, models.Room) {
+	t.Helper()
+
+	service := NewInMemoryRoomService()
+	room, host, err := service.CreateRoom(context.Background(), CreateRoomInput{RoomName: "Friday Night", HostDisplayName: "Bogdan"})
+	if err != nil {
+		t.Fatalf("CreateRoom returned error: %v", err)
+	}
+	_, player, err := service.JoinRoom(context.Background(), JoinRoomInput{Code: room.Code, DisplayName: "Ana"})
+	if err != nil {
+		t.Fatalf("JoinRoom returned error: %v", err)
+	}
+	startedRoom, err := service.StartGame(context.Background(), StartGameInput{Code: room.Code, PlayerToken: host.Token})
+	if err != nil {
+		t.Fatalf("StartGame returned error: %v", err)
+	}
+	return service, room, host, player, startedRoom
+}
+
+func findPlayerGuess(t *testing.T, guesses []models.Guess, playerID string) models.Guess {
+	t.Helper()
+	for _, guess := range guesses {
+		if guess.PlayerID == playerID {
+			return guess
+		}
+	}
+	t.Fatalf("guess for player %q not found", playerID)
+	return models.Guess{}
+}
+
+func scoreForPlayer(room models.Room, playerID string) int {
+	for _, entry := range room.CurrentGame.Scoreboard {
+		if entry.PlayerID == playerID {
+			return entry.Score
+		}
+	}
+	return 0
 }

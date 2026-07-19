@@ -227,7 +227,7 @@ func (repository *PostgresRoomRepository) StartGame(ctx context.Context, code st
 	return room, nil
 }
 
-func (repository *PostgresRoomRepository) SubmitGuess(ctx context.Context, code string, roundID string, guess models.Guess, scoreEvent *models.ScoreEvent) (models.Room, error) {
+func (repository *PostgresRoomRepository) SubmitGuess(ctx context.Context, code string, roundID string, submission game.GuessSubmission) (models.Room, error) {
 	tx, err := repository.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return models.Room{}, fmt.Errorf("begin submit guess tx: %w", err)
@@ -236,13 +236,15 @@ func (repository *PostgresRoomRepository) SubmitGuess(ctx context.Context, code 
 
 	var lockedRoundID string
 	var roundStatus models.RoundStatus
+	var boardID string
+	var gameID string
 	err = tx.QueryRow(ctx, `
-		SELECT r.id, r.status
+		SELECT r.id, r.status, r.board_id, g.id
 		FROM rounds r
 		INNER JOIN games g ON g.id = r.game_id
 		WHERE g.room_code = $1 AND r.id = $2
 		FOR UPDATE
-	`, code, roundID).Scan(&lockedRoundID, &roundStatus)
+	`, code, roundID).Scan(&lockedRoundID, &roundStatus, &boardID, &gameID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return models.Room{}, game.ErrRoundNotFound
@@ -254,6 +256,16 @@ func (repository *PostgresRoomRepository) SubmitGuess(ctx context.Context, code 
 	if roundStatus != models.RoundStatusAnswering {
 		return models.Room{}, game.ErrRoundNotAcceptingGuesses
 	}
+
+	board, err := repository.loadBoard(ctx, tx, boardID)
+	if err != nil {
+		return models.Room{}, err
+	}
+	guesses, err := repository.loadGuesses(ctx, tx, lockedRoundID)
+	if err != nil {
+		return models.Room{}, err
+	}
+	guess := game.ResolveGuess(submission, board.Answers, guesses)
 
 	_, err = tx.Exec(ctx, `
 		INSERT INTO guesses (id, round_id, player_id, raw_answer, normalized_answer, matched_prediction_answer_id, score_awarded, created_at)
@@ -267,11 +279,11 @@ func (repository *PostgresRoomRepository) SubmitGuess(ctx context.Context, code 
 		return models.Room{}, fmt.Errorf("insert guess: %w", err)
 	}
 
-	if scoreEvent != nil {
+	if guess.ScoreAwarded > 0 {
 		_, err = tx.Exec(ctx, `
 			INSERT INTO score_events (id, game_id, round_id, player_id, delta, reason, created_at)
 			VALUES ($1, $2, $3, $4, $5, $6, $7)
-		`, scoreEvent.ID, scoreEvent.GameID, scoreEvent.RoundID, scoreEvent.PlayerID, scoreEvent.Delta, scoreEvent.Reason, scoreEvent.CreatedAt)
+		`, submission.ScoreEventID, gameID, lockedRoundID, submission.PlayerID, guess.ScoreAwarded, "guess_matched_prediction_answer", submission.CreatedAt)
 		if err != nil {
 			return models.Room{}, fmt.Errorf("insert score event: %w", err)
 		}
@@ -413,12 +425,45 @@ func (repository *PostgresRoomRepository) AdvanceGame(ctx context.Context, code 
 	return room, nil
 }
 
-func (repository *PostgresRoomRepository) OverrideGuess(ctx context.Context, code string, roundID string, guess models.Guess, deltaEvent *models.ScoreEvent) (models.Room, error) {
+func (repository *PostgresRoomRepository) OverrideGuess(ctx context.Context, code string, roundID string, override game.GuessOverride) (models.Room, error) {
 	tx, err := repository.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return models.Room{}, fmt.Errorf("begin override guess tx: %w", err)
 	}
 	defer tx.Rollback(ctx)
+
+	var boardID string
+	var gameID string
+	var roundStatus models.RoundStatus
+	err = tx.QueryRow(ctx, `
+		SELECT r.board_id, game.id, r.status
+		FROM rounds r
+		INNER JOIN games game ON game.id = r.game_id
+		WHERE r.id = $1 AND game.room_code = $2
+		FOR UPDATE
+	`, roundID, code).Scan(&boardID, &gameID, &roundStatus)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return models.Room{}, game.ErrRoundNotFound
+		}
+		return models.Room{}, fmt.Errorf("lock round for guess override: %w", err)
+	}
+	if roundStatus != models.RoundStatusRevealed {
+		return models.Room{}, game.ErrRoundNotRevealed
+	}
+
+	board, err := repository.loadBoard(ctx, tx, boardID)
+	if err != nil {
+		return models.Room{}, err
+	}
+	guesses, err := repository.loadGuesses(ctx, tx, roundID)
+	if err != nil {
+		return models.Room{}, err
+	}
+	guess, delta, err := game.ResolveOverride(override, board, guesses)
+	if err != nil {
+		return models.Room{}, err
+	}
 
 	commandTag, err := tx.Exec(ctx, `
 		UPDATE guesses g
@@ -434,11 +479,11 @@ func (repository *PostgresRoomRepository) OverrideGuess(ctx context.Context, cod
 		return models.Room{}, game.ErrGuessNotFound
 	}
 
-	if deltaEvent != nil {
+	if delta != 0 {
 		_, err = tx.Exec(ctx, `
 			INSERT INTO score_events (id, game_id, round_id, player_id, delta, reason, created_at)
 			VALUES ($1, $2, $3, $4, $5, $6, $7)
-		`, deltaEvent.ID, deltaEvent.GameID, deltaEvent.RoundID, deltaEvent.PlayerID, deltaEvent.Delta, deltaEvent.Reason, deltaEvent.CreatedAt)
+		`, override.ScoreEventID, gameID, roundID, guess.PlayerID, delta, "host_override_match", override.CreatedAt)
 		if err != nil {
 			return models.Room{}, fmt.Errorf("insert override score event: %w", err)
 		}

@@ -119,6 +119,10 @@ func (client *StaticModelClient) GenerateBoard(_ context.Context, req GenerateBo
 	for _, entry := range questionSet {
 		if entry.question.ID == req.Question.ID {
 			board := entry.board
+			board.Answers = append([]models.PredictionAnswer(nil), entry.board.Answers...)
+			for index := range board.Answers {
+				board.Answers[index].Aliases = append([]string(nil), entry.board.Answers[index].Aliases...)
+			}
 			board.ModelName = req.PredictionModel
 			if board.ModelName == "" {
 				board.ModelName = "curated-bank"

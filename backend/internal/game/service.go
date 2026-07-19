@@ -88,15 +88,31 @@ type RoomService struct {
 	modelClient llm.ModelClient
 }
 
+type GuessSubmission struct {
+	ID                string
+	PlayerID          string
+	PlayerDisplayName string
+	RawAnswer         string
+	CreatedAt         time.Time
+	ScoreEventID      string
+}
+
+type GuessOverride struct {
+	GuessID                   string
+	MatchedPredictionAnswerID *string
+	ScoreEventID              string
+	CreatedAt                 time.Time
+}
+
 type RoomRepository interface {
 	CreateRoom(ctx context.Context, room models.Room) error
 	GetRoom(ctx context.Context, code string) (models.Room, error)
 	AddPlayer(ctx context.Context, code string, player models.Player) (models.Room, error)
 	StartGame(ctx context.Context, code string, gameState models.Game) (models.Room, error)
-	SubmitGuess(ctx context.Context, code string, roundID string, guess models.Guess, scoreEvent *models.ScoreEvent) (models.Room, error)
+	SubmitGuess(ctx context.Context, code string, roundID string, submission GuessSubmission) (models.Room, error)
 	RevealRound(ctx context.Context, code string, roundID string, revealStartedAt time.Time) (models.Room, error)
 	AdvanceGame(ctx context.Context, code string, gameState models.Game, nextRound *models.Round) (models.Room, error)
-	OverrideGuess(ctx context.Context, code string, roundID string, guess models.Guess, deltaEvent *models.ScoreEvent) (models.Room, error)
+	OverrideGuess(ctx context.Context, code string, roundID string, override GuessOverride) (models.Room, error)
 }
 
 func NewRoomService(repository RoomRepository, modelClient llm.ModelClient) *RoomService {
@@ -268,40 +284,15 @@ func (service *RoomService) SubmitGuess(ctx context.Context, input SubmitGuessIn
 		return models.Room{}, fmt.Errorf("prediction board missing for round")
 	}
 
-	normalizedAnswer := normalizeAnswer(answer)
-	matchedAnswerID, scoreAwarded := matchGuess(round.Board.Answers, normalizedAnswer)
-	duplicate := false
-	if matchedAnswerID != nil && answerAlreadyClaimed(round.Guesses, *matchedAnswerID, "") {
-		scoreAwarded = 0
-		duplicate = true
-	}
-
-	guess := models.Guess{
-		ID:                        newID(),
-		PlayerID:                  player.ID,
-		PlayerDisplayName:         player.DisplayName,
-		RawAnswer:                 answer,
-		NormalizedAnswer:          normalizedAnswer,
-		MatchedPredictionAnswerID: matchedAnswerID,
-		ScoreAwarded:              scoreAwarded,
-		Duplicate:                 duplicate,
-		CreatedAt:                 time.Now().UTC(),
-	}
-
-	var scoreEvent *models.ScoreEvent
-	if scoreAwarded > 0 && room.CurrentGame != nil {
-		scoreEvent = &models.ScoreEvent{
-			ID:        newID(),
-			GameID:    room.CurrentGame.ID,
-			RoundID:   round.ID,
-			PlayerID:  player.ID,
-			Delta:     scoreAwarded,
-			Reason:    "guess_matched_prediction_answer",
-			CreatedAt: guess.CreatedAt,
-		}
-	}
-
-	return service.repository.SubmitGuess(ctx, code, round.ID, guess, scoreEvent)
+	now := time.Now().UTC()
+	return service.repository.SubmitGuess(ctx, code, round.ID, GuessSubmission{
+		ID:                newID(),
+		PlayerID:          player.ID,
+		PlayerDisplayName: player.DisplayName,
+		RawAnswer:         answer,
+		CreatedAt:         now,
+		ScoreEventID:      newID(),
+	})
 }
 
 func (service *RoomService) RevealRound(ctx context.Context, input RevealRoundInput) (models.Room, error) {
@@ -403,51 +394,24 @@ func (service *RoomService) OverrideMatch(ctx context.Context, input OverrideMat
 		return models.Room{}, ErrRoundNotRevealed
 	}
 
-	guessIndex := -1
-	for index, guess := range round.Guesses {
-		if guess.ID == strings.TrimSpace(input.GuessID) {
-			guessIndex = index
-			break
-		}
-	}
-	if guessIndex < 0 {
+	guessID := strings.TrimSpace(input.GuessID)
+	if _, ok := findGuess(round.Guesses, guessID); !ok {
 		return models.Room{}, ErrGuessNotFound
 	}
 
-	guess := round.Guesses[guessIndex]
-	newScore := 0
-	duplicate := false
 	if input.MatchedPredictionAnswerID != nil {
-		answer, ok := findPredictionAnswer(round.Board, *input.MatchedPredictionAnswerID)
+		_, ok := findPredictionAnswer(round.Board, *input.MatchedPredictionAnswerID)
 		if !ok {
 			return models.Room{}, ErrPredictionAnswerNotFound
 		}
-		if answerAlreadyClaimed(round.Guesses, answer.ID, guess.ID) {
-			duplicate = true
-		} else {
-			newScore = answer.Score
-		}
 	}
 
-	delta := newScore - guess.ScoreAwarded
-	guess.MatchedPredictionAnswerID = input.MatchedPredictionAnswerID
-	guess.ScoreAwarded = newScore
-	guess.Duplicate = duplicate
-
-	var deltaEvent *models.ScoreEvent
-	if delta != 0 {
-		deltaEvent = &models.ScoreEvent{
-			ID:        newID(),
-			GameID:    room.CurrentGame.ID,
-			RoundID:   round.ID,
-			PlayerID:  guess.PlayerID,
-			Delta:     delta,
-			Reason:    "host_override_match",
-			CreatedAt: time.Now().UTC(),
-		}
-	}
-
-	return service.repository.OverrideGuess(ctx, code, round.ID, guess, deltaEvent)
+	return service.repository.OverrideGuess(ctx, code, round.ID, GuessOverride{
+		GuessID:                   guessID,
+		MatchedPredictionAnswerID: input.MatchedPredictionAnswerID,
+		ScoreEventID:              newID(),
+		CreatedAt:                 time.Now().UTC(),
+	})
 }
 
 func normalizeSettings(settings models.RoomSettings) models.RoomSettings {
@@ -628,6 +592,65 @@ func answerAlreadyClaimed(guesses []models.Guess, matchedAnswerID string, skipGu
 	}
 
 	return false
+}
+
+func ResolveGuess(submission GuessSubmission, answers []models.PredictionAnswer, guesses []models.Guess) models.Guess {
+	normalizedAnswer := normalizeAnswer(submission.RawAnswer)
+	matchedAnswerID, scoreAwarded := matchGuess(answers, normalizedAnswer)
+	duplicate := false
+	if matchedAnswerID != nil && answerAlreadyClaimed(guesses, *matchedAnswerID, "") {
+		scoreAwarded = 0
+		duplicate = true
+	}
+
+	return models.Guess{
+		ID:                        submission.ID,
+		PlayerID:                  submission.PlayerID,
+		PlayerDisplayName:         submission.PlayerDisplayName,
+		RawAnswer:                 submission.RawAnswer,
+		NormalizedAnswer:          normalizedAnswer,
+		MatchedPredictionAnswerID: matchedAnswerID,
+		ScoreAwarded:              scoreAwarded,
+		Duplicate:                 duplicate,
+		CreatedAt:                 submission.CreatedAt,
+	}
+}
+
+func ResolveOverride(override GuessOverride, board *models.PredictionBoard, guesses []models.Guess) (models.Guess, int, error) {
+	guess, ok := findGuess(guesses, override.GuessID)
+	if !ok {
+		return models.Guess{}, 0, ErrGuessNotFound
+	}
+
+	newScore := 0
+	duplicate := false
+	if override.MatchedPredictionAnswerID != nil {
+		answer, ok := findPredictionAnswer(board, *override.MatchedPredictionAnswerID)
+		if !ok {
+			return models.Guess{}, 0, ErrPredictionAnswerNotFound
+		}
+		if answerAlreadyClaimed(guesses, answer.ID, guess.ID) {
+			duplicate = true
+		} else {
+			newScore = answer.Score
+		}
+	}
+
+	delta := newScore - guess.ScoreAwarded
+	guess.MatchedPredictionAnswerID = override.MatchedPredictionAnswerID
+	guess.ScoreAwarded = newScore
+	guess.Duplicate = duplicate
+	return guess, delta, nil
+}
+
+func findGuess(guesses []models.Guess, guessID string) (models.Guess, bool) {
+	for _, guess := range guesses {
+		if guess.ID == guessID {
+			return guess, true
+		}
+	}
+
+	return models.Guess{}, false
 }
 
 func findPredictionAnswer(board *models.PredictionBoard, answerID string) (models.PredictionAnswer, bool) {

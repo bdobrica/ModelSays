@@ -43,6 +43,7 @@ Status note:
 - [x] Add indexes for room code, game id, round id, player id.
 - [x] Add unique constraint for room code.
 - [x] Add unique constraint to prevent duplicate player submissions per round.
+- [x] Add a database-enforced unique scoring claim per round and prediction answer.
 - [ ] Add seed questions for local development.
 
 ## Phase 2 — Room and Lobby API
@@ -124,7 +125,7 @@ Status note:
 - [ ] Return match confidence.
 - [x] Return no-match when appropriate.
 - [ ] Mark low-confidence matches for host review.
-- [x] Prevent duplicate scoring for already-revealed answers where applicable.
+- [x] Prevent duplicate scoring atomically for submissions and host overrides.
 - [ ] Store judge model metadata.
 - [x] Add host override endpoint.
 - [ ] Add tests for fuzzy matching.
@@ -139,7 +140,7 @@ Status note:
 - [x] Implement score events.
 - [ ] Add scoreboard endpoint.
 - [ ] Add final scoreboard response.
-- [ ] Add tests for scoring edge cases.
+- [x] Add tests for canonical, alias, miss, repeat-submission, duplicate, and override scoring cases.
 
 ## Phase 9 — Model Provider Abstraction
 
@@ -189,7 +190,8 @@ Status note:
 - [ ] Integration tests for REST API.
 - [ ] Integration tests for WebSocket events.
 - [ ] Integration tests with mocked LLM client.
-- [ ] Migration tests.
+- [x] Migration tests for atomic answer claims.
+- [x] PostgreSQL concurrency and scoreboard reload tests.
 
 ## Phase 13 — Developer Experience
 

@@ -238,12 +238,10 @@ Fields:
 - raw_answer
 - normalized_answer
 - matched_prediction_answer_id nullable
-- match_confidence
-- judge_provider
-- judge_model_name
-- judge_prompt_version
 - score_awarded
 - created_at
+
+The database permits only one positive-scoring guess for each prediction answer in a round. A matched guess with `score_awarded = 0` represents a duplicate claim.
 
 ### score_events
 
@@ -431,9 +429,9 @@ Generated questions should avoid:
 
 Team-building mode should have stricter filtering.
 
-## Matching Rules
+## Matching and Duplicate Rules
 
-A guess should be matched if it is semantically equivalent to a canonical answer or alias.
+The current MVP matcher normalizes case, whitespace, and punctuation, then requires an exact match with a canonical answer or configured alias. Broader semantic judge-model matching is planned after the deterministic MVP path is playable.
 
 Examples:
 
@@ -442,7 +440,7 @@ Examples:
 - `ChatGPT` may match `AI chatbot`;
 - `money` should probably not match `salary` unless the board allows it.
 
-The judge response should include:
+The future judge response should include:
 
 - matched answer id or null;
 - confidence;
@@ -450,6 +448,19 @@ The judge response should include:
 - whether host review is recommended.
 
 Low-confidence matches should be marked for host override.
+
+Submission scoring is authoritative inside the repository transaction. The transaction locks the round, resolves the match against its frozen board, and checks existing positive-scoring claims before inserting the guess and score event together. Only the earliest transaction to commit a claim receives the answer score; later equivalent guesses remain visible as duplicates and score zero. Host overrides use the same locked claim rule and append an auditable score event when they change a score.
+
+### PostgreSQL scoring tests
+
+Set `TEST_DATABASE_URL` to a PostgreSQL database where the test user may create schemas, then run:
+
+```bash
+cd backend
+TEST_DATABASE_URL='postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable' go test -race ./...
+```
+
+Each integration test creates a unique schema, applies all migrations, and removes the schema afterward. Without `TEST_DATABASE_URL`, PostgreSQL integration tests are skipped while unit tests still run.
 
 ## Testing Priorities
 

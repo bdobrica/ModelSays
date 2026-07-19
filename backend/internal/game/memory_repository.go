@@ -83,7 +83,7 @@ func (repository *InMemoryRoomRepository) StartGame(_ context.Context, code stri
 	return cloneRoom(*room), nil
 }
 
-func (repository *InMemoryRoomRepository) SubmitGuess(_ context.Context, code string, roundID string, guess models.Guess, _ *models.ScoreEvent) (models.Room, error) {
+func (repository *InMemoryRoomRepository) SubmitGuess(_ context.Context, code string, roundID string, submission GuessSubmission) (models.Room, error) {
 	repository.mu.Lock()
 	defer repository.mu.Unlock()
 
@@ -100,11 +100,15 @@ func (repository *InMemoryRoomRepository) SubmitGuess(_ context.Context, code st
 		return models.Room{}, ErrRoundNotAcceptingGuesses
 	}
 	for _, existingGuess := range round.Guesses {
-		if existingGuess.PlayerID == guess.PlayerID {
+		if existingGuess.PlayerID == submission.PlayerID {
 			return models.Room{}, ErrGuessAlreadySubmitted
 		}
 	}
+	if round.Board == nil {
+		return models.Room{}, ErrPredictionAnswerNotFound
+	}
 
+	guess := ResolveGuess(submission, round.Board.Answers, round.Guesses)
 	round.Guesses = append(round.Guesses, guess)
 	applyGuessToScoreboard(room.CurrentGame, guess)
 	room.UpdatedAt = time.Now().UTC()
@@ -160,7 +164,7 @@ func (repository *InMemoryRoomRepository) AdvanceGame(_ context.Context, code st
 	return cloneRoom(*room), nil
 }
 
-func (repository *InMemoryRoomRepository) OverrideGuess(_ context.Context, code string, roundID string, guess models.Guess, deltaEvent *models.ScoreEvent) (models.Room, error) {
+func (repository *InMemoryRoomRepository) OverrideGuess(_ context.Context, code string, roundID string, override GuessOverride) (models.Room, error) {
 	repository.mu.Lock()
 	defer repository.mu.Unlock()
 
@@ -172,22 +176,23 @@ func (repository *InMemoryRoomRepository) OverrideGuess(_ context.Context, code 
 		return models.Room{}, ErrRoundNotFound
 	}
 
-	updated := false
+	round := room.CurrentGame.CurrentRound
+	guess, delta, err := ResolveOverride(override, round.Board, round.Guesses)
+	if err != nil {
+		return models.Room{}, err
+	}
+
 	for index := range room.CurrentGame.CurrentRound.Guesses {
 		if room.CurrentGame.CurrentRound.Guesses[index].ID == guess.ID {
 			room.CurrentGame.CurrentRound.Guesses[index] = guess
-			updated = true
 			break
 		}
 	}
-	if !updated {
-		return models.Room{}, ErrGuessNotFound
-	}
 
-	if deltaEvent != nil {
+	if delta != 0 {
 		for index := range room.CurrentGame.Scoreboard {
 			if room.CurrentGame.Scoreboard[index].PlayerID == guess.PlayerID {
-				room.CurrentGame.Scoreboard[index].Score += deltaEvent.Delta
+				room.CurrentGame.Scoreboard[index].Score += delta
 				break
 			}
 		}
