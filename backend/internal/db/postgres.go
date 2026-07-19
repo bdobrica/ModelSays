@@ -96,12 +96,16 @@ func (repository *PostgresRoomRepository) AddPlayer(ctx context.Context, code st
 	defer tx.Rollback(ctx)
 
 	var roomCode string
-	if err := tx.QueryRow(ctx, `SELECT code FROM rooms WHERE code = $1 FOR UPDATE`, code).Scan(&roomCode); err != nil {
+	var roomStatus models.RoomStatus
+	if err := tx.QueryRow(ctx, `SELECT code, status FROM rooms WHERE code = $1 FOR UPDATE`, code).Scan(&roomCode, &roomStatus); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return models.Room{}, game.ErrRoomNotFound
 		}
 
 		return models.Room{}, fmt.Errorf("lock room: %w", err)
+	}
+	if roomStatus != models.RoomStatusLobby {
+		return models.Room{}, game.ErrRoomJoinClosed
 	}
 
 	_, err = tx.Exec(ctx, `

@@ -2,6 +2,7 @@ package db_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -99,6 +100,23 @@ func TestPostgresAtomicAnswerClaimsAndReload(t *testing.T) {
 	assertSingleClaim(t, reloadedRoom, answer.ID, answer.Score)
 	if totalScore(reloadedRoom) != answer.Score {
 		t.Fatalf("expected reconstructed scoreboard total %d, got %d", answer.Score, totalScore(reloadedRoom))
+	}
+}
+
+func TestPostgresRejectsJoinAfterGameStarts(t *testing.T) {
+	pool := integrationPool(t)
+	service := game.NewRoomService(db.NewPostgresRoomRepository(pool), nil)
+	ctx := context.Background()
+
+	room, host, err := service.CreateRoom(ctx, game.CreateRoomInput{RoomName: "Closed lobby", HostDisplayName: "Host"})
+	if err != nil {
+		t.Fatalf("CreateRoom returned error: %v", err)
+	}
+	if _, err := service.StartGame(ctx, game.StartGameInput{Code: room.Code, PlayerToken: host.Token}); err != nil {
+		t.Fatalf("StartGame returned error: %v", err)
+	}
+	if _, _, err := service.JoinRoom(ctx, game.JoinRoomInput{Code: room.Code, DisplayName: "Late Player"}); !errors.Is(err, game.ErrRoomJoinClosed) {
+		t.Fatalf("JoinRoom error = %v, want %v", err, game.ErrRoomJoinClosed)
 	}
 }
 

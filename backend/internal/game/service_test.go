@@ -85,7 +85,7 @@ func TestCreateRoomAndJoinRoom(t *testing.T) {
 		HostDisplayName: "Bogdan",
 		Settings: models.RoomSettings{
 			Mode:        models.GameModeSimultaneous,
-			TotalRounds: 6,
+			TotalRounds: 5,
 		},
 	})
 	if err != nil {
@@ -139,6 +139,72 @@ func TestJoinRoomRejectsDuplicateNames(t *testing.T) {
 	}
 }
 
+func TestJoinRoomRejectsPlayerAfterGameStarts(t *testing.T) {
+	t.Parallel()
+
+	service := NewInMemoryRoomService()
+	room, host, err := service.CreateRoom(context.Background(), CreateRoomInput{
+		RoomName: "Closed lobby", HostDisplayName: "Host",
+	})
+	if err != nil {
+		t.Fatalf("CreateRoom returned error: %v", err)
+	}
+	if _, err := service.StartGame(context.Background(), StartGameInput{Code: room.Code, PlayerToken: host.Token}); err != nil {
+		t.Fatalf("StartGame returned error: %v", err)
+	}
+	if _, _, err := service.JoinRoom(context.Background(), JoinRoomInput{Code: room.Code, DisplayName: "Late Player"}); !errors.Is(err, ErrRoomJoinClosed) {
+		t.Fatalf("JoinRoom error = %v, want %v", err, ErrRoomJoinClosed)
+	}
+}
+
+func TestCreateRoomValidatesMVPSettings(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		settings models.RoomSettings
+	}{
+		{name: "unsupported mode", settings: models.RoomSettings{Mode: "sequential"}},
+		{name: "too many rounds", settings: models.RoomSettings{TotalRounds: 6}},
+		{name: "timer too short", settings: models.RoomSettings{AnswerTimerSeconds: 14}},
+		{name: "timer too long", settings: models.RoomSettings{AnswerTimerSeconds: 121}},
+		{name: "unsupported locale", settings: models.RoomSettings{Locale: "ro"}},
+		{name: "unsupported model", settings: models.RoomSettings{PredictionModel: "expensive-model"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			service := NewInMemoryRoomService()
+			_, _, err := service.CreateRoom(context.Background(), CreateRoomInput{
+				RoomName: "Settings Test", HostDisplayName: "Host", Settings: test.settings,
+			})
+			if !errors.Is(err, ErrRoomSettingsInvalid) {
+				t.Fatalf("CreateRoom error = %v, want %v", err, ErrRoomSettingsInvalid)
+			}
+		})
+	}
+}
+
+func TestNamesUseRuneBoundsAndRejectControlCharacters(t *testing.T) {
+	t.Parallel()
+
+	service := NewInMemoryRoomService()
+	if _, _, err := service.CreateRoom(context.Background(), CreateRoomInput{
+		RoomName: "Joc de seară", HostDisplayName: "玩家",
+	}); err != nil {
+		t.Fatalf("valid Unicode names returned error: %v", err)
+	}
+	if _, _, err := service.CreateRoom(context.Background(), CreateRoomInput{
+		RoomName: "Bad\nRoom", HostDisplayName: "Host",
+	}); !errors.Is(err, ErrRoomNameInvalid) {
+		t.Fatalf("control-character room name error = %v, want %v", err, ErrRoomNameInvalid)
+	}
+	if _, _, err := service.CreateRoom(context.Background(), CreateRoomInput{
+		RoomName: "Valid Room", HostDisplayName: "Bad\tName",
+	}); !errors.Is(err, ErrDisplayNameInvalid) {
+		t.Fatalf("control-character display name error = %v, want %v", err, ErrDisplayNameInvalid)
+	}
+}
+
 func TestStartGameCreatesCurrentRound(t *testing.T) {
 	t.Parallel()
 
@@ -148,7 +214,7 @@ func TestStartGameCreatesCurrentRound(t *testing.T) {
 		HostDisplayName: "Bogdan",
 		Settings: models.RoomSettings{
 			Mode:               models.GameModeSimultaneous,
-			TotalRounds:        6,
+			TotalRounds:        5,
 			AnswerTimerSeconds: 30,
 			Locale:             "en",
 		},

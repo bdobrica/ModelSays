@@ -46,6 +46,7 @@ func main() {
 	}
 
 	roomService := game.NewRoomService(roomRepository, modelClient)
+	roomService.SetPredictionModel(cfg.DefaultModels.Prediction)
 	server := httpapi.NewServer(cfg, logger, roomService)
 
 	httpServer := &http.Server{

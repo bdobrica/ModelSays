@@ -50,6 +50,9 @@ func (repository *InMemoryRoomRepository) AddPlayer(_ context.Context, code stri
 	if !ok {
 		return models.Room{}, ErrRoomNotFound
 	}
+	if room.Status != models.RoomStatusLobby || room.CurrentGame != nil {
+		return models.Room{}, ErrRoomJoinClosed
+	}
 
 	for _, existingPlayer := range room.Players {
 		if normalizeDisplayName(existingPlayer.DisplayName) == normalizeDisplayName(player.DisplayName) {

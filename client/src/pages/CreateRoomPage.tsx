@@ -58,13 +58,14 @@ export function CreateRoomPage() {
             <form className="form-grid" onSubmit={handleSubmit}>
                 <label>
                     Room name
-                    <input value={roomName} onChange={(event) => setRoomName(event.target.value)} required />
+                    <input maxLength={48} value={roomName} onChange={(event) => setRoomName(event.target.value)} required />
                 </label>
 
                 <label>
                     Host display name
                     <input
                         value={hostDisplayName}
+                        maxLength={24}
                         onChange={(event) => setHostDisplayName(event.target.value)}
                         required
                     />
@@ -75,7 +76,7 @@ export function CreateRoomPage() {
                     <input
                         type="number"
                         min={1}
-                        max={12}
+                        max={5}
                         value={totalRounds}
                         onChange={(event) => setTotalRounds(Number(event.target.value))}
                     />

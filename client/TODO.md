@@ -9,6 +9,7 @@ Status note:
 	- live room updates currently use 3-second polling, not WebSockets;
 	- loading and error handling still exist as inline page states, not shared reusable components;
 	- the create-room flow currently fixes game mode to simultaneous instead of exposing a mode selector.
+	- the creation form and backend now share the MVP bounds of 1–5 rounds, a 15–120 second timer, and bounded names.
 
 ## Phase 0 — Project Setup
 
@@ -60,7 +61,7 @@ Status note:
 
 - [x] Build join-room screen.
 - [ ] Validate room code.
-- [ ] Validate display name.
+- [x] Apply server-compatible display-name length bounds.
 - [x] Call join-room API.
 - [x] Store room code locally.
 - [x] Store reconnect token locally.

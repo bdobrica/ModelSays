@@ -4,6 +4,8 @@ Model Says is a real-time party game where players try to guess what an AI model
 
 This client is a React app for joining rooms, playing rounds, submitting answers, watching reveals, and viewing scores. It should be optimized for parties, Zoom/team-building sessions, and casual play.
 
+The current creation form follows the backend MVP contract: simultaneous mode, 1–5 rounds, a 15–120 second timer, English locale, and the default `gpt-4.1-mini` prediction model. Room and display-name inputs are capped at the server's 48- and 24-character limits. Invite links stop accepting new players once the host starts the game.
+
 ## Core Experience
 
 Players are not guessing real survey data.

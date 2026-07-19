@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -12,6 +13,8 @@ import (
 	"github.com/bogdandobrica/modelsays/backend/internal/game"
 	"github.com/bogdandobrica/modelsays/backend/internal/models"
 )
+
+const maxRequestBodyBytes = 16 * 1024
 
 type Server struct {
 	config      config.Config
@@ -137,7 +140,7 @@ func (server *Server) handleHealth(writer http.ResponseWriter, _ *http.Request) 
 
 func (server *Server) handleCreateRoom(writer http.ResponseWriter, request *http.Request) {
 	var payload createRoomRequest
-	if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+	if err := decodeJSONBody(writer, request, &payload); err != nil {
 		writeError(writer, http.StatusBadRequest, "invalid JSON payload")
 		return
 	}
@@ -198,7 +201,7 @@ func (server *Server) handleGetRoom(writer http.ResponseWriter, request *http.Re
 
 func (server *Server) handleJoinRoom(writer http.ResponseWriter, request *http.Request, code string) {
 	var payload joinRoomRequest
-	if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+	if err := decodeJSONBody(writer, request, &payload); err != nil {
 		writeError(writer, http.StatusBadRequest, "invalid JSON payload")
 		return
 	}
@@ -217,7 +220,7 @@ func (server *Server) handleJoinRoom(writer http.ResponseWriter, request *http.R
 
 func (server *Server) handleStartGame(writer http.ResponseWriter, request *http.Request, code string) {
 	var payload startGameRequest
-	if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+	if err := decodeJSONBody(writer, request, &payload); err != nil {
 		writeError(writer, http.StatusBadRequest, "invalid JSON payload")
 		return
 	}
@@ -236,7 +239,7 @@ func (server *Server) handleStartGame(writer http.ResponseWriter, request *http.
 
 func (server *Server) handleSubmitGuess(writer http.ResponseWriter, request *http.Request, code string, roundID string) {
 	var payload submitGuessRequest
-	if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+	if err := decodeJSONBody(writer, request, &payload); err != nil {
 		writeError(writer, http.StatusBadRequest, "invalid JSON payload")
 		return
 	}
@@ -257,7 +260,7 @@ func (server *Server) handleSubmitGuess(writer http.ResponseWriter, request *htt
 
 func (server *Server) handleRevealRound(writer http.ResponseWriter, request *http.Request, code string, roundID string) {
 	var payload revealRoundRequest
-	if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+	if err := decodeJSONBody(writer, request, &payload); err != nil {
 		writeError(writer, http.StatusBadRequest, "invalid JSON payload")
 		return
 	}
@@ -277,7 +280,7 @@ func (server *Server) handleRevealRound(writer http.ResponseWriter, request *htt
 
 func (server *Server) handleNextRound(writer http.ResponseWriter, request *http.Request, code string) {
 	var payload nextRoundRequest
-	if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+	if err := decodeJSONBody(writer, request, &payload); err != nil {
 		writeError(writer, http.StatusBadRequest, "invalid JSON payload")
 		return
 	}
@@ -296,7 +299,7 @@ func (server *Server) handleNextRound(writer http.ResponseWriter, request *http.
 
 func (server *Server) handleOverrideMatch(writer http.ResponseWriter, request *http.Request, code string) {
 	var payload overrideMatchRequest
-	if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+	if err := decodeJSONBody(writer, request, &payload); err != nil {
 		writeError(writer, http.StatusBadRequest, "invalid JSON payload")
 		return
 	}
@@ -326,18 +329,34 @@ func (server *Server) writeDomainError(writer http.ResponseWriter, err error) {
 		writeError(writer, http.StatusForbidden, err.Error())
 	case errors.Is(err, game.ErrUnauthorizedReveal), errors.Is(err, game.ErrUnauthorizedAdvance), errors.Is(err, game.ErrUnauthorizedOverride), errors.Is(err, game.ErrPlayerNotFound):
 		writeError(writer, http.StatusForbidden, err.Error())
-	case errors.Is(err, game.ErrGameAlreadyStarted), errors.Is(err, game.ErrGameAlreadyCompleted):
+	case errors.Is(err, game.ErrGameAlreadyStarted), errors.Is(err, game.ErrGameAlreadyCompleted), errors.Is(err, game.ErrRoomJoinClosed):
 		writeError(writer, http.StatusConflict, err.Error())
 	case errors.Is(err, game.ErrRoundNotAcceptingGuesses), errors.Is(err, game.ErrAnswerPhaseExpired), errors.Is(err, game.ErrRoundAlreadyRevealed), errors.Is(err, game.ErrRoundNotRevealed), errors.Is(err, game.ErrGuessAlreadySubmitted):
 		writeError(writer, http.StatusConflict, err.Error())
 	case errors.Is(err, game.ErrContentUnavailable):
 		writeError(writer, http.StatusServiceUnavailable, game.ErrContentUnavailable.Error())
-	case errors.Is(err, game.ErrDisplayNameInvalid), errors.Is(err, game.ErrRoomNameInvalid), errors.Is(err, game.ErrDuplicatePlayer), errors.Is(err, game.ErrAnswerInvalid), errors.Is(err, game.ErrPredictionAnswerNotFound), errors.Is(err, game.ErrGuessNotFound):
+	case errors.Is(err, game.ErrDisplayNameInvalid), errors.Is(err, game.ErrRoomNameInvalid), errors.Is(err, game.ErrRoomCodeInvalid), errors.Is(err, game.ErrRoomSettingsInvalid), errors.Is(err, game.ErrDuplicatePlayer), errors.Is(err, game.ErrAnswerInvalid), errors.Is(err, game.ErrPredictionAnswerNotFound), errors.Is(err, game.ErrGuessNotFound):
 		writeError(writer, http.StatusBadRequest, err.Error())
 	default:
 		server.logger.Error("unexpected request failure", "error", err)
 		writeError(writer, http.StatusInternalServerError, "internal server error")
 	}
+}
+
+func decodeJSONBody(writer http.ResponseWriter, request *http.Request, destination any) error {
+	request.Body = http.MaxBytesReader(writer, request.Body, maxRequestBodyBytes)
+	decoder := json.NewDecoder(request.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(destination); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("multiple JSON values")
+		}
+		return err
+	}
+	return nil
 }
 
 func (server *Server) withCORS(next http.Handler) http.Handler {

@@ -158,6 +158,8 @@ make verify
 
 Without `OPENAI_API_KEY`, games use a five-question English curated bank and support the full 1–5 round MVP flow. With OpenAI enabled, question and board responses use strict JSON schemas and are validated independently of the provider. Invalid or failed generation is retried once, then the server selects the unused curated entry for that round. Only failure of both paths returns a temporary content-unavailable response.
 
+The supported MVP room contract is intentionally narrow: simultaneous mode, 1–5 rounds, a 15–120 second answer timer, English (`en`), and the server-configured `DEFAULT_PREDICTION_MODEL`. Room names are 3–48 Unicode characters and display names are 2–24; control characters are rejected. Room codes are six characters from the displayed invite alphabet. New players may join only while the room is in the lobby; attempting to reuse an invite after start returns a conflict response. JSON mutation requests are limited to 16 KiB and reject unknown fields, trailing values, and malformed input.
+
 ## Suggested Tech Stack
 
 ### Backend

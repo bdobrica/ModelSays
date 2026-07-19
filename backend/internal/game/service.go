@@ -20,8 +20,11 @@ var (
 	ErrRoomNotFound             = errors.New("room not found")
 	ErrDisplayNameInvalid       = errors.New("display name must be between 2 and 24 characters")
 	ErrRoomNameInvalid          = errors.New("room name must be between 3 and 48 characters")
+	ErrRoomCodeInvalid          = errors.New("room code must be 6 letters or digits")
 	ErrDuplicatePlayer          = errors.New("display name already taken in this room")
+	ErrRoomJoinClosed           = errors.New("game has started; new players cannot join")
 	ErrRoomCodeConflict         = errors.New("room code already exists")
+	ErrRoomSettingsInvalid      = errors.New("room settings are not supported")
 	ErrUnauthorizedStart        = errors.New("only the host can start the game")
 	ErrUnauthorizedReveal       = errors.New("only the host can reveal the round")
 	ErrUnauthorizedAdvance      = errors.New("only the host can advance to the next round")
@@ -53,6 +56,11 @@ const (
 	maxAliasCount            = 8
 	maxBoardMetadataRunes    = 80
 	maxPredictionAnswerScore = 100
+	minTotalRounds           = 1
+	maxTotalRounds           = 5
+	minAnswerTimerSeconds    = 15
+	maxAnswerTimerSeconds    = 120
+	defaultPredictionModel   = "gpt-4.1-mini"
 )
 
 type CreateRoomInput struct {
@@ -98,10 +106,11 @@ type OverrideMatchInput struct {
 }
 
 type RoomService struct {
-	repository     RoomRepository
-	modelClient    llm.ModelClient
-	fallbackClient llm.ModelClient
-	clock          Clock
+	repository      RoomRepository
+	modelClient     llm.ModelClient
+	fallbackClient  llm.ModelClient
+	clock           Clock
+	predictionModel string
 }
 
 type Clock interface {
@@ -154,10 +163,17 @@ func NewRoomServiceWithClock(repository RoomRepository, modelClient llm.ModelCli
 	}
 
 	return &RoomService{
-		repository:     repository,
-		modelClient:    modelClient,
-		fallbackClient: llm.NewStaticModelClient(),
-		clock:          clock,
+		repository:      repository,
+		modelClient:     modelClient,
+		fallbackClient:  llm.NewStaticModelClient(),
+		clock:           clock,
+		predictionModel: defaultPredictionModel,
+	}
+}
+
+func (service *RoomService) SetPredictionModel(model string) {
+	if model = strings.TrimSpace(model); model != "" {
+		service.predictionModel = model
 	}
 }
 
@@ -169,7 +185,7 @@ func (service *RoomService) CreateRoom(ctx context.Context, input CreateRoomInpu
 	roomName := strings.TrimSpace(input.RoomName)
 	hostDisplayName := strings.TrimSpace(input.HostDisplayName)
 
-	if len(roomName) < 3 || len(roomName) > 48 {
+	if validateBoundedText(roomName, 3, 48) != nil {
 		return models.Room{}, models.Player{}, ErrRoomNameInvalid
 	}
 
@@ -178,6 +194,9 @@ func (service *RoomService) CreateRoom(ctx context.Context, input CreateRoomInpu
 	}
 
 	settings := normalizeSettings(input.Settings)
+	if err := service.validateSettings(settings); err != nil {
+		return models.Room{}, models.Player{}, err
+	}
 	now := service.clock.Now()
 	host := models.Player{
 		ID:          newID(),
@@ -212,10 +231,18 @@ func (service *RoomService) CreateRoom(ctx context.Context, input CreateRoomInpu
 }
 
 func (service *RoomService) GetRoom(ctx context.Context, code string) (models.Room, error) {
-	return service.repository.GetRoom(ctx, strings.ToUpper(strings.TrimSpace(code)))
+	code, err := normalizeRoomCode(code)
+	if err != nil {
+		return models.Room{}, err
+	}
+	return service.repository.GetRoom(ctx, code)
 }
 
 func (service *RoomService) JoinRoom(ctx context.Context, input JoinRoomInput) (models.Room, models.Player, error) {
+	code, err := normalizeRoomCode(input.Code)
+	if err != nil {
+		return models.Room{}, models.Player{}, err
+	}
 	displayName := strings.TrimSpace(input.DisplayName)
 	if err := validateDisplayName(displayName); err != nil {
 		return models.Room{}, models.Player{}, err
@@ -229,7 +256,7 @@ func (service *RoomService) JoinRoom(ctx context.Context, input JoinRoomInput) (
 		Token:       newToken(),
 	}
 
-	room, err := service.repository.AddPlayer(ctx, strings.ToUpper(strings.TrimSpace(input.Code)), player)
+	room, err := service.repository.AddPlayer(ctx, code, player)
 	if err != nil {
 		return models.Room{}, models.Player{}, err
 	}
@@ -238,7 +265,10 @@ func (service *RoomService) JoinRoom(ctx context.Context, input JoinRoomInput) (
 }
 
 func (service *RoomService) StartGame(ctx context.Context, input StartGameInput) (models.Room, error) {
-	code := strings.ToUpper(strings.TrimSpace(input.Code))
+	code, err := normalizeRoomCode(input.Code)
+	if err != nil {
+		return models.Room{}, err
+	}
 	playerToken := strings.TrimSpace(input.PlayerToken)
 
 	room, err := service.repository.GetRoom(ctx, code)
@@ -286,10 +316,13 @@ func (service *RoomService) StartGame(ctx context.Context, input StartGameInput)
 }
 
 func (service *RoomService) SubmitGuess(ctx context.Context, input SubmitGuessInput) (models.Room, error) {
-	code := strings.ToUpper(strings.TrimSpace(input.Code))
+	code, err := normalizeRoomCode(input.Code)
+	if err != nil {
+		return models.Room{}, err
+	}
 	roundID := strings.TrimSpace(input.RoundID)
 	answer := strings.TrimSpace(input.Answer)
-	if len(answer) < 1 || len(answer) > 120 {
+	if validateBoundedText(answer, 1, 120) != nil {
 		return models.Room{}, ErrAnswerInvalid
 	}
 
@@ -334,7 +367,10 @@ func (service *RoomService) SubmitGuess(ctx context.Context, input SubmitGuessIn
 }
 
 func (service *RoomService) RevealRound(ctx context.Context, input RevealRoundInput) (models.Room, error) {
-	code := strings.ToUpper(strings.TrimSpace(input.Code))
+	code, err := normalizeRoomCode(input.Code)
+	if err != nil {
+		return models.Room{}, err
+	}
 	roundID := strings.TrimSpace(input.RoundID)
 	room, err := service.repository.GetRoom(ctx, code)
 	if err != nil {
@@ -359,7 +395,10 @@ func (service *RoomService) RevealRound(ctx context.Context, input RevealRoundIn
 }
 
 func (service *RoomService) NextRound(ctx context.Context, input NextRoundInput) (models.Room, error) {
-	code := strings.ToUpper(strings.TrimSpace(input.Code))
+	code, err := normalizeRoomCode(input.Code)
+	if err != nil {
+		return models.Room{}, err
+	}
 	room, err := service.repository.GetRoom(ctx, code)
 	if err != nil {
 		return models.Room{}, err
@@ -413,7 +452,10 @@ func (service *RoomService) NextRound(ctx context.Context, input NextRoundInput)
 }
 
 func (service *RoomService) OverrideMatch(ctx context.Context, input OverrideMatchInput) (models.Room, error) {
-	code := strings.ToUpper(strings.TrimSpace(input.Code))
+	code, err := normalizeRoomCode(input.Code)
+	if err != nil {
+		return models.Room{}, err
+	}
 	room, err := service.repository.GetRoom(ctx, code)
 	if err != nil {
 		return models.Room{}, err
@@ -456,28 +498,75 @@ func normalizeSettings(settings models.RoomSettings) models.RoomSettings {
 	if settings.Mode == "" {
 		settings.Mode = models.GameModeSimultaneous
 	}
-	if settings.TotalRounds <= 0 {
+	if settings.TotalRounds == 0 {
 		settings.TotalRounds = 5
 	}
-	if settings.AnswerTimerSeconds <= 0 {
+	if settings.AnswerTimerSeconds == 0 {
 		settings.AnswerTimerSeconds = 45
 	}
 	if strings.TrimSpace(settings.Locale) == "" {
 		settings.Locale = "en"
 	}
+	settings.Locale = strings.TrimSpace(settings.Locale)
 	if strings.TrimSpace(settings.PredictionModel) == "" {
-		settings.PredictionModel = "gpt-4.1-mini"
+		settings.PredictionModel = defaultPredictionModel
 	}
+	settings.PredictionModel = strings.TrimSpace(settings.PredictionModel)
 
 	return settings
 }
 
 func validateDisplayName(displayName string) error {
-	if len(displayName) < 2 || len(displayName) > 24 {
+	if validateBoundedText(displayName, 2, 24) != nil {
 		return ErrDisplayNameInvalid
 	}
 
 	return nil
+}
+
+func (service *RoomService) validateSettings(settings models.RoomSettings) error {
+	if settings.Mode != models.GameModeSimultaneous {
+		return fmt.Errorf("%w: mode must be simultaneous", ErrRoomSettingsInvalid)
+	}
+	if settings.TotalRounds < minTotalRounds || settings.TotalRounds > maxTotalRounds {
+		return fmt.Errorf("%w: total rounds must be between %d and %d", ErrRoomSettingsInvalid, minTotalRounds, maxTotalRounds)
+	}
+	if settings.AnswerTimerSeconds < minAnswerTimerSeconds || settings.AnswerTimerSeconds > maxAnswerTimerSeconds {
+		return fmt.Errorf("%w: answer timer must be between %d and %d seconds", ErrRoomSettingsInvalid, minAnswerTimerSeconds, maxAnswerTimerSeconds)
+	}
+	if settings.Locale != "en" {
+		return fmt.Errorf("%w: locale must be en", ErrRoomSettingsInvalid)
+	}
+	if settings.PredictionModel != service.predictionModel {
+		return fmt.Errorf("%w: prediction model must be %s", ErrRoomSettingsInvalid, service.predictionModel)
+	}
+	return nil
+}
+
+func validateBoundedText(value string, minimum int, maximum int) error {
+	count := utf8.RuneCountInString(value)
+	if count < minimum || count > maximum {
+		return ErrRoomSettingsInvalid
+	}
+	for _, character := range value {
+		if unicode.IsControl(character) {
+			return ErrRoomSettingsInvalid
+		}
+	}
+	return nil
+}
+
+func normalizeRoomCode(code string) (string, error) {
+	code = strings.ToUpper(strings.TrimSpace(code))
+	if utf8.RuneCountInString(code) != 6 {
+		return "", ErrRoomCodeInvalid
+	}
+	for _, character := range code {
+		if !strings.ContainsRune(roomAlphabet, character) {
+			return "", ErrRoomCodeInvalid
+		}
+	}
+	return code, nil
 }
 
 func cloneRoom(room models.Room) models.Room {

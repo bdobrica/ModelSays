@@ -11,6 +11,7 @@ Status note:
   - the public room projection hides boards, guesses, outcomes, awarded points, and current-round score changes until reveal while preserving submission progress.
   - MVP matching is deterministic Unicode-aware normalization plus exact canonical/alias equality; semantic judge-model matching is deferred.
   - model content uses strict schemas, provider-independent validation, one retry, and a five-round curated fallback; raw response and cost auditing remain deferred.
+  - room creation now enforces the narrow MVP settings and name/code bounds, strict bounded JSON decoding, and lobby-only joins in both repositories; public-launch rate limiting remains deferred.
 
 ## Phase 0 — Project Setup
 
@@ -56,6 +57,8 @@ Status note:
 - [x] Implement `GET /api/rooms/{code}`.
 - [x] Implement `POST /api/rooms/{code}/join`.
 - [x] Implement display-name validation.
+- [x] Reject joins after game start under the room lock.
+- [x] Enforce MVP settings and strict bounded JSON request decoding.
 - [x] Implement host assignment.
 - [x] Implement player reconnect token.
 - [ ] Implement player heartbeat.

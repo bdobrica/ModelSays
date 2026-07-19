@@ -179,6 +179,62 @@ func TestExpiredSubmissionReturnsStableConflictResponse(t *testing.T) {
 	}
 }
 
+func TestCreateRoomRejectsInvalidSettingsAndMalformedBodies(t *testing.T) {
+	t.Parallel()
+
+	server := NewServer(config.Config{}, slog.New(slog.NewTextHandler(io.Discard, nil)), game.NewInMemoryRoomService())
+	valid := `{"roomName":"Friday Night","hostDisplayName":"Host","settings":{"mode":"simultaneous","totalRounds":1,"answerTimerSeconds":15,"locale":"en","predictionModel":"gpt-4.1-mini","teamSafeMode":false}}`
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "zero rounds after explicit invalid timer", body: strings.Replace(valid, `"totalRounds":1`, `"totalRounds":6`, 1)},
+		{name: "timer below lower bound", body: strings.Replace(valid, `"answerTimerSeconds":15`, `"answerTimerSeconds":14`, 1)},
+		{name: "timer above upper bound", body: strings.Replace(valid, `"answerTimerSeconds":15`, `"answerTimerSeconds":121`, 1)},
+		{name: "unsupported mode", body: strings.Replace(valid, `"simultaneous"`, `"sequential"`, 1)},
+		{name: "unsupported locale", body: strings.Replace(valid, `"locale":"en"`, `"locale":"ro"`, 1)},
+		{name: "unsupported model", body: strings.Replace(valid, `"gpt-4.1-mini"`, `"other-model"`, 1)},
+		{name: "unknown field", body: strings.Replace(valid, `"roomName"`, `"unexpected":true,"roomName"`, 1)},
+		{name: "trailing JSON", body: valid + `{}`},
+		{name: "oversized body", body: valid + strings.Repeat(" ", maxRequestBodyBytes)},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodPost, "/api/rooms", strings.NewReader(test.body))
+			request.Header.Set("Content-Type", "application/json")
+			server.Handler().ServeHTTP(response, request)
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusBadRequest, response.Body.String())
+			}
+		})
+	}
+}
+
+func TestCreateJoinStartHTTPFlowAndJoinClosure(t *testing.T) {
+	t.Parallel()
+
+	server := NewServer(config.Config{}, slog.New(slog.NewTextHandler(io.Discard, nil)), game.NewInMemoryRoomService())
+	created := performRoomRequest(t, server, http.MethodPost, "/api/rooms", `{
+		"roomName":"Friday Night","hostDisplayName":"Host",
+		"settings":{"mode":"simultaneous","totalRounds":5,"answerTimerSeconds":120,"locale":"en","predictionModel":"gpt-4.1-mini","teamSafeMode":true}
+	}`)
+	code := nestedString(t, created, "room", "code")
+	hostToken := nestedString(t, created, "player", "token")
+	performRoomRequest(t, server, http.MethodPost, fmt.Sprintf("/api/rooms/%s/join", code), `{"displayName":"Player"}`)
+	performRoomRequest(t, server, http.MethodPost, fmt.Sprintf("/api/rooms/%s/start", code), fmt.Sprintf(`{"playerToken":%q}`, hostToken))
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/rooms/%s/join", code), strings.NewReader(`{"displayName":"Late Player"}`))
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusConflict {
+		t.Fatalf("late join status = %d, want %d: %s", response.Code, http.StatusConflict, response.Body.String())
+	}
+	if body := strings.TrimSpace(response.Body.String()); body != `{"error":"game has started; new players cannot join"}` {
+		t.Fatalf("late join response = %s", body)
+	}
+}
+
 func performRoomRequest(t *testing.T, server *Server, method string, path string, body string) map[string]any {
 	t.Helper()
 

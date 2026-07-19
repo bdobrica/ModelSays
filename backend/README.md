@@ -422,6 +422,14 @@ Do not scatter provider-specific logic throughout handlers.
 
 The MVP requests strict JSON-schema responses from OpenAI, then applies the same provider-independent validation used for curated content. A playable board requires one bounded question with ID/locale/category metadata and exactly five ordered answers with unique normalized canonicals, ranks 1–5, strictly descending scores from 1–100, bounded canonical/alias text, bounded aliases, and non-empty provider/model/prompt metadata. Canonical and alias ownership must also be unambiguous after normalization.
 
+## Supported MVP API input
+
+Room creation accepts only simultaneous mode, 1–5 rounds, a 15–120 second answer timer, locale `en`, and the prediction model configured by `DEFAULT_PREDICTION_MODEL` (default `gpt-4.1-mini`). Omitted settings retain the defaults of five rounds and 45 seconds. Room names must contain 3–48 Unicode characters and display names 2–24; control characters are rejected. Route room codes must be six characters from the invite-code alphabet.
+
+Joining creates a new player only while the room is in the lobby. Once start wins the room lock, later joins return HTTP `409` with `game has started; new players cannot join`. Player-token mutations resolve the token only within the requested room and operate only on that room's current requested round.
+
+All JSON mutation bodies are capped at 16 KiB. Decoding rejects unknown object fields, malformed JSON, empty bodies, and additional trailing JSON values. Validation failures return HTTP `400`.
+
 Generation gets two attempts. If either attempt fails or returns invalid content, the server falls back to the curated bank entry for that round. The English bank contains five unique validated rounds, matching the maximum MVP round count. Provider failures do not block a static game; if the model and curated paths both fail, start/advance returns HTTP 503 with a retryable content-unavailable message. Persisted board metadata records the actual provider, requested model, and prompt version rather than trusting model-authored metadata. Raw responses, token use, and cost auditing remain post-MVP work.
 
 ## Safety and Content Rules
