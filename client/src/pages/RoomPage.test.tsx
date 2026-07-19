@@ -63,6 +63,7 @@ const board = {
 function roomState(phase: 'lobby' | 'answering' | 'revealed' | 'completed', submitted = false): api.Room {
   const room: api.Room = {
     code: 'ABC234',
+    revision: phase === 'lobby' ? 0 : phase === 'answering' ? 1 : phase === 'revealed' ? 2 : 3,
     name: 'Test room',
     status: phase === 'lobby' ? 'lobby' : phase === 'completed' ? 'completed' : 'in_progress',
     settings,
@@ -215,7 +216,7 @@ describe('RoomPage', () => {
       .mockResolvedValueOnce({ room: roomState('revealed') })
 
     renderRoom()
-    await act(async () => vi.advanceTimersByTime(3000))
+    await act(async () => vi.advanceTimersByTime(5000))
     await act(async () => {})
     expect(screen.getByText('Answers and awarded scores are now revealed.')).toBeInTheDocument()
 

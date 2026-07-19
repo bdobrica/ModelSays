@@ -79,7 +79,7 @@ Then restart `make install` or `make start`. Model output is validated, retried 
 
 Raw provider response capture is disabled by default. See [`docs/provider-operations.md`](docs/provider-operations.md) before changing provider limits or retention settings.
 
-The backend also exposes authenticated SSE room invalidations. The shipped browser still polls until its event client is implemented, so streaming failure does not interrupt play. See [`docs/events.md`](docs/events.md) for the event contract and connection-limit configuration.
+The browser uses authenticated SSE invalidations for prompt updates and automatically falls back to polling if streaming is unavailable. The room page shows a non-blocking live/reconnecting/offline indicator. If it remains in reconnecting mode, verify that reverse proxies do not buffer `text/event-stream`, preserve `X-Player-Token` and `Last-Event-ID`, and allow long-lived responses. Play can continue through polling recovery. See [`docs/events.md`](docs/events.md) for the event contract and connection-limit configuration.
 
 ## Verification
 

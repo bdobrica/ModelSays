@@ -1,24 +1,28 @@
 # Model Says — Client
 
-Model Says is a polling-based party game where players try to guess what an AI model thinks the most common answers are.
+Model Says is a live-updating party game where players try to guess what an AI model thinks the most common answers are.
 
 This client is a React app for joining rooms, playing rounds, submitting answers, watching reveals, and viewing scores. It should be optimized for parties, Zoom/team-building sessions, and casual play.
 
 The current creation form follows the backend MVP contract: simultaneous mode, 1–5 rounds, a 15–120 second timer, English locale, and the default `gpt-4.1-mini` prediction model. Room and display-name inputs are capped at the server's 48- and 24-character limits. Invite links stop accepting new players once the host starts the game.
 
-The playable client uses one request at a time with sequenced polling, refetches after every mutation, slows polling in a hidden tab, and stops it after completion. It validates a matching local token with the backend on refresh instead of trusting the stored host role. The answering view derives its countdown from the server deadline and disables local input at expiry; the server remains authoritative. Final scores are ranked with winners and ties identified. The backend offers authenticated SSE invalidations, but client consumption, presence, and cross-device session transfer are deferred.
+The playable client authenticates an SSE stream with a request header and treats every event as an invalidation: authoritative state still comes from a sequenced room refetch. It coalesces bursts, resumes from the last applied room revision, detects gaps, reconnects with bounded exponential backoff, and automatically retains slower polling as recovery. Polling and reconnect work are reduced in hidden tabs and stop at game completion or when the room route is left. A polite status indicator reports live, reconnecting, offline, and complete states without blocking play.
 
 ## Supported MVP
 
 The client supports the complete simultaneous game path on one room route: create/join, lobby polling, host start, a server-deadline countdown, one locked answer, expiry state, reveal and host override, private post-reveal semantic suggestions for the host, next round, final ranked winners/ties, and server-validated same-browser refresh recovery. The layout collapses to one column below 900 px for phone-sized player views.
 
-The room-flow component suite covers host and player states, expiry, stale polling responses, reveal/override, final ties, and session recovery. The PostgreSQL lifecycle gate separately exercises one host and two player identities across the persisted API flow.
+The client suite covers the event contract and every event type, header authentication, burst coalescing, duplicate/out-of-order/gapped revisions, malformed/secret-bearing payload rejection, reconnect/resume, offline/online and stop behavior, plus room-flow stale-response protection. The PostgreSQL lifecycle gate separately exercises one host and two player identities across the persisted API flow.
 
 The root `make baseline` command builds the production client and records its uncompressed asset size alongside 3-, 8-, and 12-player API polling workloads. Current bundle evidence and beta budgets are documented in [`docs/baselines/pb-00.md`](../docs/baselines/pb-00.md).
 
+## Live updates and recovery
+
+The client opens `GET /api/rooms/{code}/events` with `X-Player-Token`; credentials never enter the URL. Live invalidations normally produce an immediate room refetch, while a 30-second safety poll recovers an event-publication failure. When streaming is unavailable the UI reports reconnecting and polls every five seconds while retrying the stream from its last applied revision. Hidden tabs poll every 30 seconds. Returning to a visible tab or an online network triggers immediate reconnect/refetch.
+
 ## Known Limitations
 
-Room updates still use three-second polling until the authenticated SSE client and fallback behavior are implemented. Reveal and advancement require the host. Matching corrections happen only after reveal. Sessions do not transfer across devices, and presence is not tracked. Teams, sequential mode, animations, round deltas, play-again/share controls, and a dedicated browser end-to-end harness are deferred. Physical-device and external-player usability testing is still recommended before public release.
+Reveal and advancement require the host. Matching corrections happen only after reveal. Sessions do not transfer across devices, and presence is not tracked. Teams, sequential mode, animations, round deltas, play-again/share controls, and a dedicated browser end-to-end harness are deferred. Physical-device and lossy mobile-network playtesting is still recommended before public release.
 
 ## Core Experience
 

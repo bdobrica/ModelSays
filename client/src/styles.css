@@ -200,6 +200,32 @@ input {
     color: var(--text-dim);
 }
 
+.connection-indicator {
+    display: inline-flex;
+    align-items: center;
+    width: fit-content;
+    gap: 0.45rem;
+    margin: 0;
+    font-size: 0.88rem;
+}
+
+.connection-indicator::before {
+    width: 0.6rem;
+    height: 0.6rem;
+    border-radius: 50%;
+    background: var(--secondary);
+    content: "";
+}
+
+.connection-live::before {
+    background: #61d895;
+}
+
+.connection-fallback::before,
+.connection-offline::before {
+    background: #ffba6b;
+}
+
 .hero-actions {
     display: flex;
     gap: 0.75rem;

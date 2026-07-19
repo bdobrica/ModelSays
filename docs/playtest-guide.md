@@ -14,7 +14,8 @@ Use this guide for facilitated tests of the existing simultaneous mode. Record r
 - Ask whether the countdown, submitted state, expiry, reveal ownership, and duplicate rule are clear.
 - Record every disputed deterministic match, the raw guess, expected answer, and whether the host override was discoverable and sufficient.
 - Count host interventions and estimate host effort per round.
-- Note polling delay, stale state, refresh/reconnect behavior, and mobile keyboard/layout problems.
+- Observe the live-update indicator during normal play, a backend restart, and a short offline/online cycle. Record mutation-to-visible delay, reconnect delay, stale state, and whether fallback polling is understandable.
+- On a phone or throttled mobile-network profile, background and restore the tab. Confirm it catches up without revealing hidden state, duplicating actions, or requiring a manual refresh.
 
 ## After play
 

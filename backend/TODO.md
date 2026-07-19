@@ -77,7 +77,7 @@ Status note:
 - [x] Persist ordered room revisions and a bounded replay log.
 - [x] Publish content-free join, start, submission-progress, reveal, score, round, and completion invalidations.
 - [x] Add heartbeat, process connection limits, slow-consumer write deadlines, and graceful shutdown.
-- [ ] Consume events in the browser with reconnect and polling fallback (FUTURE-02B).
+- [x] Consume events in the browser with reconnect and polling fallback (FUTURE-02B).
 - [ ] Add player presence/heartbeat semantics separately from transport heartbeat.
 
 ## Phase 4 — Game Engine

@@ -7,7 +7,7 @@ Status note:
 - The controlled simultaneous MVP flow is complete and CI-gated. Unchecked items are known limitations or post-MVP polish, not prerequisites for the current playable scope.
 - Current scope changes:
 	- the current client uses a single room route that switches between lobby, answer, reveal, and completion states instead of separate screens;
-	- live room updates use sequenced, non-overlapping 3-second polling (slower in hidden tabs); the backend SSE invalidation stream is ready for FUTURE-02B consumption;
+	- live room updates use authenticated SSE invalidations, sequenced authoritative refetches, bounded reconnect/resume, and slower polling recovery; hidden tabs reduce work;
 	- same-browser refresh validates the stored token with the server; presence and cross-device transfer remain deferred;
 	- loading and error handling still exist as inline page states, not shared reusable components;
 	- the create-room flow currently fixes game mode to simultaneous instead of exposing a mode selector.
@@ -20,7 +20,7 @@ Status note:
 - [x] Create React + TypeScript + Vite app.
 - [x] Add router.
 - [x] Add API client wrapper.
-- [ ] Add authenticated SSE client wrapper with polling fallback.
+- [x] Add authenticated SSE client wrapper with polling fallback.
 - [x] Add environment variable handling.
 - [ ] Add linting.
 - [ ] Add formatting.
@@ -82,7 +82,7 @@ Status note:
 - [x] Show host badge.
 - [ ] Show team assignments if enabled.
 - [x] Show settings summary.
-- [ ] Connect to the SSE invalidation stream.
+- [x] Connect to the SSE invalidation stream.
 - [x] Update lobby on player join/leave.
 - [ ] Add ready toggle if backend supports it.
 - [x] Show start button for host only.
@@ -91,14 +91,14 @@ Status note:
 
 ## Phase 5 — SSE Invalidation State
 
-- [ ] Create SSE connection/reconnect manager.
-- [ ] Authenticate the stream with the room/player token header.
-- [ ] Subscribe to room events.
+- [x] Create SSE connection/reconnect manager.
+- [x] Authenticate the stream with the room/player token header.
+- [x] Subscribe to room events.
 - [x] Recover and validate the stored session during same-browser refresh.
 - [x] Refetch room state after polling/mutations.
-- [ ] Coalesce every `room_invalidation` type into an authoritative room refetch.
-- [ ] Resume by revision and detect duplicate, out-of-order, and gapped events.
-- [ ] Fall back to polling and show a non-blocking connection indicator.
+- [x] Coalesce every `room_invalidation` type into an authoritative room refetch.
+- [x] Resume by revision and detect duplicate, out-of-order, and gapped events.
+- [x] Fall back to polling and show a non-blocking connection indicator.
 
 ## Phase 6 — Round Play Screen
 

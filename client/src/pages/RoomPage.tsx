@@ -14,10 +14,12 @@ import {
   type JudgeSuggestion,
   type Room,
 } from '../lib/api'
+import { RoomEventClient, type RoomConnectionState } from '../lib/roomEvents'
 import { clearSession, loadSession, saveSession } from '../lib/session'
 
-const activePollMilliseconds = 3000
-const hiddenPollMilliseconds = 15000
+const liveSafetyPollMilliseconds = 30_000
+const fallbackPollMilliseconds = 5_000
+const hiddenPollMilliseconds = 30_000
 
 export function RoomPage() {
   const { code: routeCode = '' } = useParams()
@@ -33,10 +35,12 @@ export function RoomPage() {
   const [guessAnswer, setGuessAnswer] = useState('')
   const [overrideSelections, setOverrideSelections] = useState<Record<string, string>>({})
   const [judgeSuggestions, setJudgeSuggestions] = useState<JudgeSuggestion[]>([])
+  const [connectionState, setConnectionState] = useState<RoomConnectionState>('connecting')
   const [now, setNow] = useState(() => Date.now())
   const requestSequence = useRef(0)
   const activeRequest = useRef<AbortController | null>(null)
   const mutationInFlight = useRef(false)
+  const eventClient = useRef<RoomEventClient | null>(null)
 
   const refreshRoom = useCallback(async (showLoading = false) => {
     const sequence = ++requestSequence.current
@@ -49,7 +53,9 @@ export function RoomPage() {
       const response = await getRoom(code, controller.signal)
       if (sequence === requestSequence.current) {
         setRoom(response.room)
+        eventClient.current?.setAppliedRevision(response.room.revision)
         setErrorMessage(null)
+        return response.room.revision
       }
     } catch (error) {
       if (!controller.signal.aborted && sequence === requestSequence.current) {
@@ -61,6 +67,7 @@ export function RoomPage() {
         if (showLoading) setIsLoading(false)
       }
     }
+    return null
   }, [code])
 
   useEffect(() => {
@@ -121,6 +128,34 @@ export function RoomPage() {
   const activePlayerToken = activePlayer?.token ?? ''
 
   useEffect(() => {
+    if (!activePlayerToken || !room || isGameCompleted) {
+      if (isGameCompleted) setConnectionState('stopped')
+      return
+    }
+    const client = new RoomEventClient({
+      roomCode: code,
+      playerToken: activePlayerToken,
+      initialRevision: room.revision,
+      onStateChange: setConnectionState,
+      onConnected: async () => (await refreshRoom(false)) ?? room.revision,
+      onInvalidations: async () => {
+        if (mutationInFlight.current || document.visibilityState === 'hidden' || !navigator.onLine) {
+          return room.revision
+        }
+        return (await refreshRoom(false)) ?? room.revision
+      },
+    })
+    eventClient.current = client
+    client.start()
+    return () => {
+      client.stop()
+      if (eventClient.current === client) eventClient.current = null
+    }
+    // The stream cursor is updated through setAppliedRevision; room changes must not recreate it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activePlayerToken, code, isGameCompleted, room != null, refreshRoom])
+
+  useEffect(() => {
     if (!Number.isFinite(answerPhaseEndsAt) || hasLocallyExpired) return
     setNow(Date.now())
     const timer = window.setInterval(() => setNow(Date.now()), 250)
@@ -156,26 +191,35 @@ export function RoomPage() {
 
     const schedule = () => {
       if (cancelled) return
-      const delay = document.visibilityState === 'hidden' ? hiddenPollMilliseconds : activePollMilliseconds
+      const delay = document.visibilityState === 'hidden'
+        ? hiddenPollMilliseconds
+        : connectionState === 'live'
+          ? liveSafetyPollMilliseconds
+          : fallbackPollMilliseconds
       timer = window.setTimeout(async () => {
-        if (!mutationInFlight.current) await refreshRoom(false)
+        if (navigator.onLine && !mutationInFlight.current) await refreshRoom(false)
         schedule()
       }, delay)
     }
     const handleVisibility = () => {
       if (timer) window.clearTimeout(timer)
-      if (document.visibilityState === 'visible' && !mutationInFlight.current) void refreshRoom(false)
+      if (document.visibilityState === 'visible' && navigator.onLine && !mutationInFlight.current) void refreshRoom(false)
       schedule()
+    }
+    const handleOnline = () => {
+      if (!mutationInFlight.current) void refreshRoom(false)
     }
 
     schedule()
     document.addEventListener('visibilitychange', handleVisibility)
+    window.addEventListener('online', handleOnline)
     return () => {
       cancelled = true
       if (timer) window.clearTimeout(timer)
       document.removeEventListener('visibilitychange', handleVisibility)
+      window.removeEventListener('online', handleOnline)
     }
-  }, [isGameCompleted, refreshRoom])
+  }, [connectionState, isGameCompleted, refreshRoom])
 
   async function mutateRoom(action: () => Promise<unknown>) {
     mutationInFlight.current = true
@@ -250,7 +294,18 @@ export function RoomPage() {
         <div className="section-heading">
           <p className="eyebrow">Room state</p>
           <h1>{room?.name || code}</h1>
-          <p>Room updates use resilient polling. The server remains authoritative for timing and game state.</p>
+          <p>Live events trigger authoritative room refreshes, with polling recovery when the stream is unavailable.</p>
+          <p aria-live="polite" className={`connection-indicator connection-${connectionState}`} role="status">
+            {connectionState === 'live'
+              ? 'Live updates connected'
+              : connectionState === 'offline'
+                ? 'Offline — updates will resume when your network returns'
+                : connectionState === 'stopped'
+                  ? 'Live updates complete'
+                  : connectionState === 'fallback'
+                    ? 'Reconnecting — polling for updates'
+                    : 'Connecting live updates…'}
+          </p>
         </div>
 
         <div className="room-code-row"><span>Room code</span><strong>{code}</strong></div>

@@ -45,4 +45,6 @@ The server sends comment heartbeats, bounds concurrent streams per process, appl
 - `EVENT_MAX_CONNECTIONS` — process-wide stream limit, default `100`;
 - `EVENT_WRITE_TIMEOUT_SECONDS` — per-write slow-consumer deadline, default `5`.
 
-FUTURE-02B will add browser consumption, reconnect/backoff, and polling fallback. Existing clients continue polling unchanged.
+The browser consumes this endpoint with a fetch-stream client because native `EventSource` cannot attach the required authentication header. It validates the exact versioned envelope, coalesces event bursts, discards duplicate and stale revisions, identifies gaps, and always refetches the public room projection rather than applying event data as state.
+
+The last successfully refetched room revision is sent as `Last-Event-ID` on reconnect. Every successful connection performs a full refetch before applying replayed invalidations, and revision gaps take the same full-refetch path. Retry uses bounded exponential backoff from 500 milliseconds to 15 seconds. A stream failure is non-blocking: the browser reports its connection state and polls every five seconds until live updates recover, with a 30-second safety poll while live. Hidden tabs defer event-driven refetches and use a 30-second poll; visibility and network recovery trigger immediate reconnect/refetch, and completion or route exit closes the stream.

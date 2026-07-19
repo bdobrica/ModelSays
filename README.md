@@ -1,6 +1,6 @@
 # Model Says
 
-**Model Says** is a playable polling-based party game where players try to guess what an AI model thinks the most common answers are.
+**Model Says** is a playable live-updating party game where players try to guess what an AI model thinks the most common answers are.
 
 It is inspired by survey-answer party games, but with a different premise:
 
@@ -90,7 +90,7 @@ The backend is responsible for:
 * answer matching;
 * scoring;
 * timers;
-* polling-based room updates;
+* authenticated live room invalidations with polling recovery;
 * host controls.
 
 See [`backend/README.md`](backend/README.md) for more details.
@@ -248,7 +248,7 @@ The controlled MVP is playable with one host and at least two players:
 - a five-round curated bank that works without an OpenAI key, plus validated OpenAI generation when configured;
 - deterministic canonical/alias matching with first committed claim wins;
 - server-enforced deadlines, hidden answering-state outcomes, host-triggered reveal, and post-reveal overrides;
-- authenticated ordered SSE invalidations, plus three-second collision-safe polling and server-validated same-browser session recovery;
+- authenticated ordered SSE invalidations, authoritative sequenced refetches, bounded reconnect/resume, polling recovery, and server-validated same-browser session recovery;
 - responsive host/player layouts, including the single-column layout below 900 px;
 - automated backend, client, and PostgreSQL lifecycle gates through `make verify`.
 
@@ -256,7 +256,7 @@ The repeatable MVP playtest gate uses a host and two player identities across tw
 
 ## Known Limitations
 
-- The backend publishes durable SSE room invalidations, but the current browser continues to use three-second polling until its live-event client is added.
+- Live invalidations contain no game content and only trigger authoritative room refetches. Streaming failures automatically retain five-second polling recovery and a visible non-blocking connection status.
 - Automatic scoring remains deterministic. Optional semantic suggestions still require an explicit post-reveal host decision.
 - Expiry closes answering, but reveal and round advancement remain manual host actions.
 - Reconnect is limited to the same browser’s stored room token; there is no presence heartbeat or cross-device transfer.
@@ -337,7 +337,7 @@ Semantic model-based matching is not active in the MVP. It is a post-MVP option 
 
 ## Development Status
 
-This project has a working simultaneous-game browser flow with deadline countdowns, safe non-overlapping polling, same-browser session recovery, host controls, and ranked final scores. The backend now provides authenticated ordered SSE invalidations; browser consumption, cross-device session transfer, presence, and automatic deadline reveal remain follow-up work.
+This project has a working simultaneous-game browser flow with deadline countdowns, authenticated live invalidations, sequenced refetch and polling recovery, same-browser session recovery, host controls, and ranked final scores. Cross-device session transfer, presence, and automatic deadline reveal remain follow-up work.
 
 The controlled MVP implementation is complete. The next work should be chosen from measured playtest feedback; likely candidates are semantic match suggestions, pushed updates, automatic round progression, and public-launch hardening.
 

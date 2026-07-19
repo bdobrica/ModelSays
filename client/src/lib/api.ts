@@ -98,6 +98,7 @@ export interface Game {
 
 export interface Room {
   code: string
+  revision: number
   name: string
   status: string
   settings: RoomSettings
