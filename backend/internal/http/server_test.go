@@ -135,6 +135,39 @@ func TestRoomResponsesHideRoundOutcomeUntilReveal(t *testing.T) {
 	}
 }
 
+func TestProviderAuditsRequireHostHeaderAndStayOutOfRoomProjection(t *testing.T) {
+	service := game.NewInMemoryRoomService()
+	room, host, err := service.CreateRoom(context.Background(), game.CreateRoomInput{RoomName: "Private audits", HostDisplayName: "Host"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.StartGame(context.Background(), game.StartGameInput{Code: room.Code, PlayerToken: host.Token}); err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(config.Config{}, slog.New(slog.NewTextHandler(io.Discard, nil)), service)
+
+	public := performRoomRequest(t, server, http.MethodGet, "/api/rooms/"+room.Code, "")
+	encoded, _ := json.Marshal(public)
+	if strings.Contains(string(encoded), "providerAudits") || strings.Contains(string(encoded), "retentionClass") {
+		t.Fatalf("public room projection leaked provider audit data: %s", encoded)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/api/rooms/"+room.Code+"/provider-audits", nil)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("unauthenticated audit status = %d, want 403", response.Code)
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/api/rooms/"+room.Code+"/provider-audits", nil)
+	request.Header.Set("X-Player-Token", host.Token)
+	response = httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"retentionClass":"provider_audit_30d"`) {
+		t.Fatalf("host audit response = %d %s", response.Code, response.Body.String())
+	}
+}
+
 func TestExpiredSubmissionReturnsStableConflictResponse(t *testing.T) {
 	t.Parallel()
 

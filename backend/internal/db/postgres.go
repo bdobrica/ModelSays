@@ -44,6 +44,57 @@ func NewPostgresRoomRepository(pool *pgxpool.Pool) *PostgresRoomRepository {
 	return &PostgresRoomRepository{pool: pool}
 }
 
+func (repository *PostgresRoomRepository) ListProviderAudits(ctx context.Context, code string) ([]models.ProviderCallAudit, error) {
+	rows, err := repository.pool.Query(ctx, `
+		SELECT id, room_code, game_id, COALESCE(round_id, ''), purpose, provider, model_name,
+		       prompt_version, provider_request_id, outcome, latency_ms, input_tokens,
+		       output_tokens, estimated_cost_usd, attempt, call_path, error_category,
+		       raw_response, retention_class, started_at, completed_at
+		FROM provider_call_audits WHERE room_code = $1 ORDER BY started_at, id
+	`, code)
+	if err != nil {
+		return nil, fmt.Errorf("list provider audits: %w", err)
+	}
+	defer rows.Close()
+	audits := make([]models.ProviderCallAudit, 0)
+	for rows.Next() {
+		var audit models.ProviderCallAudit
+		if err := rows.Scan(&audit.ID, &audit.RoomCode, &audit.GameID, &audit.RoundID, &audit.Purpose,
+			&audit.Provider, &audit.Model, &audit.PromptVersion, &audit.RequestID, &audit.Outcome,
+			&audit.LatencyMillis, &audit.InputTokens, &audit.OutputTokens, &audit.EstimatedCostUSD,
+			&audit.Attempt, &audit.Path, &audit.ErrorCategory, &audit.RawResponse,
+			&audit.RetentionClass, &audit.StartedAt, &audit.CompletedAt); err != nil {
+			return nil, fmt.Errorf("scan provider audit: %w", err)
+		}
+		audits = append(audits, audit)
+	}
+	return audits, rows.Err()
+}
+
+type auditExecer interface {
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+}
+
+func insertProviderAudits(ctx context.Context, executor auditExecer, audits []models.ProviderCallAudit) error {
+	for _, audit := range audits {
+		_, err := executor.Exec(ctx, `
+			INSERT INTO provider_call_audits (
+				id, room_code, game_id, round_id, purpose, provider, model_name, prompt_version,
+				provider_request_id, outcome, latency_ms, input_tokens, output_tokens,
+				estimated_cost_usd, attempt, call_path, error_category, raw_response,
+				retention_class, started_at, completed_at
+			) VALUES ($1,$2,$3,NULLIF($4,''),$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
+		`, audit.ID, audit.RoomCode, audit.GameID, audit.RoundID, audit.Purpose, audit.Provider,
+			audit.Model, audit.PromptVersion, audit.RequestID, audit.Outcome, audit.LatencyMillis,
+			audit.InputTokens, audit.OutputTokens, audit.EstimatedCostUSD, audit.Attempt, audit.Path,
+			audit.ErrorCategory, audit.RawResponse, audit.RetentionClass, audit.StartedAt, audit.CompletedAt)
+		if err != nil {
+			return fmt.Errorf("insert provider audit: %w", err)
+		}
+	}
+	return nil
+}
+
 func (repository *PostgresRoomRepository) CreateRoom(ctx context.Context, room models.Room) error {
 	settingsJSON, err := json.Marshal(room.Settings)
 	if err != nil {
@@ -212,6 +263,9 @@ func (repository *PostgresRoomRepository) StartGame(ctx context.Context, code st
 	`, gameState.CurrentRound.ID, gameState.ID, gameState.CurrentRound.RoundIndex, question.ID, board.ID, gameState.CurrentRound.Status, gameState.CurrentRound.AnswerPhaseStartedAt, gameState.CurrentRound.AnswerPhaseEndsAt, gameState.CurrentRound.RevealStartedAt, gameState.CurrentRound.CreatedAt)
 	if err != nil {
 		return models.Room{}, fmt.Errorf("insert round: %w", err)
+	}
+	if err := insertProviderAudits(ctx, tx, gameState.CurrentRound.ProviderAudits); err != nil {
+		return models.Room{}, err
 	}
 
 	_, err = tx.Exec(ctx, `UPDATE rooms SET status = $2, updated_at = $3 WHERE code = $1`, code, models.RoomStatusInGame, time.Now().UTC())
@@ -405,6 +459,9 @@ func (repository *PostgresRoomRepository) AdvanceGame(ctx context.Context, code 
 		`, nextRound.ID, gameState.ID, nextRound.RoundIndex, question.ID, board.ID, nextRound.Status, nextRound.AnswerPhaseStartedAt, nextRound.AnswerPhaseEndsAt, nextRound.RevealStartedAt, nextRound.CreatedAt)
 		if err != nil {
 			return models.Room{}, fmt.Errorf("insert next round: %w", err)
+		}
+		if err := insertProviderAudits(ctx, tx, nextRound.ProviderAudits); err != nil {
+			return models.Room{}, err
 		}
 	}
 

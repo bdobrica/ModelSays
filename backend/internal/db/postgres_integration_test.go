@@ -202,6 +202,61 @@ func TestAtomicAnswerClaimMigrationUpDown(t *testing.T) {
 	}
 }
 
+func TestPostgresProviderAuditHistoryIsRoomScoped(t *testing.T) {
+	pool := integrationPool(t)
+	repository := db.NewPostgresRoomRepository(pool)
+	service := game.NewRoomService(repository, nil)
+	ctx := context.Background()
+
+	firstRoom, firstHost, err := service.CreateRoom(ctx, game.CreateRoomInput{RoomName: "First audit room", HostDisplayName: "Host One"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondRoom, secondHost, err := service.CreateRoom(ctx, game.CreateRoomInput{RoomName: "Second audit room", HostDisplayName: "Host Two"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.StartGame(ctx, game.StartGameInput{Code: firstRoom.Code, PlayerToken: firstHost.Token}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.StartGame(ctx, game.StartGameInput{Code: secondRoom.Code, PlayerToken: secondHost.Token}); err != nil {
+		t.Fatal(err)
+	}
+
+	firstAudits, err := db.NewPostgresRoomRepository(pool).ListProviderAudits(ctx, firstRoom.Code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(firstAudits) != 2 {
+		t.Fatalf("first room audit count = %d, want 2", len(firstAudits))
+	}
+	for _, audit := range firstAudits {
+		if audit.RoomCode != firstRoom.Code || audit.Provider != "static" || audit.EstimatedCostUSD != 0 || audit.RawResponse != "" {
+			t.Fatalf("unexpected isolated fallback audit: %#v", audit)
+		}
+	}
+	secondAudits, err := repository.ListProviderAudits(ctx, secondRoom.Code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(secondAudits) != 2 || secondAudits[0].GameID == firstAudits[0].GameID {
+		t.Fatalf("second room audit history crossed room boundary: %#v", secondAudits)
+	}
+}
+
+func TestProviderAuditMigrationUpDown(t *testing.T) {
+	pool := integrationPool(t)
+	var exists bool
+	if err := pool.QueryRow(context.Background(), `SELECT to_regclass('provider_call_audits') IS NOT NULL`).Scan(&exists); err != nil {
+		t.Fatal(err)
+	}
+	if !exists {
+		t.Fatal("provider_call_audits table missing after migration up")
+	}
+	executeMigrationSection(t, pool, migrationPath(t, "000006_provider_call_audits.sql"), false)
+	executeMigrationSection(t, pool, migrationPath(t, "000006_provider_call_audits.sql"), true)
+}
+
 func integrationPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	databaseURL := os.Getenv("TEST_DATABASE_URL")

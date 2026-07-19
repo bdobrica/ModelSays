@@ -19,6 +19,10 @@ import (
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{}))
 	cfg := config.Load()
+	if !cfg.ModelPolicy.AllowsQuestion(cfg.DefaultModels.Question) || !cfg.ModelPolicy.AllowsPrediction(cfg.DefaultModels.Prediction) {
+		logger.Error("default model is not present in its server allowlist")
+		os.Exit(1)
+	}
 	modelClient := llm.ModelClient(llm.NewStaticModelClient())
 	if cfg.OpenAIAPIKey != "" {
 		modelClient = llm.NewOpenAIModelClient(cfg.OpenAIAPIKey, llm.ClientDefaults{
@@ -47,6 +51,7 @@ func main() {
 
 	roomService := game.NewRoomService(roomRepository, modelClient)
 	roomService.SetPredictionModel(cfg.DefaultModels.Prediction)
+	roomService.SetModelPolicy(cfg.ModelPolicy)
 	server := httpapi.NewServer(cfg, logger, roomService)
 
 	httpServer := &http.Server{

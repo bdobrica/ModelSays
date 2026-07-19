@@ -41,6 +41,10 @@ type openAIChatResponse struct {
 	Error *struct {
 		Message string `json:"message"`
 	} `json:"error,omitempty"`
+	Usage struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+	} `json:"usage"`
 }
 
 type generatedQuestionsPayload struct {
@@ -82,7 +86,7 @@ func (client *OpenAIModelClient) GenerateQuestions(ctx context.Context, req Gene
 
 	prompt := fmt.Sprintf("Generate %d unique broad, party-safe questions for a game where players guess an AI answer board. Locale: %s. Category: %s. Team safe mode: %t. Vary by round index %d. Do not repeat these prior questions: %q. Avoid hateful, sexual, medical, legal, financial, personal, or workplace-sensitive topics.", maxInt(req.Count, 1), req.Locale, defaultString(req.Category, "party"), req.TeamSafeMode, req.RoundIndex, req.ExcludedText)
 
-	body, err := client.completeJSON(ctx, model, prompt, questionsJSONSchema())
+	body, metadata, err := client.completeJSON(ctx, model, prompt, "questions-v1", questionsJSONSchema())
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +116,7 @@ func (client *OpenAIModelClient) GenerateQuestions(ctx context.Context, req Gene
 		return nil, fmt.Errorf("openai returned no usable questions")
 	}
 
-	return &GenerateQuestionsResponse{Questions: questions}, nil
+	return &GenerateQuestionsResponse{Questions: questions, Metadata: metadata}, nil
 }
 
 func (client *OpenAIModelClient) GenerateBoard(ctx context.Context, req GenerateBoardRequest) (*GenerateBoardResponse, error) {
@@ -123,7 +127,8 @@ func (client *OpenAIModelClient) GenerateBoard(ctx context.Context, req Generate
 
 	prompt := fmt.Sprintf("Generate a Family Feud style answer board for the question %q. Provide exactly 5 ranked answers with descending positive integer scores. Aliases should contain close synonyms only. Team safe mode: %t. Prompt version: %s.", req.Question.Text, req.TeamSafeMode, defaultString(req.PromptVersion, "v1"))
 
-	body, err := client.completeJSON(ctx, model, prompt, boardJSONSchema())
+	promptVersion := defaultString(req.PromptVersion, "v1")
+	body, metadata, err := client.completeJSON(ctx, model, prompt, promptVersion, boardJSONSchema())
 	if err != nil {
 		return nil, err
 	}
@@ -154,10 +159,11 @@ func (client *OpenAIModelClient) GenerateBoard(ctx context.Context, req Generate
 		Answers:       answers,
 	}
 
-	return &GenerateBoardResponse{Board: board}, nil
+	return &GenerateBoardResponse{Board: board, Metadata: metadata}, nil
 }
 
-func (client *OpenAIModelClient) completeJSON(ctx context.Context, model string, prompt string, schema map[string]any) ([]byte, error) {
+func (client *OpenAIModelClient) completeJSON(ctx context.Context, model string, prompt string, promptVersion string, schema map[string]any) ([]byte, CallMetadata, error) {
+	metadata := CallMetadata{Provider: "openai", Model: model, PromptVersion: promptVersion}
 	reqBody, err := json.Marshal(openAIChatRequest{
 		Model: model,
 		Messages: []openAIMessage{
@@ -175,43 +181,53 @@ func (client *OpenAIModelClient) completeJSON(ctx context.Context, model string,
 		Temperature: 0.7,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("marshal openai request: %w", err)
+		return nil, metadata, &CallError{Metadata: metadata, Err: fmt.Errorf("marshal openai request: %w", err)}
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, client.baseURL, bytes.NewReader(reqBody))
 	if err != nil {
-		return nil, fmt.Errorf("create openai request: %w", err)
+		return nil, metadata, &CallError{Metadata: metadata, Err: fmt.Errorf("create openai request: %w", err)}
 	}
 	httpReq.Header.Set("Authorization", "Bearer "+client.apiKey)
 	httpReq.Header.Set("Content-Type", "application/json")
 
 	httpResp, err := client.http.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("send openai request: %w", err)
+		return nil, metadata, &CallError{Metadata: metadata, Err: fmt.Errorf("send openai request: %w", err)}
 	}
 	defer httpResp.Body.Close()
 
 	body, err := io.ReadAll(httpResp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("read openai response: %w", err)
+		return nil, metadata, &CallError{Metadata: metadata, Err: fmt.Errorf("read openai response: %w", err)}
 	}
+	metadata.RequestID = httpResp.Header.Get("x-request-id")
+	metadata.RawResponse = string(body)
 
 	var response openAIChatResponse
 	if err := json.Unmarshal(body, &response); err != nil {
-		return nil, fmt.Errorf("decode openai response: %w", err)
+		return nil, metadata, &CallError{Metadata: metadata, Err: fmt.Errorf("decode openai response: %w", err)}
 	}
+	metadata.InputTokens = response.Usage.PromptTokens
+	metadata.OutputTokens = response.Usage.CompletionTokens
+	metadata.EstimatedCostUSD = estimateOpenAICost(model, metadata.InputTokens, metadata.OutputTokens)
 	if httpResp.StatusCode >= 400 {
-		if response.Error != nil {
-			return nil, fmt.Errorf("openai error: %s", response.Error.Message)
-		}
-		return nil, fmt.Errorf("openai error: status %d", httpResp.StatusCode)
+		return nil, metadata, &CallError{Metadata: metadata, Err: fmt.Errorf("openai error: status %d", httpResp.StatusCode)}
 	}
 	if len(response.Choices) == 0 {
-		return nil, fmt.Errorf("openai returned no choices")
+		return nil, metadata, &CallError{Metadata: metadata, Err: fmt.Errorf("openai returned no choices")}
 	}
 
 	content := strings.TrimSpace(response.Choices[0].Message.Content)
-	return []byte(content), nil
+	return []byte(content), metadata, nil
+}
+
+func estimateOpenAICost(model string, inputTokens int, outputTokens int) float64 {
+	// Server-owned estimates; update alongside the allowlist when pricing changes.
+	if model == "gpt-4.1-mini" {
+		return float64(inputTokens)*0.40/1_000_000 + float64(outputTokens)*1.60/1_000_000
+	}
+	return 0
 }
 
 func questionsJSONSchema() map[string]any {

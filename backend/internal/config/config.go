@@ -2,7 +2,11 @@ package config
 
 import (
 	"os"
+	"strconv"
 	"strings"
+	"time"
+
+	"github.com/bogdandobrica/modelsays/backend/internal/llm"
 )
 
 type Config struct {
@@ -12,6 +16,7 @@ type Config struct {
 	HTTPAddr           string
 	CORSAllowedOrigins []string
 	DefaultModels      DefaultModels
+	ModelPolicy        llm.Policy
 }
 
 type DefaultModels struct {
@@ -20,6 +25,7 @@ type DefaultModels struct {
 }
 
 func Load() Config {
+	defaultPolicy := llm.DefaultPolicy()
 	return Config{
 		AppEnv:             getEnv("APP_ENV", "development"),
 		DatabaseURL:        getEnv("DATABASE_URL", ""),
@@ -30,7 +36,33 @@ func Load() Config {
 			Prediction: getEnv("DEFAULT_PREDICTION_MODEL", "gpt-4.1-mini"),
 			Question:   getEnv("DEFAULT_QUESTION_MODEL", "gpt-4.1-mini"),
 		},
+		ModelPolicy: llm.Policy{
+			AllowedQuestionModels:   splitCSV(getEnv("ALLOWED_QUESTION_MODELS", "gpt-4.1-mini")),
+			AllowedPredictionModels: splitCSV(getEnv("ALLOWED_PREDICTION_MODELS", "gpt-4.1-mini")),
+			Timeout:                 time.Duration(getEnvInt("MODEL_TIMEOUT_SECONDS", int(defaultPolicy.Timeout/time.Second))) * time.Second,
+			MaxAttempts:             getEnvInt("MODEL_MAX_ATTEMPTS", defaultPolicy.MaxAttempts),
+			MaxCallsPerGame:         getEnvInt("MODEL_MAX_CALLS_PER_GAME", defaultPolicy.MaxCallsPerGame),
+			MaxEstimatedCostUSD:     getEnvFloat("MODEL_MAX_COST_USD_PER_GAME", defaultPolicy.MaxEstimatedCostUSD),
+			CaptureRawResponses:     strings.EqualFold(getEnv("MODEL_CAPTURE_RAW_RESPONSES", "false"), "true"),
+			MaxRawResponseBytes:     getEnvInt("MODEL_RAW_RESPONSE_MAX_BYTES", defaultPolicy.MaxRawResponseBytes),
+		}.Normalize(),
 	}
+}
+
+func getEnvInt(key string, fallback int) int {
+	value, err := strconv.Atoi(strings.TrimSpace(os.Getenv(key)))
+	if err != nil || value < 1 {
+		return fallback
+	}
+	return value
+}
+
+func getEnvFloat(key string, fallback float64) float64 {
+	value, err := strconv.ParseFloat(strings.TrimSpace(os.Getenv(key)), 64)
+	if err != nil || value <= 0 {
+		return fallback
+	}
+	return value
 }
 
 func getEnv(key string, fallback string) string {

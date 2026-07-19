@@ -10,12 +10,13 @@ import (
 )
 
 type InMemoryRoomRepository struct {
-	mu    sync.RWMutex
-	rooms map[string]*models.Room
+	mu     sync.RWMutex
+	rooms  map[string]*models.Room
+	audits map[string][]models.ProviderCallAudit
 }
 
 func NewInMemoryRoomRepository() *InMemoryRoomRepository {
-	return &InMemoryRoomRepository{rooms: make(map[string]*models.Room)}
+	return &InMemoryRoomRepository{rooms: make(map[string]*models.Room), audits: make(map[string][]models.ProviderCallAudit)}
 }
 
 func (repository *InMemoryRoomRepository) CreateRoom(_ context.Context, room models.Room) error {
@@ -81,6 +82,7 @@ func (repository *InMemoryRoomRepository) StartGame(_ context.Context, code stri
 
 	room.Status = models.RoomStatusInGame
 	room.CurrentGame = cloneGame(&gameState)
+	repository.audits[code] = append(repository.audits[code], gameState.CurrentRound.ProviderAudits...)
 	room.UpdatedAt = time.Now().UTC()
 
 	return cloneRoom(*room), nil
@@ -164,10 +166,20 @@ func (repository *InMemoryRoomRepository) AdvanceGame(_ context.Context, code st
 	room.CurrentGame.EndedAt = gameState.EndedAt
 	if nextRound != nil {
 		room.CurrentGame.CurrentRound = cloneGame(&models.Game{CurrentRound: nextRound}).CurrentRound
+		repository.audits[code] = append(repository.audits[code], nextRound.ProviderAudits...)
 	}
 	room.UpdatedAt = time.Now().UTC()
 
 	return cloneRoom(*room), nil
+}
+
+func (repository *InMemoryRoomRepository) ListProviderAudits(_ context.Context, code string) ([]models.ProviderCallAudit, error) {
+	repository.mu.RLock()
+	defer repository.mu.RUnlock()
+	if _, ok := repository.rooms[code]; !ok {
+		return nil, ErrRoomNotFound
+	}
+	return append([]models.ProviderCallAudit(nil), repository.audits[code]...), nil
 }
 
 func (repository *InMemoryRoomRepository) OverrideGuess(_ context.Context, code string, roundID string, override GuessOverride) (models.Room, error) {

@@ -25,9 +25,9 @@ func TestGenerateBoardRequestsStrictSchemaAndRecordsActualMetadata(t *testing.T)
 		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
-			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Header:     http.Header{"Content-Type": []string{"application/json"}, "X-Request-Id": []string{"req_test"}},
 			Body: io.NopCloser(strings.NewReader(
-				`{"choices":[{"message":{"role":"assistant","content":"{\"provider\":\"invented\",\"modelName\":\"invented\",\"promptVersion\":\"invented\",\"answers\":[{\"canonicalAnswer\":\"one\",\"aliases\":[\"first\"],\"rank\":1,\"score\":50},{\"canonicalAnswer\":\"two\",\"aliases\":[\"second\"],\"rank\":2,\"score\":40},{\"canonicalAnswer\":\"three\",\"aliases\":[\"third\"],\"rank\":3,\"score\":30},{\"canonicalAnswer\":\"four\",\"aliases\":[\"fourth\"],\"rank\":4,\"score\":20},{\"canonicalAnswer\":\"five\",\"aliases\":[\"fifth\"],\"rank\":5,\"score\":10}]}"}}]}`,
+				`{"usage":{"prompt_tokens":1000,"completion_tokens":500},"choices":[{"message":{"role":"assistant","content":"{\"provider\":\"invented\",\"modelName\":\"invented\",\"promptVersion\":\"invented\",\"answers\":[{\"canonicalAnswer\":\"one\",\"aliases\":[\"first\"],\"rank\":1,\"score\":50},{\"canonicalAnswer\":\"two\",\"aliases\":[\"second\"],\"rank\":2,\"score\":40},{\"canonicalAnswer\":\"three\",\"aliases\":[\"third\"],\"rank\":3,\"score\":30},{\"canonicalAnswer\":\"four\",\"aliases\":[\"fourth\"],\"rank\":4,\"score\":20},{\"canonicalAnswer\":\"five\",\"aliases\":[\"fifth\"],\"rank\":5,\"score\":10}]}"}}]}`,
 			)),
 		}, nil
 	})
@@ -44,6 +44,9 @@ func TestGenerateBoardRequestsStrictSchemaAndRecordsActualMetadata(t *testing.T)
 	}
 	if response.Board.Provider != "openai" || response.Board.ModelName != "actual-model" || response.Board.PromptVersion != "v7" {
 		t.Fatalf("expected actual request metadata, got provider=%q model=%q prompt=%q", response.Board.Provider, response.Board.ModelName, response.Board.PromptVersion)
+	}
+	if response.Metadata.RequestID != "req_test" || response.Metadata.InputTokens != 1000 || response.Metadata.OutputTokens != 500 {
+		t.Fatalf("provider usage metadata was not captured: %#v", response.Metadata)
 	}
 }
 

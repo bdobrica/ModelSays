@@ -11,7 +11,7 @@ Status note:
   - the round state machine enforces the answer deadline during submission and covers reveal, next-round transition, and final completion, but expiry does not yet trigger automatic reveal or progression;
   - the public room projection hides boards, guesses, outcomes, awarded points, and current-round score changes until reveal while preserving submission progress.
   - MVP matching is deterministic Unicode-aware normalization plus exact canonical/alias equality; semantic judge-model matching is deferred.
-  - model content uses strict schemas, provider-independent validation, one retry, and a five-round curated fallback; raw response and cost auditing remain deferred.
+  - model content uses strict schemas, provider-independent validation, one retry, and a five-round curated fallback; provider calls now have private room-scoped audits and cost-control foundations.
   - room creation now enforces the narrow MVP settings and name/code bounds, strict bounded JSON decoding, and lobby-only joins in both repositories; public-launch rate limiting remains deferred.
   - same-browser refresh validates the stored token through the room session endpoint; heartbeat/presence and cross-device transfer remain deferred.
   - CI now gates formatting, vetting, backend/client tests, the production client build, and a PostgreSQL-backed full API lifecycle that uses only curated content.
@@ -121,9 +121,9 @@ Status note:
 - [x] Normalize answer ranks.
 - [x] Require canonical answers.
 - [x] Require aliases.
-- [ ] Store raw model response.
+- [x] Support explicitly enabled, bounded and redacted raw model response storage (disabled by default).
 - [x] Store provider, model, and prompt version accurately.
-- [ ] Store temperature and token/cost audit metadata.
+- [x] Store token/cost audit metadata.
 - [x] Compute board hash.
 - [x] Freeze board before accepting guesses.
 - [x] Add bounded retry behavior for invalid model output.
@@ -161,13 +161,13 @@ Status note:
 
 - [x] Create `ModelClient` interface.
 - [x] Implement OpenAI client.
-- [ ] Add model registry.
-- [ ] Add allowed prediction models.
+- [x] Add model policy/registry foundation.
+- [x] Add allowed prediction models.
 - [ ] Add allowed judge models.
 - [x] Add per-room selected model settings.
 - [x] Add provider timeout handling.
-- [ ] Add provider retry policy.
-- [ ] Add cost/logging metadata.
+- [x] Add provider retry policy.
+- [x] Add private provider cost/audit metadata.
 - [ ] Add future extension point for other providers.
 
 ## Phase 10 — Admin and Host Controls

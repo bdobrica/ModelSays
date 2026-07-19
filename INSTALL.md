@@ -29,7 +29,7 @@ Create your local configuration:
 cp .env.example .env
 ```
 
-The defaults work with the included Docker Compose database. To use generated questions and boards, set `OPENAI_API_KEY` in `.env`; leave it empty to use the curated offline content.
+The defaults work with the included Docker Compose database. To use generated questions and boards, set `OPENAI_API_KEY` in `.env`; leave it empty to use the curated offline content. Provider calls remain bounded by the allowlist, timeout, retry, and per-game budget settings in `.env.example`.
 
 Install the locked Go and npm dependencies, start PostgreSQL, apply migrations, and launch both servers:
 
@@ -76,6 +76,8 @@ OPENAI_API_KEY=your-development-key
 ```
 
 Then restart `make install` or `make start`. Model output is validated, retried once, and falls back to an unused curated round if generation fails. Never commit `.env`.
+
+Raw provider response capture is disabled by default. See [`docs/provider-operations.md`](docs/provider-operations.md) before changing provider limits or retention settings.
 
 ## Verification
 

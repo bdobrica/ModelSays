@@ -17,6 +17,7 @@ type GenerateQuestionsRequest struct {
 
 type GenerateQuestionsResponse struct {
 	Questions []models.Question
+	Metadata  CallMetadata
 }
 
 type GenerateBoardRequest struct {
@@ -27,7 +28,8 @@ type GenerateBoardRequest struct {
 }
 
 type GenerateBoardResponse struct {
-	Board models.PredictionBoard
+	Board    models.PredictionBoard
+	Metadata CallMetadata
 }
 
 type ClientDefaults struct {

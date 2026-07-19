@@ -139,7 +139,9 @@ func (client *StaticModelClient) GenerateQuestions(_ context.Context, req Genera
 		questions = append(questions, selected)
 	}
 
-	return &GenerateQuestionsResponse{Questions: questions}, nil
+	return &GenerateQuestionsResponse{Questions: questions, Metadata: CallMetadata{
+		Provider: "static", Model: "curated-bank", PromptVersion: "v1",
+	}}, nil
 }
 
 func containsFold(values []string, candidate string) bool {
@@ -170,7 +172,9 @@ func (client *StaticModelClient) GenerateBoard(_ context.Context, req GenerateBo
 				board.ModelName = "curated-bank"
 			}
 			board.PromptVersion = defaultString(req.PromptVersion, board.PromptVersion)
-			return &GenerateBoardResponse{Board: board}, nil
+			return &GenerateBoardResponse{Board: board, Metadata: CallMetadata{
+				Provider: "static", Model: "curated-bank", PromptVersion: board.PromptVersion,
+			}}, nil
 		}
 	}
 

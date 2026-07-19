@@ -29,6 +29,7 @@ var (
 	ErrUnauthorizedReveal       = errors.New("only the host can reveal the round")
 	ErrUnauthorizedAdvance      = errors.New("only the host can advance to the next round")
 	ErrUnauthorizedOverride     = errors.New("only the host can override a match")
+	ErrUnauthorizedAudit        = errors.New("only the host can view provider audits")
 	ErrGameAlreadyStarted       = errors.New("game already started")
 	ErrGameAlreadyCompleted     = errors.New("game already completed")
 	ErrNoQuestionsAvailable     = errors.New("no questions available for this room")
@@ -49,7 +50,7 @@ var (
 
 const (
 	roomAlphabet             = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-	generationAttempts       = 2
+	generationAttempts       = 2 // retained as the documented/default retry count
 	predictionAnswerCount    = 5
 	maxQuestionTextRunes     = 240
 	maxAnswerTextRunes       = 80
@@ -116,6 +117,7 @@ type RoomService struct {
 	fallbackClient  llm.ModelClient
 	clock           Clock
 	predictionModel string
+	modelPolicy     llm.Policy
 }
 
 type Clock interface {
@@ -153,6 +155,7 @@ type RoomRepository interface {
 	RevealRound(ctx context.Context, code string, roundID string, revealStartedAt time.Time) (models.Room, error)
 	AdvanceGame(ctx context.Context, code string, gameState models.Game, nextRound *models.Round) (models.Room, error)
 	OverrideGuess(ctx context.Context, code string, roundID string, override GuessOverride) (models.Room, error)
+	ListProviderAudits(ctx context.Context, code string) ([]models.ProviderCallAudit, error)
 }
 
 func NewRoomService(repository RoomRepository, modelClient llm.ModelClient) *RoomService {
@@ -173,7 +176,12 @@ func NewRoomServiceWithClock(repository RoomRepository, modelClient llm.ModelCli
 		fallbackClient:  llm.NewStaticModelClient(),
 		clock:           clock,
 		predictionModel: defaultPredictionModel,
+		modelPolicy:     llm.DefaultPolicy(),
 	}
+}
+
+func (service *RoomService) SetModelPolicy(policy llm.Policy) {
+	service.modelPolicy = policy.Normalize()
 }
 
 func (service *RoomService) SetPredictionModel(model string) {
@@ -262,6 +270,21 @@ func (service *RoomService) GetRoom(ctx context.Context, code string) (models.Ro
 	return service.repository.GetRoom(ctx, code)
 }
 
+func (service *RoomService) GetProviderAudits(ctx context.Context, code string, playerToken string) ([]models.ProviderCallAudit, error) {
+	code, err := normalizeRoomCode(code)
+	if err != nil {
+		return nil, err
+	}
+	room, err := service.repository.GetRoom(ctx, code)
+	if err != nil {
+		return nil, err
+	}
+	if !isHostToken(room.Players, strings.TrimSpace(playerToken)) {
+		return nil, ErrUnauthorizedAudit
+	}
+	return service.repository.ListProviderAudits(ctx, code)
+}
+
 func (service *RoomService) JoinRoom(ctx context.Context, input JoinRoomInput) (models.Room, models.Player, error) {
 	code, err := normalizeRoomCode(input.Code)
 	if err != nil {
@@ -309,13 +332,15 @@ func (service *RoomService) StartGame(ctx context.Context, input StartGameInput)
 	}
 
 	now := service.clock.Now()
-	roundSeed, err := service.generateRound(ctx, room.Settings, 1, nil, now)
+	gameID := newID()
+	roundID := newID()
+	roundSeed, err := service.generateRoundScoped(ctx, room.Code, gameID, roundID, room.Settings, 1, nil, now, nil)
 	if err != nil {
 		return models.Room{}, err
 	}
 
 	gameState := models.Game{
-		ID:                newID(),
+		ID:                gameID,
 		Status:            models.GameStatusInProgress,
 		Mode:              room.Settings.Mode,
 		TotalRounds:       room.Settings.TotalRounds,
@@ -324,7 +349,7 @@ func (service *RoomService) StartGame(ctx context.Context, input StartGameInput)
 		CreatedAt:         now,
 		StartedAt:         now,
 		CurrentRound: &models.Round{
-			ID:                   newID(),
+			ID:                   roundID,
 			RoundIndex:           roundSeed.RoundIndex,
 			Status:               models.RoundStatusAnswering,
 			Question:             roundSeed.Question,
@@ -333,6 +358,7 @@ func (service *RoomService) StartGame(ctx context.Context, input StartGameInput)
 			AnswerPhaseStartedAt: now,
 			AnswerPhaseEndsAt:    now.Add(time.Duration(room.Settings.AnswerTimerSeconds) * time.Second),
 			CreatedAt:            now,
+			ProviderAudits:       roundSeed.Audits,
 		},
 	}
 
@@ -449,13 +475,18 @@ func (service *RoomService) NextRound(ctx context.Context, input NextRoundInput)
 	}
 
 	nextRoundIndex := room.CurrentGame.CurrentRoundIndex + 1
-	roundSeed, err := service.generateRound(ctx, room.Settings, nextRoundIndex, []string{room.CurrentGame.CurrentRound.Question.Text}, now)
+	priorAudits, err := service.repository.ListProviderAudits(ctx, code)
+	if err != nil {
+		return models.Room{}, err
+	}
+	roundID := newID()
+	roundSeed, err := service.generateRoundScoped(ctx, room.Code, room.CurrentGame.ID, roundID, room.Settings, nextRoundIndex, []string{room.CurrentGame.CurrentRound.Question.Text}, now, priorAudits)
 	if err != nil {
 		return models.Room{}, err
 	}
 
 	nextRound := &models.Round{
-		ID:                   newID(),
+		ID:                   roundID,
 		RoundIndex:           nextRoundIndex,
 		Status:               models.RoundStatusAnswering,
 		Question:             roundSeed.Question,
@@ -464,6 +495,7 @@ func (service *RoomService) NextRound(ctx context.Context, input NextRoundInput)
 		AnswerPhaseStartedAt: now,
 		AnswerPhaseEndsAt:    now.Add(time.Duration(room.Settings.AnswerTimerSeconds) * time.Second),
 		CreatedAt:            now,
+		ProviderAudits:       roundSeed.Audits,
 	}
 
 	nextGame := cloneGame(room.CurrentGame)
@@ -856,28 +888,60 @@ type generatedRound struct {
 	RoundIndex int
 	Question   models.Question
 	Board      models.PredictionBoard
+	Audits     []models.ProviderCallAudit
 }
 
 func (service *RoomService) generateRound(ctx context.Context, settings models.RoomSettings, roundIndex int, excludedQuestions []string, now time.Time) (generatedRound, error) {
+	return service.generateRoundScoped(ctx, "", "", "", settings, roundIndex, excludedQuestions, now, nil)
+}
+
+func (service *RoomService) generateRoundScoped(ctx context.Context, roomCode string, gameID string, roundID string, settings models.RoomSettings, roundIndex int, excludedQuestions []string, now time.Time, priorAudits []models.ProviderCallAudit) (generatedRound, error) {
+	if strings.TrimSpace(settings.PredictionModel) == "" {
+		settings.PredictionModel = service.predictionModel
+	}
+	if !service.modelPolicy.AllowsPrediction(settings.PredictionModel) {
+		return generatedRound{}, fmt.Errorf("%w: %s", llm.ErrModelNotAllowed, settings.PredictionModel)
+	}
+	audits := make([]models.ProviderCallAudit, 0, service.modelPolicy.MaxAttempts*2+2)
+	priorCalls, priorSpent := providerUsage(priorAudits)
+	paidCalls, spent := priorCalls, priorSpent
 	var generationErr error
-	for attempt := 0; attempt < generationAttempts; attempt++ {
-		round, err := service.generateRoundWithClient(ctx, service.modelClient, settings, roundIndex, excludedQuestions, now)
+	for attempt := 1; attempt <= service.modelPolicy.MaxAttempts && paidCalls < service.modelPolicy.MaxCallsPerGame && spent < service.modelPolicy.MaxEstimatedCostUSD; attempt++ {
+		round, err := service.generateRoundWithClient(ctx, service.modelClient, settings, roundIndex, excludedQuestions, now, roomCode, gameID, roundID, "primary", attempt, service.modelPolicy.MaxCallsPerGame-priorCalls, service.modelPolicy.MaxEstimatedCostUSD-priorSpent, &audits)
+		newCalls, newSpent := providerUsage(audits)
+		paidCalls, spent = priorCalls+newCalls, priorSpent+newSpent
 		if err == nil {
+			round.Audits = audits
 			return round, nil
 		}
 		generationErr = errors.Join(generationErr, err)
 	}
 
-	round, fallbackErr := service.generateRoundWithClient(ctx, service.fallbackClient, settings, roundIndex, excludedQuestions, now)
+	round, fallbackErr := service.generateRoundWithClient(ctx, service.fallbackClient, settings, roundIndex, excludedQuestions, now, roomCode, gameID, roundID, "curated_fallback", 1, 2, service.modelPolicy.MaxEstimatedCostUSD, &audits)
 	if fallbackErr == nil {
+		round.Audits = audits
 		return round, nil
 	}
 
 	return generatedRound{}, fmt.Errorf("%w: %v", ErrContentUnavailable, errors.Join(generationErr, fallbackErr))
 }
 
-func (service *RoomService) generateRoundWithClient(ctx context.Context, client llm.ModelClient, settings models.RoomSettings, roundIndex int, excludedQuestions []string, now time.Time) (generatedRound, error) {
-	questionResponse, err := client.GenerateQuestions(ctx, llm.GenerateQuestionsRequest{
+func providerUsage(audits []models.ProviderCallAudit) (int, float64) {
+	calls := 0
+	cost := 0.0
+	for _, audit := range audits {
+		if audit.Provider != "" && audit.Provider != "static" {
+			calls++
+			cost += audit.EstimatedCostUSD
+		}
+	}
+	return calls, cost
+}
+
+func (service *RoomService) generateRoundWithClient(ctx context.Context, client llm.ModelClient, settings models.RoomSettings, roundIndex int, excludedQuestions []string, now time.Time, roomCode string, gameID string, roundID string, path string, attempt int, remainingCalls int, remainingCost float64, audits *[]models.ProviderCallAudit) (generatedRound, error) {
+	callCtx, cancel := llm.WithTimeout(ctx, service.modelPolicy.Timeout)
+	started := service.clock.Now()
+	questionResponse, err := client.GenerateQuestions(callCtx, llm.GenerateQuestionsRequest{
 		Locale:       settings.Locale,
 		Category:     "party",
 		Count:        1,
@@ -885,42 +949,110 @@ func (service *RoomService) generateRoundWithClient(ctx context.Context, client 
 		TeamSafeMode: settings.TeamSafeMode,
 		ExcludedText: excludedQuestions,
 	})
+	cancel()
+	service.appendProviderAudit(audits, roomCode, gameID, roundID, "question_generation", path, attempt, started, metadataQuestions(questionResponse, err), err)
 	if err != nil {
 		return generatedRound{}, err
 	}
+	if path == "primary" {
+		calls, cost := providerUsage(*audits)
+		if calls >= remainingCalls || cost >= remainingCost {
+			return generatedRound{}, llm.ErrBudgetExhausted
+		}
+	}
 	if questionResponse == nil || len(questionResponse.Questions) == 0 {
+		markLastAuditInvalid(audits)
 		return generatedRound{}, ErrNoQuestionsAvailable
 	}
 	if len(questionResponse.Questions) != 1 {
+		markLastAuditInvalid(audits)
 		return generatedRound{}, fmt.Errorf("%w: question generator must return exactly one question", ErrGeneratedContentInvalid)
 	}
 
 	question := questionResponse.Questions[0]
 	if err := validateQuestion(question, settings.Locale, excludedQuestions); err != nil {
+		markLastAuditInvalid(audits)
 		return generatedRound{}, err
 	}
 	if question.CreatedAt.IsZero() {
 		question.CreatedAt = now
 	}
 
-	boardResponse, err := client.GenerateBoard(ctx, llm.GenerateBoardRequest{
+	callCtx, cancel = llm.WithTimeout(ctx, service.modelPolicy.Timeout)
+	started = service.clock.Now()
+	boardResponse, err := client.GenerateBoard(callCtx, llm.GenerateBoardRequest{
 		Question:        question,
 		PredictionModel: settings.PredictionModel,
 		TeamSafeMode:    settings.TeamSafeMode,
 		PromptVersion:   "v1",
 	})
+	cancel()
+	service.appendProviderAudit(audits, roomCode, gameID, roundID, "board_generation", path, attempt, started, metadataBoard(boardResponse, err), err)
 	if err != nil {
 		return generatedRound{}, err
 	}
 	if boardResponse == nil {
+		markLastAuditInvalid(audits)
 		return generatedRound{}, fmt.Errorf("board generator returned no response")
 	}
 	if err := validatePredictionBoard(boardResponse.Board); err != nil {
+		markLastAuditInvalid(audits)
 		return generatedRound{}, err
 	}
 
 	board := prepareBoard(boardResponse.Board, question, now)
 	return generatedRound{RoundIndex: roundIndex, Question: question, Board: board}, nil
+}
+
+func markLastAuditInvalid(audits *[]models.ProviderCallAudit) {
+	if len(*audits) == 0 {
+		return
+	}
+	last := len(*audits) - 1
+	(*audits)[last].Outcome = "invalid_output"
+	(*audits)[last].ErrorCategory = "validation"
+}
+
+func metadataQuestions(response *llm.GenerateQuestionsResponse, err error) llm.CallMetadata {
+	if response != nil {
+		return response.Metadata
+	}
+	return llm.MetadataFromError(err)
+}
+
+func metadataBoard(response *llm.GenerateBoardResponse, err error) llm.CallMetadata {
+	if response != nil {
+		return response.Metadata
+	}
+	return llm.MetadataFromError(err)
+}
+
+func (service *RoomService) appendProviderAudit(audits *[]models.ProviderCallAudit, roomCode string, gameID string, roundID string, purpose string, path string, attempt int, started time.Time, metadata llm.CallMetadata, callErr error) {
+	completed := service.clock.Now()
+	outcome := "success"
+	category := ""
+	if callErr != nil {
+		outcome = "error"
+		category = "provider_error"
+		if errors.Is(callErr, context.DeadlineExceeded) {
+			outcome = "timeout"
+			category = "timeout"
+		}
+	}
+	raw := ""
+	if service.modelPolicy.CaptureRawResponses {
+		raw = llm.RedactRawResponse(metadata.RawResponse, service.modelPolicy.MaxRawResponseBytes)
+	}
+	*audits = append(*audits, models.ProviderCallAudit{
+		ID: newID(), RoomCode: roomCode, GameID: gameID, RoundID: roundID,
+		Purpose: purpose, Provider: metadata.Provider, Model: metadata.Model,
+		PromptVersion: metadata.PromptVersion, RequestID: metadata.RequestID,
+		Outcome: outcome, LatencyMillis: completed.Sub(started).Milliseconds(),
+		InputTokens: metadata.InputTokens, OutputTokens: metadata.OutputTokens,
+		EstimatedCostUSD: metadata.EstimatedCostUSD, Attempt: attempt, Path: path,
+		ErrorCategory: category, RawResponse: raw, RetentionClass: "provider_audit_30d",
+		StartedAt: started, CompletedAt: completed,
+	})
 }
 
 func validateQuestion(question models.Question, locale string, excluded []string) error {

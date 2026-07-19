@@ -74,17 +74,42 @@ type Question struct {
 }
 
 type Round struct {
-	ID                   string           `json:"id"`
-	RoundIndex           int              `json:"roundIndex"`
-	Status               RoundStatus      `json:"status"`
-	Question             Question         `json:"question"`
-	BoardHash            string           `json:"boardHash"`
-	Board                *PredictionBoard `json:"board,omitempty"`
-	Guesses              []Guess          `json:"guesses,omitempty"`
-	AnswerPhaseStartedAt time.Time        `json:"answerPhaseStartedAt"`
-	AnswerPhaseEndsAt    time.Time        `json:"answerPhaseEndsAt"`
-	RevealStartedAt      *time.Time       `json:"revealStartedAt,omitempty"`
-	CreatedAt            time.Time        `json:"createdAt"`
+	ID                   string              `json:"id"`
+	RoundIndex           int                 `json:"roundIndex"`
+	Status               RoundStatus         `json:"status"`
+	Question             Question            `json:"question"`
+	BoardHash            string              `json:"boardHash"`
+	Board                *PredictionBoard    `json:"board,omitempty"`
+	Guesses              []Guess             `json:"guesses,omitempty"`
+	AnswerPhaseStartedAt time.Time           `json:"answerPhaseStartedAt"`
+	AnswerPhaseEndsAt    time.Time           `json:"answerPhaseEndsAt"`
+	RevealStartedAt      *time.Time          `json:"revealStartedAt,omitempty"`
+	CreatedAt            time.Time           `json:"createdAt"`
+	ProviderAudits       []ProviderCallAudit `json:"-"`
+}
+
+type ProviderCallAudit struct {
+	ID               string    `json:"id"`
+	RoomCode         string    `json:"roomCode"`
+	GameID           string    `json:"gameId"`
+	RoundID          string    `json:"roundId,omitempty"`
+	Purpose          string    `json:"purpose"`
+	Provider         string    `json:"provider"`
+	Model            string    `json:"model"`
+	PromptVersion    string    `json:"promptVersion"`
+	RequestID        string    `json:"requestId,omitempty"`
+	Outcome          string    `json:"outcome"`
+	LatencyMillis    int64     `json:"latencyMillis"`
+	InputTokens      int       `json:"inputTokens"`
+	OutputTokens     int       `json:"outputTokens"`
+	EstimatedCostUSD float64   `json:"estimatedCostUsd"`
+	Attempt          int       `json:"attempt"`
+	Path             string    `json:"path"`
+	ErrorCategory    string    `json:"errorCategory,omitempty"`
+	RawResponse      string    `json:"rawResponse,omitempty"`
+	RetentionClass   string    `json:"retentionClass"`
+	StartedAt        time.Time `json:"startedAt"`
+	CompletedAt      time.Time `json:"completedAt"`
 }
 
 type Game struct {

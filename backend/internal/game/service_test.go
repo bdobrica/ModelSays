@@ -30,6 +30,22 @@ type scriptedModelClient struct {
 	boardCalls        int
 }
 
+type costlyQuestionClient struct {
+	boardCalls int
+}
+
+func (client *costlyQuestionClient) GenerateQuestions(_ context.Context, _ llm.GenerateQuestionsRequest) (*llm.GenerateQuestionsResponse, error) {
+	return &llm.GenerateQuestionsResponse{
+		Questions: []models.Question{generatedQuestion("costly", "Name something costly.")},
+		Metadata:  llm.CallMetadata{Provider: "paid", Model: "gpt-4.1-mini", PromptVersion: "v1", EstimatedCostUSD: 0.11},
+	}, nil
+}
+
+func (client *costlyQuestionClient) GenerateBoard(_ context.Context, _ llm.GenerateBoardRequest) (*llm.GenerateBoardResponse, error) {
+	client.boardCalls++
+	return &llm.GenerateBoardResponse{Board: validGeneratedBoard()}, nil
+}
+
 func (client fixedBoardModelClient) GenerateQuestions(_ context.Context, _ llm.GenerateQuestionsRequest) (*llm.GenerateQuestionsResponse, error) {
 	return &llm.GenerateQuestionsResponse{Questions: []models.Question{{
 		ID: "question-1", Text: "Name something.", Locale: "en", Category: "party",
@@ -602,6 +618,59 @@ func TestGenerateRoundFallsBackAfterProviderErrors(t *testing.T) {
 	}
 	if client.questionCalls != generationAttempts || round.Board.Provider != "static" {
 		t.Fatalf("expected bounded retries then static fallback, calls=%d provider=%q", client.questionCalls, round.Board.Provider)
+	}
+}
+
+func TestProviderAuditsRecordRetryAndZeroCostFallback(t *testing.T) {
+	primary := &scriptedModelClient{questionErrors: []error{errors.New("failed"), errors.New("failed")}}
+	service := NewRoomService(NewInMemoryRoomRepository(), primary)
+	room, host, err := service.CreateRoom(context.Background(), CreateRoomInput{RoomName: "Audited game", HostDisplayName: "Host"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.StartGame(context.Background(), StartGameInput{Code: room.Code, PlayerToken: host.Token}); err != nil {
+		t.Fatal(err)
+	}
+	audits, err := service.GetProviderAudits(context.Background(), room.Code, host.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(audits) != 4 {
+		t.Fatalf("audit count = %d, want two failures plus two fallback calls", len(audits))
+	}
+	if audits[0].Attempt != 1 || audits[1].Attempt != 2 {
+		t.Fatalf("retry attempts not attributable: %#v", audits[:2])
+	}
+	for _, audit := range audits[2:] {
+		if audit.Path != "curated_fallback" || audit.Provider != "static" || audit.EstimatedCostUSD != 0 {
+			t.Fatalf("fallback audit is not distinct and zero-cost: %#v", audit)
+		}
+	}
+	if _, err := service.GetProviderAudits(context.Background(), room.Code, "not-host"); !errors.Is(err, ErrUnauthorizedAudit) {
+		t.Fatalf("non-host audit error = %v, want %v", err, ErrUnauthorizedAudit)
+	}
+}
+
+func TestProviderBudgetExhaustionMakesNoFurtherPaidCall(t *testing.T) {
+	primary := &costlyQuestionClient{}
+	service := NewRoomService(NewInMemoryRoomRepository(), primary)
+	service.SetModelPolicy(llm.Policy{
+		AllowedPredictionModels: []string{"gpt-4.1-mini"},
+		MaxAttempts:             2, MaxCallsPerGame: 20, MaxEstimatedCostUSD: 0.10,
+	})
+	room, host, err := service.CreateRoom(context.Background(), CreateRoomInput{RoomName: "Budget fallback", HostDisplayName: "Host"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, err := service.StartGame(context.Background(), StartGameInput{Code: room.Code, PlayerToken: host.Token})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if primary.boardCalls != 0 {
+		t.Fatalf("paid board calls = %d, want zero after question exhausted budget", primary.boardCalls)
+	}
+	if started.CurrentGame.CurrentRound.Board.Provider != "static" {
+		t.Fatalf("budget exhaustion did not preserve curated play: %#v", started.CurrentGame.CurrentRound.Board)
 	}
 }
 

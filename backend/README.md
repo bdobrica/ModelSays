@@ -54,13 +54,13 @@ The frontend should not be trusted for game-state decisions.
 
 ## Supported MVP
 
-The backend supports simultaneous English games with 1–5 rounds, 15–120 second answer windows, curated offline content or validated OpenAI generation, PostgreSQL persistence, deterministic canonical/alias matching, first-claim duplicate scoring, phase-aware response secrecy, host reveal/override/advance controls, and room-scoped same-browser session recovery.
+The backend supports simultaneous English games with 1–5 rounds, 15–120 second answer windows, curated offline content or validated and audited OpenAI generation, PostgreSQL persistence, deterministic canonical/alias matching, first-claim duplicate scoring, phase-aware response secrecy, host reveal/override/advance controls, and room-scoped same-browser session recovery. Provider configuration, privacy, and operations are documented in [`docs/provider-operations.md`](../docs/provider-operations.md).
 
 The PostgreSQL lifecycle gate runs a host plus two players through two curated rounds and covers shared board identity, session recovery during answering and reveal, equivalent guesses, deadline rejection, override, completion, and score reload after the repository/service/server are rebuilt.
 
 ## Known Limitations
 
-Updates are polled rather than pushed. Expiry does not automatically reveal. Matching has no semantic judge. Presence, cross-device session transfer, teams, non-English locales, and non-simultaneous modes are not supported. Public-launch rate limiting, moderation, observability, retention, and provider cost controls remain deferred.
+Updates are polled rather than pushed. Expiry does not automatically reveal. Matching has no semantic judge. Presence, cross-device session transfer, teams, non-English locales, and non-simultaneous modes are not supported. Public-launch rate limiting, moderation, general observability, and automated audit retention cleanup remain deferred.
 
 ## Suggested Stack
 
@@ -386,6 +386,14 @@ APP_ENV=development
 CORS_ALLOWED_ORIGINS=http://localhost:5173
 DEFAULT_PREDICTION_MODEL=gpt-4.1-mini
 DEFAULT_QUESTION_MODEL=gpt-4.1-mini
+ALLOWED_PREDICTION_MODELS=gpt-4.1-mini
+ALLOWED_QUESTION_MODELS=gpt-4.1-mini
+MODEL_TIMEOUT_SECONDS=10
+MODEL_MAX_ATTEMPTS=2
+MODEL_MAX_CALLS_PER_GAME=20
+MODEL_MAX_COST_USD_PER_GAME=0.10
+MODEL_CAPTURE_RAW_RESPONSES=false
+MODEL_RAW_RESPONSE_MAX_BYTES=4096
 ```
 
 ## Local Development
