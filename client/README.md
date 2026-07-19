@@ -14,6 +14,8 @@ The client supports the complete simultaneous game path on one room route: creat
 
 The room-flow component suite covers host and player states, expiry, stale polling responses, reveal/override, final ties, and session recovery. The PostgreSQL lifecycle gate separately exercises one host and two player identities across the persisted API flow.
 
+The root `make baseline` command builds the production client and records its uncompressed asset size alongside 3-, 8-, and 12-player API polling workloads. Current bundle evidence and beta budgets are documented in [`docs/baselines/pb-00.md`](../docs/baselines/pb-00.md).
+
 ## Known Limitations
 
 Room updates use three-second polling, not WebSockets. Reveal and advancement require the host. Matching corrections happen only after reveal. Sessions do not transfer across devices, and presence is not tracked. Teams, sequential mode, animations, round deltas, play-again/share controls, and a dedicated browser end-to-end harness are deferred. Physical-device and external-player usability testing is still recommended before public release.

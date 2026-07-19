@@ -16,7 +16,7 @@ CORS_ALLOWED_ORIGINS ?= http://localhost:5173
 GOOSE_VERSION := v3.27.2
 GOOSE := go run github.com/pressly/goose/v3/cmd/goose@$(GOOSE_VERSION)
 
-.PHONY: help install bootstrap start dev postgres-up postgres-down postgres-logs postgres-reset migrate-up migrate-down backend client format check-format vet-backend test-backend test-client build-client check verify
+.PHONY: help install bootstrap start dev postgres-up postgres-down postgres-logs postgres-reset migrate-up migrate-down backend client baseline format check-format vet-backend test-backend test-client build-client check verify
 
 help:
 	@printf '%s\n' \
@@ -34,6 +34,7 @@ help:
 		'  make migrate-down  Roll back the most recent backend migration' \
 		'  make backend       Run the backend only' \
 		'  make client        Run the client only' \
+		'  make baseline      Measure 3-, 8-, and 12-player PostgreSQL gameplay workloads' \
 		'  make format        Format backend Go source' \
 		'  make check-format  Check backend Go formatting' \
 		'  make vet-backend   Run Go static analysis' \
@@ -81,6 +82,9 @@ backend:
 
 client:
 	cd $(CLIENT_DIR) && npm run dev
+
+baseline: build-client
+	cd $(BACKEND_DIR) && go run ./cmd/baseline -database-url '$(DATABASE_URL)' -client-dist ../client/dist
 
 format:
 	gofmt -w $$(find $(BACKEND_DIR) -type f -name '*.go')

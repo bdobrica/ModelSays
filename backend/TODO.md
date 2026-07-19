@@ -15,6 +15,7 @@ Status note:
   - room creation now enforces the narrow MVP settings and name/code bounds, strict bounded JSON decoding, and lobby-only joins in both repositories; public-launch rate limiting remains deferred.
   - same-browser refresh validates the stored token through the room session endpoint; heartbeat/presence and cross-device transfer remain deferred.
   - CI now gates formatting, vetting, backend/client tests, the production client build, and a PostgreSQL-backed full API lifecycle that uses only curated content.
+  - a local PostgreSQL/HTTP baseline now measures representative 3-, 8-, and 12-player polling workloads; production telemetry, concurrency load, and query-plan analysis remain future hardening.
 
 ## Phase 0 — Project Setup
 
@@ -206,6 +207,7 @@ Status note:
 - [x] Integration tests with a deterministic non-network model client.
 - [x] Migration tests for atomic answer claims.
 - [x] PostgreSQL concurrency and scoreboard reload tests.
+- [x] Add repeatable 3-, 8-, and 12-player PostgreSQL gameplay baselines.
 
 ## Phase 13 — Developer Experience
 

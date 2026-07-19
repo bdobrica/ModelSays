@@ -159,6 +159,14 @@ make verify
 
 GitHub Actions runs separate backend, client, and PostgreSQL integration jobs on pushes and pull requests. The database job covers a host-and-two-player, two-round HTTP lifecycle—including secrecy, equivalent claims, deadline rejection, session recovery, reveal, host override, completion, and reload—using curated content, so verification never needs an OpenAI key or external model request.
 
+Before performance-sensitive beta changes, build the client and run the repeatable 3-, 8-, and 12-player PostgreSQL baseline:
+
+```bash
+make baseline
+```
+
+The command prints versioned JSON and never calls an external model. See [`docs/baselines/pb-00.md`](docs/baselines/pb-00.md) for the initial two-pass results and budgets, [`docs/release-evidence.md`](docs/release-evidence.md) for the release record, and [`docs/playtest-guide.md`](docs/playtest-guide.md) for structured human feedback.
+
 The required automated smoke gate stays at the API boundary to keep CI small and deterministic. For a human usability/fun check before wider distribution, run:
 
 1. Run `make start`, open `http://localhost:5173` in three separate browser sessions (one at a phone-sized viewport), and create a two-round room in the first.

@@ -13,6 +13,7 @@ Status note:
 	- the create-room flow currently fixes game mode to simultaneous instead of exposing a mode selector.
 	- the creation form and backend now share the MVP bounds of 1–5 rounds, a 15–120 second timer, and bounded names.
 	- CI runs the locked client test suite and production build alongside backend and PostgreSQL lifecycle gates.
+	- the root baseline command records production bundle size and representative polling volume; browser rendering and physical-device performance remain playtest work.
 
 ## Phase 0 — Project Setup
 

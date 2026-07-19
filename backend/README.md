@@ -6,6 +6,10 @@ This backend provides the game engine, room management, persistent generated ans
 
 The key idea is not to simulate a real survey. The game is explicitly about guessing the model’s predicted cultural priors.
 
+## Performance Baseline
+
+From the repository root, `make baseline` runs deterministic 3-, 8-, and 12-player workloads through the real HTTP handler and PostgreSQL repository. It emits versioned JSON containing request/poll volume, response bytes, backend and mutation-visibility latency, database query counts/duration, and the built client size. The harness uses curated content, creates isolated schemas, and makes no provider calls. It is a regression baseline, not production telemetry or a saturation test; interpretation and current budgets are in [`docs/baselines/pb-00.md`](../docs/baselines/pb-00.md).
+
 ## Core Concept
 
 For each round:
