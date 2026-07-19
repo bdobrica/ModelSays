@@ -6,6 +6,7 @@ import { HomePage } from './pages/HomePage'
 import { JoinRoomPage } from './pages/JoinRoomPage'
 import { NotFoundPage } from './pages/NotFoundPage'
 import { RoomPage } from './pages/RoomPage'
+import { ReplayPage } from './pages/ReplayPage'
 
 export default function App() {
     return (
@@ -15,6 +16,7 @@ export default function App() {
                 <Route path="/create" element={<CreateRoomPage />} />
                 <Route path="/join" element={<JoinRoomPage />} />
                 <Route path="/room/:code" element={<RoomPage />} />
+                <Route path="/replay/:replayId" element={<ReplayPage />} />
                 <Route path="*" element={<NotFoundPage />} />
             </Routes>
         </AppShell>

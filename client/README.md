@@ -10,7 +10,7 @@ The playable client authenticates an SSE stream with a request header and treats
 
 ## Supported MVP
 
-The client supports the complete simultaneous game path on one room route: create/join, live lobby, host start, a server-deadline countdown, one locked answer, automatic expiry reveal, host early reveal and override, private post-reveal semantic suggestions for the host, next round, final ranked winners/ties, and server-validated same-browser refresh recovery. The layout collapses to one column below 900 px for phone-sized player views.
+The client supports the complete simultaneous game path: create/join, live lobby, host start, a server-deadline countdown, one locked answer, automatic expiry reveal, host early reveal and override, private post-reveal semantic suggestions for the host, next round, final ranked winners/ties, share/copy results, a round-by-round replay route, host play-again into a clean lobby, and server-validated same-browser refresh recovery. The layout collapses to one column below 900 px for phone-sized player views.
 
 The client suite covers the event contract and every event type, header authentication, burst coalescing, duplicate/out-of-order/gapped revisions, malformed/secret-bearing payload rejection, reconnect/resume, offline/online and stop behavior, plus room-flow stale-response protection. The PostgreSQL lifecycle gate separately exercises one host and two player identities across the persisted API flow.
 
@@ -22,7 +22,7 @@ The client opens `GET /api/rooms/{code}/events` with `X-Player-Token`; credentia
 
 ## Known Limitations
 
-Next-round advancement remains a host action, and automatic reveal requires the backend's PostgreSQL worker. Matching corrections happen only after reveal. Sessions do not transfer across devices, and presence is not tracked. Teams, sequential mode, animations, round deltas, play-again/share controls, and a dedicated browser end-to-end harness are deferred. Physical-device and lossy mobile-network playtesting is still recommended before public release.
+Next-round advancement remains a host action, and automatic reveal requires the backend's PostgreSQL worker. Matching corrections happen only after reveal. Sessions do not transfer across devices, and presence is not tracked. Teams, sequential mode, animations, and a dedicated browser end-to-end harness are deferred. Physical-device and lossy mobile-network playtesting is still recommended before public release.
 
 ## Core Experience
 

@@ -58,6 +58,59 @@ func TestObservabilityAddsRequestIDMetricsAndRedactsSecrets(t *testing.T) {
 	}
 }
 
+func TestReplayHTTPProjectionExcludesPrivateFields(t *testing.T) {
+	service := game.NewInMemoryRoomService()
+	ctx := context.Background()
+	room, host, err := service.CreateRoom(ctx, game.CreateRoomInput{
+		RoomName: "Replay privacy", HostDisplayName: "Host",
+		Settings: models.RoomSettings{TotalRounds: 1, AnswerTimerSeconds: 30},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, player, err := service.JoinRoom(ctx, game.JoinRoomInput{Code: room.Code, DisplayName: "Player"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, err := service.StartGame(ctx, game.StartGameInput{Code: room.Code, PlayerToken: host.Token})
+	if err != nil {
+		t.Fatal(err)
+	}
+	answer := started.CurrentGame.CurrentRound.Board.Answers[0]
+	if _, err := service.SubmitGuess(ctx, game.SubmitGuessInput{
+		Code: room.Code, RoundID: started.CurrentGame.CurrentRound.ID,
+		PlayerToken: player.Token, Answer: answer.CanonicalAnswer,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.RevealRound(ctx, game.RevealRoundInput{
+		Code: room.Code, RoundID: started.CurrentGame.CurrentRound.ID, PlayerToken: host.Token,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	completed, err := service.NextRound(ctx, game.NextRoundInput{Code: room.Code, PlayerToken: host.Token})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(config.Config{}, slog.New(slog.NewTextHandler(io.Discard, nil)), service)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/replays/"+completed.CurrentGame.ReplayID, nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("replay status=%d body=%s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	for _, private := range []string{host.Token, player.Token, `"aliases"`, `"normalizedAnswer"`, `"provider"`, `"modelName"`, `"promptVersion"`, `"providerAudits"`, `"rawResponse"`} {
+		if strings.Contains(body, private) {
+			t.Fatalf("replay leaked %q: %s", private, body)
+		}
+	}
+	for _, public := range []string{answer.CanonicalAnswer, player.DisplayName, `"scoreDeltas"`} {
+		if !strings.Contains(body, public) {
+			t.Fatalf("replay omitted %q: %s", public, body)
+		}
+	}
+}
+
 func TestAbuseLimitsReturnDeterministicMetadataAndExcludeHealth(t *testing.T) {
 	cfg := config.Config{Abuse: security.DefaultConfig()}
 	cfg.Abuse.Create = security.Policy{Limit: 1, Window: time.Minute}

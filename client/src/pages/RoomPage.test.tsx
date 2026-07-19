@@ -16,6 +16,7 @@ vi.mock('../lib/api', async () => {
     submitGuess: vi.fn(),
     revealRound: vi.fn(),
     nextRound: vi.fn(),
+    playAgain: vi.fn(),
     overrideMatch: vi.fn(),
     getJudgeSuggestions: vi.fn(),
   }
@@ -74,6 +75,7 @@ function roomState(phase: 'lobby' | 'answering' | 'revealed' | 'completed', subm
   if (phase === 'lobby') return room
   room.currentGame = {
     id: 'game-1',
+    replayId: phase === 'completed' ? 'replay-12345678901234567890123456789012' : undefined,
     status: phase === 'completed' ? 'completed' : 'in_progress',
     mode: 'simultaneous',
     totalRounds: 2,
@@ -232,5 +234,27 @@ describe('RoomPage', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Leave this session' }))
     expect(screen.getByText('Home')).toBeInTheDocument()
     expect(window.localStorage.getItem('modelsays.session')).toBeNull()
+  })
+
+  it('copies completed results and lets only the host create a clean next lobby', async () => {
+    saveSession('ABC234', host)
+    const completed = roomState('completed', true)
+    vi.mocked(api.recoverSession).mockResolvedValue({ room: completed, player: host })
+    vi.mocked(api.getRoom).mockResolvedValue({ room: completed })
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    Object.defineProperty(navigator, 'share', { configurable: true, value: undefined })
+    vi.mocked(api.playAgain).mockResolvedValue({
+      room: { ...roomState('lobby'), code: 'NEW234', name: 'Test room' },
+      player: { ...host, id: 'new-host', token: 'new-token' },
+    })
+
+    renderRoom()
+    fireEvent.click(await screen.findByRole('button', { name: 'Share results' }))
+    expect(await screen.findByText('Replay link copied')).toBeInTheDocument()
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining('/replay/replay-12345678901234567890123456789012'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Play again' }))
+    await waitFor(() => expect(api.playAgain).toHaveBeenCalledWith('ABC234', { playerToken: host.token }))
   })
 })

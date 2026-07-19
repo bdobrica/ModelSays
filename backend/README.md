@@ -62,6 +62,8 @@ The PostgreSQL lifecycle gate runs a host plus two players through two curated r
 
 Clients use authenticated SSE invalidations with polling recovery. Automatic reveal requires PostgreSQL, while advancement remains host-controlled. Presence, cross-device session transfer, teams, non-English locales, and non-simultaneous modes are not supported. Abuse limits are process-local, so public deployments must use one API replica. Privacy-safe JSON logs, authenticated bounded metrics, dependency-aware readiness, graceful drain, and opt-in recovery/retention tooling are implemented; environment-specific staging evidence remains an operator responsibility. See [`docs/operations.md`](../docs/operations.md).
 
+Completed games receive a random 128-bit replay identifier. `GET /api/replays/{replayID}` returns rankings, ties, revealed question/board answers, guesses, answer matches, and per-round score deltas. It deliberately omits tokens, normalized guesses, aliases, provider/model/prompt metadata, audits, judge records, and raw provider content. `POST /api/rooms/{code}/play-again` is host-token protected and creates a distinct lobby with copied settings and a new host identity; no gameplay rows or credentials are reused.
+
 ## Suggested Stack
 
 - Go

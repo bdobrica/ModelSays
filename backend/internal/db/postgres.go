@@ -123,8 +123,8 @@ func (repository *PostgresRoomRepository) Ready(ctx context.Context) error {
 	if err := repository.pool.QueryRow(checkCtx, `SELECT version_id, is_applied = false FROM goose_db_version ORDER BY id DESC LIMIT 1`).Scan(&version, &dirty); err != nil {
 		return fmt.Errorf("migration compatibility: %w", err)
 	}
-	if dirty || version != 9 {
-		return fmt.Errorf("migration compatibility: database version %d dirty=%t, want 9 clean", version, dirty)
+	if dirty || version != 10 {
+		return fmt.Errorf("migration compatibility: database version %d dirty=%t, want 10 clean", version, dirty)
 	}
 	return nil
 }
@@ -355,6 +355,55 @@ func (repository *PostgresRoomRepository) GetRoom(ctx context.Context, code stri
 	return repository.loadRoom(ctx, repository.pool, code)
 }
 
+func (repository *PostgresRoomRepository) GetRoomByReplayID(ctx context.Context, replayID string) (models.Room, error) {
+	var code string
+	err := repository.pool.QueryRow(ctx, `SELECT room_code FROM games WHERE replay_id = $1`, replayID).Scan(&code)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return models.Room{}, game.ErrReplayNotFound
+	}
+	if err != nil {
+		return models.Room{}, fmt.Errorf("query replay room: %w", err)
+	}
+	return repository.loadRoom(ctx, repository.pool, code)
+}
+
+func (repository *PostgresRoomRepository) ListGameRounds(ctx context.Context, gameID string) ([]models.Round, error) {
+	rows, err := repository.pool.Query(ctx, `
+		SELECT r.id, r.round_index, r.status, r.board_id, r.answer_phase_started_at,
+		       r.answer_phase_ends_at, r.reveal_started_at, r.created_at,
+		       q.id, q.text, q.locale, q.category, q.created_at
+		FROM rounds r
+		INNER JOIN questions q ON q.id = r.question_id
+		WHERE r.game_id = $1
+		ORDER BY r.round_index
+	`, gameID)
+	if err != nil {
+		return nil, fmt.Errorf("query game rounds: %w", err)
+	}
+	defer rows.Close()
+	result := make([]models.Round, 0)
+	for rows.Next() {
+		var round models.Round
+		var boardID string
+		if err := rows.Scan(&round.ID, &round.RoundIndex, &round.Status, &boardID,
+			&round.AnswerPhaseStartedAt, &round.AnswerPhaseEndsAt, &round.RevealStartedAt, &round.CreatedAt,
+			&round.Question.ID, &round.Question.Text, &round.Question.Locale, &round.Question.Category, &round.Question.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan game round: %w", err)
+		}
+		round.Board, err = repository.loadBoard(ctx, repository.pool, boardID)
+		if err != nil {
+			return nil, err
+		}
+		round.BoardHash = valueOrBoardHash(round.Board)
+		round.Guesses, err = repository.loadGuesses(ctx, repository.pool, round.ID)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, round)
+	}
+	return result, rows.Err()
+}
+
 func (repository *PostgresRoomRepository) AddPlayer(ctx context.Context, code string, player models.Player) (models.Room, error) {
 	tx, err := repository.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
@@ -462,9 +511,9 @@ func (repository *PostgresRoomRepository) StartGame(ctx context.Context, code st
 	}
 
 	_, err = tx.Exec(ctx, `
-		INSERT INTO games (id, room_code, status, mode, total_rounds, current_round_index, created_at, started_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-	`, gameState.ID, code, gameState.Status, gameState.Mode, gameState.TotalRounds, gameState.CurrentRoundIndex, gameState.CreatedAt, gameState.StartedAt)
+		INSERT INTO games (id, room_code, replay_id, status, mode, total_rounds, current_round_index, created_at, started_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	`, gameState.ID, code, gameState.ReplayID, gameState.Status, gameState.Mode, gameState.TotalRounds, gameState.CurrentRoundIndex, gameState.CreatedAt, gameState.StartedAt)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return models.Room{}, game.ErrGameAlreadyStarted
@@ -916,6 +965,7 @@ func (repository *PostgresRoomRepository) loadCurrentGame(ctx context.Context, q
 	err := querier.QueryRow(ctx, `
 		SELECT
 			g.id,
+			COALESCE(g.replay_id, ''),
 			g.status,
 			g.mode,
 			g.total_rounds,
@@ -944,6 +994,7 @@ func (repository *PostgresRoomRepository) loadCurrentGame(ctx context.Context, q
 		LIMIT 1
 	`, code).Scan(
 		&gameState.ID,
+		&gameState.ReplayID,
 		&gameState.Status,
 		&gameState.Mode,
 		&gameState.TotalRounds,

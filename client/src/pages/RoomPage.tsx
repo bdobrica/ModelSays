@@ -5,6 +5,7 @@ import {
   getRoom,
   getJudgeSuggestions,
   nextRound,
+  playAgain,
   overrideMatch,
   recoverSession,
   revealRound,
@@ -36,6 +37,7 @@ export function RoomPage() {
   const [overrideSelections, setOverrideSelections] = useState<Record<string, string>>({})
   const [judgeSuggestions, setJudgeSuggestions] = useState<JudgeSuggestion[]>([])
   const [connectionState, setConnectionState] = useState<RoomConnectionState>('connecting')
+  const [shareStatus, setShareStatus] = useState('')
   const [now, setNow] = useState(() => Date.now())
   const requestSequence = useRef(0)
   const activeRequest = useRef<AbortController | null>(null)
@@ -266,6 +268,36 @@ export function RoomPage() {
     await mutateRoom(() => nextRound(code, { playerToken: activePlayerToken }))
   }
 
+  async function handlePlayAgain() {
+    if (!activePlayerToken) return setErrorMessage('Missing player session token')
+    setIsMutating(true)
+    try {
+      const response = await playAgain(code, { playerToken: activePlayerToken })
+      if (!response.player?.token) throw new Error('New host session was not returned')
+      saveSession(response.room.code, response.player)
+      navigate(`/room/${response.room.code}`)
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Unable to create a new room')
+      setIsMutating(false)
+    }
+  }
+
+  async function handleShareResults() {
+    if (!currentGame?.replayId) return
+    const url = `${window.location.origin}/replay/${currentGame.replayId}`
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: `${room?.name ?? 'Model Says'} results`, url })
+        setShareStatus('Results shared')
+      } else {
+        await navigator.clipboard.writeText(url)
+        setShareStatus('Replay link copied')
+      }
+    } catch (error) {
+      if ((error as DOMException)?.name !== 'AbortError') setShareStatus('Unable to share results')
+    }
+  }
+
   async function handleOverrideMatch(guessId: string) {
     if (!activePlayerToken || !currentRound) return setErrorMessage('Missing player session or round state')
     const selectedValue = overrideSelections[guessId] ?? ''
@@ -425,6 +457,15 @@ export function RoomPage() {
                 </button>
               </div>
             ) : null}
+            {isGameCompleted && currentGame?.replayId ? (
+              <div className="action-row">
+                <button className="button button-primary" onClick={() => void handleShareResults()} type="button">Share results</button>
+                <button className="button button-secondary" onClick={() => navigate(`/replay/${currentGame.replayId}`)} type="button">View replay</button>
+                {isHost ? <button className="button button-secondary" disabled={isMutating} onClick={() => void handlePlayAgain()} type="button">Play again</button> : null}
+                <button className="button button-secondary" onClick={() => navigate('/')} type="button">Back to home</button>
+              </div>
+            ) : null}
+            {shareStatus ? <p className="status-note" aria-live="polite" role="status">{shareStatus}</p> : null}
           </section>
         ) : null}
 

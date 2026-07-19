@@ -229,3 +229,4 @@ Status note:
 - [x] Round reveal works.
 - [x] Final scoreboard works.
 - [x] Same-browser refresh validates and restores the player session without breaking the game.
+- [x] Add privacy-safe completed-game replay retrieval and host-controlled clean play-again lifecycle.

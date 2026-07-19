@@ -173,7 +173,7 @@ The required automated smoke gate stays at the API boundary to keep CI small and
 2. Join from both player sessions, start as host, and confirm all sessions show the same question and board hash without revealing the board.
 3. Submit equivalent aliases from both players, refresh during answering, wait for expiry, confirm further input is disabled/rejected, then reveal as host.
 4. Confirm the first claim scored and the later equivalent is a duplicate, correct the duplicate to another answer with the host override controls, and refresh during reveal.
-5. Advance, play and reveal round two, confirm all sessions show the same final ranking, restart the backend, and confirm refresh preserves the completed game and identities.
+5. Advance, play and reveal round two, confirm all sessions show the same final ranking, open the shareable round-by-round replay, then use the host's **Play again** action and confirm it creates an empty new lobby.
 
 Without `OPENAI_API_KEY`, games use a five-question English curated bank and support the full 1–5 round MVP flow. With OpenAI enabled, question and board responses use strict JSON schemas and are validated independently of the provider. Invalid or failed generation is retried once, then the server selects the unused curated entry for that round. Only failure of both paths returns a temporary content-unavailable response.
 
@@ -260,7 +260,7 @@ The repeatable MVP playtest gate uses a host and two player identities across tw
 - Automatic scoring remains deterministic. Optional semantic suggestions still require an explicit post-reveal host decision.
 - Expiry closes answering and the PostgreSQL worker automatically reveals; round advancement remains a manual host action.
 - Reconnect is limited to the same browser’s stored room token; there is no presence heartbeat or cross-device transfer.
-- Only simultaneous English games are supported; teams, sequential play, play-again, and shareable results are deferred.
+- Only simultaneous English games are supported; teams and sequential play are deferred. Completed games now have a non-enumerable results link with final rankings, round deltas, revealed boards/guesses, and answer matches. The host can create a clean new lobby with the same settings through **Play again**.
 - The responsive UI is automated at the component/CSS level, but physical-device and external-participant playtesting remains a release follow-up.
 - Public API/provider abuse boundaries, privacy-safe logs and bounded metrics, dependency-aware readiness, graceful drain, and recovery controls are documented and tested. The supported public-beta topology remains one API replica; an operator-controlled TLS/proxy and physical-network staging drill is still required before uncontrolled public traffic.
 
@@ -273,6 +273,8 @@ Recommended MVP mode.
 All players answer at the same time. The server accepts guesses only before the published `answerPhaseEndsAt` deadline. PostgreSQL-backed servers reveal automatically at expiry (after an optional reveal-only grace period), and the host may reveal early. Next-round advancement stays manual so the host has an unbounded review window for suggestions and score corrections. The durable transition and emergency-disable contract is documented in [`docs/deadline-transitions.md`](docs/deadline-transitions.md).
 
 While a round is accepting answers, every public API response hides the frozen board, guess text, normalized answers, match and duplicate outcomes, awarded points, and the current round's score changes. Players can see who has submitted and the scoreboard through the last revealed round. Reveal publishes the frozen board and round results and applies the new totals to the public scoreboard.
+
+After completion, the room exposes a random replay identifier. Anyone with its link can view final rankings (including ties), revealed boards and guesses, answer matches, and per-round score deltas. Replay responses exclude player tokens, normalized guesses, answer aliases, provider/model/prompt metadata, audits, judge records, and raw provider content. Replays currently follow completed-game retention and do not have an automatic expiry; see [`docs/operations.md`](docs/operations.md).
 
 For the MVP, matching is deterministic: Unicode letters and numbers are lowercased, punctuation is removed, and whitespace is collapsed. The result must exactly equal a similarly normalized canonical board answer or alias; accents remain significant, and no semantic or fuzzy inference is performed. A board is rejected if the same normalized phrase belongs to multiple answers. Only the earliest committed guess that claims a board answer receives its points. Later guesses matching that same answer are recorded as duplicates and score zero. After reveal, the host can correct a hit, miss, or disputed answer with an override.
 

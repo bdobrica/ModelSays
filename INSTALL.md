@@ -70,6 +70,8 @@ Only the earliest accepted guess matching a board answer earns its points. A lat
 
 Refreshing the same browser restores its player session. Do not clear browser storage during a game. Cross-device session transfer is not currently supported.
 
+When the final round is complete, use **Share results** to share or copy the unguessable replay link. The replay shows winners/ties and every revealed round without exposing session credentials or private provider records. The host can select **Play again** to create a fresh lobby with the same room name and settings; other players join the new code, and no prior guesses, claims, boards, deadlines, scores, or credentials carry over.
+
 ## Optional OpenAI content
 
 Edit `.env`:

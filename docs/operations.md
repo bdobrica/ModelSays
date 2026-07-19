@@ -20,7 +20,7 @@ On `SIGTERM`, the backend stops accepting connections, cancels event streams and
 
 ## Signals
 
-`GET /healthz` is process-only liveness. `GET /readyz` checks PostgreSQL connectivity, clean migration version `000009`, and recent successful transition-worker processing. A failure returns only `not_ready`; details remain in private logs.
+`GET /healthz` is process-only liveness. `GET /readyz` checks PostgreSQL connectivity, clean migration version `000010`, and recent successful transition-worker processing. A failure returns only `not_ready`; details remain in private logs.
 
 `GET /metrics` uses `Authorization: Bearer $METRICS_TOKEN` when configured and must not be exposed publicly. Metrics cover bounded HTTP route/status/latency, active rooms and event connections, subscriptions/reconnects, transition passes/latency, database-pool state, provider outcomes/tokens/estimated cost, and limiter decisions. Labels are fixed categories—never room codes, IPs, player IDs, tokens, prompts, or guesses.
 
@@ -38,7 +38,7 @@ Rotate a provider or metrics secret by installing the new environment value, dra
 
 `make ops-restore BACKUP_FILE=... RESTORE_DATABASE=modelsays_restore_drill` is a dry run. Destructive recreation occurs only when the separately supplied `CONFIRM_RESTORE` exactly matches the constrained disposable database name. Never point the restore drill at the live database.
 
-Provider audits/raw responses are classified for 30-day retention. `make ops-retention RETENTION_DAYS=30` only reports eligible rows. Deletion requires separate authorization and `APPLY_RETENTION=yes`. Backups expire under the backup policy; logs/metrics should use the platform retention policy and contain no user content. Game deletion/anonymization is not automated yet: respond to a request by restricting access, locating records under controlled database access, recording approval, deleting in dependency order, and verifying backups age out. Do not improvise destructive SQL during an incident.
+Provider audits/raw responses are classified for 30-day retention. `make ops-retention RETENTION_DAYS=30` only reports eligible rows. Deletion requires separate authorization and `APPLY_RETENTION=yes`. Backups expire under the backup policy; logs/metrics should use the platform retention policy and contain no user content. Public replay links use random 128-bit identifiers and currently remain available for as long as their completed game is retained; an absent/deleted identifier returns the same not-found response as an invalid one. Game/replay deletion or anonymization is not automated yet: respond to a request by restricting access, locating records under controlled database access, recording approval, deleting in dependency order, and verifying backups age out. Do not improvise destructive SQL during an incident.
 
 ## Incident response
 

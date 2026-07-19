@@ -15,6 +15,7 @@ type InMemoryRoomRepository struct {
 	audits      map[string][]models.ProviderCallAudit
 	suggestions map[string][]models.JudgeSuggestion
 	events      map[string][]models.RoomEvent
+	rounds      map[string][]models.Round
 }
 
 func NewInMemoryRoomRepository() *InMemoryRoomRepository {
@@ -22,6 +23,7 @@ func NewInMemoryRoomRepository() *InMemoryRoomRepository {
 		rooms: make(map[string]*models.Room), audits: make(map[string][]models.ProviderCallAudit),
 		suggestions: make(map[string][]models.JudgeSuggestion),
 		events:      make(map[string][]models.RoomEvent),
+		rounds:      make(map[string][]models.Round),
 	}
 }
 
@@ -87,6 +89,37 @@ func (repository *InMemoryRoomRepository) GetRoom(_ context.Context, code string
 	}
 
 	return cloneRoom(*room), nil
+}
+
+func (repository *InMemoryRoomRepository) GetRoomByReplayID(_ context.Context, replayID string) (models.Room, error) {
+	repository.mu.RLock()
+	defer repository.mu.RUnlock()
+	for _, room := range repository.rooms {
+		if room.CurrentGame != nil && room.CurrentGame.ReplayID == replayID {
+			return cloneRoom(*room), nil
+		}
+	}
+	return models.Room{}, ErrReplayNotFound
+}
+
+func (repository *InMemoryRoomRepository) ListGameRounds(_ context.Context, gameID string) ([]models.Round, error) {
+	repository.mu.RLock()
+	defer repository.mu.RUnlock()
+	rounds := repository.rounds[gameID]
+	result := make([]models.Round, 0, len(rounds)+1)
+	for _, round := range rounds {
+		result = append(result, *cloneGame(&models.Game{CurrentRound: &round}).CurrentRound)
+	}
+	for _, room := range repository.rooms {
+		if room.CurrentGame != nil && room.CurrentGame.ID == gameID && room.CurrentGame.CurrentRound != nil {
+			current := room.CurrentGame.CurrentRound
+			if len(result) == 0 || result[len(result)-1].ID != current.ID {
+				result = append(result, *cloneGame(&models.Game{CurrentRound: current}).CurrentRound)
+			}
+			break
+		}
+	}
+	return result, nil
 }
 
 func (repository *InMemoryRoomRepository) AddPlayer(_ context.Context, code string, player models.Player) (models.Room, error) {
@@ -215,6 +248,9 @@ func (repository *InMemoryRoomRepository) AdvanceGame(_ context.Context, code st
 	room.CurrentGame.Scoreboard = append([]models.ScoreboardEntry(nil), gameState.Scoreboard...)
 	room.CurrentGame.EndedAt = gameState.EndedAt
 	if nextRound != nil {
+		if room.CurrentGame.CurrentRound != nil {
+			repository.rounds[room.CurrentGame.ID] = append(repository.rounds[room.CurrentGame.ID], *cloneGame(&models.Game{CurrentRound: room.CurrentGame.CurrentRound}).CurrentRound)
+		}
 		room.CurrentGame.CurrentRound = cloneGame(&models.Game{CurrentRound: nextRound}).CurrentRound
 		repository.audits[code] = append(repository.audits[code], nextRound.ProviderAudits...)
 	}

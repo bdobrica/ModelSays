@@ -117,6 +117,107 @@ func TestPostgresAtomicAnswerClaimsAndReload(t *testing.T) {
 	}
 }
 
+func TestReplayMigrationDownAndUp(t *testing.T) {
+	pool := integrationPool(t)
+	path := migrationPath(t, "000010_game_replays.sql")
+	executeMigrationSection(t, pool, path, false)
+	if indexExists(t, pool, "games_replay_id_idx") {
+		t.Fatal("replay index still exists after migration down")
+	}
+	executeMigrationSection(t, pool, path, true)
+	if !indexExists(t, pool, "games_replay_id_idx") {
+		t.Fatal("replay index missing after migration up")
+	}
+}
+
+func TestPostgresReplayAndPlayAgainIsolation(t *testing.T) {
+	pool := integrationPool(t)
+	service := game.NewRoomService(db.NewPostgresRoomRepository(pool), nil)
+	ctx := context.Background()
+	room, host, err := service.CreateRoom(ctx, game.CreateRoomInput{
+		RoomName: "Replay isolation", HostDisplayName: "Host",
+		Settings: models.RoomSettings{TotalRounds: 1, AnswerTimerSeconds: 30},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, player, err := service.JoinRoom(ctx, game.JoinRoomInput{Code: room.Code, DisplayName: "Player"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, err := service.StartGame(ctx, game.StartGameInput{Code: room.Code, PlayerToken: host.Token})
+	if err != nil {
+		t.Fatal(err)
+	}
+	answer := started.CurrentGame.CurrentRound.Board.Answers[0]
+	if _, err := service.SubmitGuess(ctx, game.SubmitGuessInput{
+		Code: room.Code, RoundID: started.CurrentGame.CurrentRound.ID,
+		PlayerToken: player.Token, Answer: answer.CanonicalAnswer,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.RevealRound(ctx, game.RevealRoundInput{
+		Code: room.Code, RoundID: started.CurrentGame.CurrentRound.ID, PlayerToken: host.Token,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	completed, err := service.NextRound(ctx, game.NextRoundInput{Code: room.Code, PlayerToken: host.Token})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reloadedService := game.NewRoomService(db.NewPostgresRoomRepository(pool), nil)
+	replay, err := reloadedService.GetReplay(ctx, completed.CurrentGame.ReplayID)
+	if err != nil || len(replay.Rounds) != 1 || replay.Rankings[0].PlayerID != player.ID {
+		t.Fatalf("reloaded replay=%#v err=%v", replay, err)
+	}
+	fresh, freshHost, err := reloadedService.PlayAgain(ctx, game.PlayAgainInput{Code: room.Code, PlayerToken: host.Token})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fresh.Code == room.Code || freshHost.Token == host.Token || fresh.CurrentGame != nil {
+		t.Fatal("fresh lifecycle reused original state")
+	}
+	_, freshPlayer, err := reloadedService.JoinRoom(ctx, game.JoinRoomInput{Code: fresh.Code, DisplayName: "Player"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondStarted, err := reloadedService.StartGame(ctx, game.StartGameInput{Code: fresh.Code, PlayerToken: freshHost.Token})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if secondStarted.CurrentGame.ID == completed.CurrentGame.ID ||
+		secondStarted.CurrentGame.CurrentRound.ID == completed.CurrentGame.CurrentRound.ID ||
+		len(secondStarted.CurrentGame.CurrentRound.Guesses) != 0 ||
+		secondStarted.CurrentGame.Scoreboard[0].Score != 0 {
+		t.Fatal("second game inherited original game, round, guesses, or scores")
+	}
+	secondAnswer := secondStarted.CurrentGame.CurrentRound.Board.Answers[0]
+	if _, err := reloadedService.SubmitGuess(ctx, game.SubmitGuessInput{
+		Code: fresh.Code, RoundID: secondStarted.CurrentGame.CurrentRound.ID,
+		PlayerToken: freshPlayer.Token, Answer: secondAnswer.CanonicalAnswer,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reloadedService.RevealRound(ctx, game.RevealRoundInput{
+		Code: fresh.Code, RoundID: secondStarted.CurrentGame.CurrentRound.ID, PlayerToken: freshHost.Token,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	secondCompleted, err := reloadedService.NextRound(ctx, game.NextRoundInput{Code: fresh.Code, PlayerToken: freshHost.Token})
+	if err != nil {
+		t.Fatal(err)
+	}
+	finalService := game.NewRoomService(db.NewPostgresRoomRepository(pool), nil)
+	secondReplay, err := finalService.GetReplay(ctx, secondCompleted.CurrentGame.ReplayID)
+	if err != nil || len(secondReplay.Rounds) != 1 || secondReplay.Rankings[0].PlayerID != freshPlayer.ID {
+		t.Fatalf("second replay=%#v err=%v", secondReplay, err)
+	}
+	originalReplay, err := finalService.GetReplay(ctx, completed.CurrentGame.ReplayID)
+	if err != nil || originalReplay.Rankings[0].PlayerID != player.ID {
+		t.Fatalf("original replay changed after second game: %#v err=%v", originalReplay, err)
+	}
+}
+
 func TestPostgresDueRevealIsExactlyOnceAcrossWorkersAndRestart(t *testing.T) {
 	pool := integrationPool(t)
 	first := db.NewPostgresRoomRepository(pool)

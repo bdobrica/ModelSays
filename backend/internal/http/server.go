@@ -66,6 +66,10 @@ type nextRoundRequest struct {
 	PlayerToken string `json:"playerToken"`
 }
 
+type playAgainRequest struct {
+	PlayerToken string `json:"playerToken"`
+}
+
 type overrideMatchRequest struct {
 	PlayerToken               string  `json:"playerToken"`
 	RoundID                   string  `json:"roundId"`
@@ -100,6 +104,7 @@ type publicPlayer struct {
 
 type publicGame struct {
 	ID                string                   `json:"id"`
+	ReplayID          string                   `json:"replayId,omitempty"`
 	Status            models.GameStatus        `json:"status"`
 	Mode              models.GameMode          `json:"mode"`
 	TotalRounds       int                      `json:"totalRounds"`
@@ -179,6 +184,7 @@ func (server *Server) routes() {
 	server.mux.HandleFunc("GET /readyz", server.handleReady)
 	server.mux.HandleFunc("GET /metrics", server.handleMetrics)
 	server.mux.HandleFunc("POST /api/rooms", server.handleCreateRoom)
+	server.mux.HandleFunc("GET /api/replays/", server.handleReplay)
 	server.mux.HandleFunc("GET /api/rooms/", server.handleRoomRoutes)
 	server.mux.HandleFunc("POST /api/rooms/", server.handleRoomRoutes)
 }
@@ -259,6 +265,8 @@ func (server *Server) handleRoomRoutes(writer http.ResponseWriter, request *http
 		server.handleStartGame(writer, request, code)
 	case request.Method == http.MethodPost && len(parts) == 2 && parts[1] == "next-round":
 		server.handleNextRound(writer, request, code)
+	case request.Method == http.MethodPost && len(parts) == 2 && parts[1] == "play-again":
+		server.handlePlayAgain(writer, request, code)
 	case request.Method == http.MethodPost && len(parts) == 2 && parts[1] == "override-match":
 		server.handleOverrideMatch(writer, request, code)
 	case request.Method == http.MethodPost && len(parts) == 4 && parts[1] == "rounds" && parts[3] == "guesses":
@@ -268,6 +276,20 @@ func (server *Server) handleRoomRoutes(writer http.ResponseWriter, request *http
 	default:
 		writeError(writer, http.StatusNotFound, "room route not found")
 	}
+}
+
+func (server *Server) handleReplay(writer http.ResponseWriter, request *http.Request) {
+	replayID := strings.Trim(strings.TrimPrefix(request.URL.Path, "/api/replays/"), "/")
+	if replayID == "" || strings.Contains(replayID, "/") {
+		writeError(writer, http.StatusNotFound, game.ErrReplayNotFound.Error())
+		return
+	}
+	replay, err := server.roomService.GetReplay(request.Context(), replayID)
+	if err != nil {
+		server.writeDomainError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"replay": replay})
 }
 
 func (server *Server) handleRoomEvents(writer http.ResponseWriter, request *http.Request, code string) {
@@ -428,6 +450,8 @@ func metricRoute(request *http.Request) string {
 		return "metrics"
 	case request.URL.Path == "/api/rooms" && request.Method == http.MethodPost:
 		return "room_create"
+	case strings.HasPrefix(request.URL.Path, "/api/replays/"):
+		return "replay"
 	case strings.HasSuffix(request.URL.Path, "/events"):
 		return "room_events"
 	case strings.Contains(request.URL.Path, "/rounds/"):
@@ -604,6 +628,25 @@ func (server *Server) handleNextRound(writer http.ResponseWriter, request *http.
 	writeJSON(writer, http.StatusOK, roomResponse{Room: projectRoom(room)})
 }
 
+func (server *Server) handlePlayAgain(writer http.ResponseWriter, request *http.Request, code string) {
+	var payload playAgainRequest
+	if err := decodeJSONBody(writer, request, &payload); err != nil {
+		writeError(writer, http.StatusBadRequest, "invalid JSON payload")
+		return
+	}
+	if !server.allowPlayerAction(writer, "play-again", code, payload.PlayerToken, server.abuse.Config().PlayerAction) {
+		return
+	}
+	room, player, err := server.roomService.PlayAgain(request.Context(), game.PlayAgainInput{
+		Code: code, PlayerToken: payload.PlayerToken,
+	})
+	if err != nil {
+		server.writeDomainError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusCreated, roomResponse{Room: projectRoom(room), Player: &player})
+}
+
 func (server *Server) handleOverrideMatch(writer http.ResponseWriter, request *http.Request, code string) {
 	var payload overrideMatchRequest
 	if err := decodeJSONBody(writer, request, &payload); err != nil {
@@ -714,15 +757,17 @@ func (server *Server) writeDomainError(writer http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, game.ErrRoomNotFound):
 		writeError(writer, http.StatusNotFound, err.Error())
+	case errors.Is(err, game.ErrReplayNotFound):
+		writeError(writer, http.StatusNotFound, err.Error())
 	case errors.Is(err, game.ErrRoundNotFound):
 		writeError(writer, http.StatusNotFound, err.Error())
 	case errors.Is(err, game.ErrUnauthorizedStart):
 		writeError(writer, http.StatusForbidden, err.Error())
-	case errors.Is(err, game.ErrUnauthorizedReveal), errors.Is(err, game.ErrUnauthorizedAdvance), errors.Is(err, game.ErrUnauthorizedOverride), errors.Is(err, game.ErrUnauthorizedAudit), errors.Is(err, game.ErrUnauthorizedJudgeReview), errors.Is(err, game.ErrPlayerNotFound):
+	case errors.Is(err, game.ErrUnauthorizedReveal), errors.Is(err, game.ErrUnauthorizedAdvance), errors.Is(err, game.ErrUnauthorizedOverride), errors.Is(err, game.ErrUnauthorizedAudit), errors.Is(err, game.ErrUnauthorizedJudgeReview), errors.Is(err, game.ErrUnauthorizedPlayAgain), errors.Is(err, game.ErrPlayerNotFound):
 		writeError(writer, http.StatusForbidden, err.Error())
 	case errors.Is(err, game.ErrGameAlreadyStarted), errors.Is(err, game.ErrGameAlreadyCompleted), errors.Is(err, game.ErrRoomJoinClosed):
 		writeError(writer, http.StatusConflict, err.Error())
-	case errors.Is(err, game.ErrRoundNotAcceptingGuesses), errors.Is(err, game.ErrAnswerPhaseExpired), errors.Is(err, game.ErrRoundAlreadyRevealed), errors.Is(err, game.ErrRoundNotRevealed), errors.Is(err, game.ErrGuessAlreadySubmitted):
+	case errors.Is(err, game.ErrRoundNotAcceptingGuesses), errors.Is(err, game.ErrAnswerPhaseExpired), errors.Is(err, game.ErrRoundAlreadyRevealed), errors.Is(err, game.ErrRoundNotRevealed), errors.Is(err, game.ErrGuessAlreadySubmitted), errors.Is(err, game.ErrReplayNotReady):
 		writeError(writer, http.StatusConflict, err.Error())
 	case errors.Is(err, game.ErrContentUnavailable):
 		writeError(writer, http.StatusServiceUnavailable, game.ErrContentUnavailable.Error())
@@ -845,6 +890,9 @@ func projectRoom(room models.Room) publicRoom {
 		CreatedAt:         gameState.CreatedAt,
 		StartedAt:         gameState.StartedAt,
 		EndedAt:           gameState.EndedAt,
+	}
+	if gameState.Status == models.GameStatusCompleted {
+		projectedGame.ReplayID = gameState.ReplayID
 	}
 	projected.CurrentGame = projectedGame
 	if gameState.CurrentRound == nil {

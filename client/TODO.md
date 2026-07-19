@@ -126,7 +126,7 @@ Status note:
 - [x] Show canonical answers.
 - [x] Show point values.
 - [ ] Animate answer reveals.
-- [ ] Show which players matched each answer.
+- [x] Show which players matched each answer in completed-game replay.
 - [x] Show misses.
 - [ ] Show score deltas.
 - [x] Show board hash.
@@ -157,9 +157,9 @@ Status note:
 - [ ] Show team rankings if enabled.
 - [ ] Show round-by-round point changes.
 - [x] Highlight winner and ties.
-- [ ] Add play-again button.
+- [x] Add host play-again button that enters a clean new lobby.
 - [ ] Add back-to-lobby button.
-- [ ] Add share results button if desired.
+- [x] Add accessible share/copy results feedback and a stable replay route.
 
 ## Phase 10 — Team Mode
 

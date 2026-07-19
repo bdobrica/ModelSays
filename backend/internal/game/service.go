@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -47,6 +48,9 @@ var (
 	ErrGeneratedContentInvalid  = errors.New("generated game content is invalid")
 	ErrContentUnavailable       = errors.New("game content is temporarily unavailable; please try again")
 	ErrAnswerInvalid            = errors.New("answer must be between 1 and 120 characters")
+	ErrReplayNotFound           = errors.New("replay is unavailable or has expired")
+	ErrReplayNotReady           = errors.New("replay is available only after the game is complete")
+	ErrUnauthorizedPlayAgain    = errors.New("only the host can play again")
 )
 
 const (
@@ -100,6 +104,11 @@ type RevealRoundInput struct {
 }
 
 type NextRoundInput struct {
+	Code        string
+	PlayerToken string
+}
+
+type PlayAgainInput struct {
 	Code        string
 	PlayerToken string
 }
@@ -171,6 +180,8 @@ type RoomRepository interface {
 	ListJudgeSuggestions(ctx context.Context, code string, roundID string) ([]models.JudgeSuggestion, error)
 	AppendRoomEvent(ctx context.Context, code string, eventType models.RoomEventType, occurredAt time.Time) (models.RoomEvent, error)
 	ListRoomEvents(ctx context.Context, code string, afterRevision int64, limit int) ([]models.RoomEvent, error)
+	GetRoomByReplayID(ctx context.Context, replayID string) (models.Room, error)
+	ListGameRounds(ctx context.Context, gameID string) ([]models.Round, error)
 }
 
 func NewRoomService(repository RoomRepository, modelClient llm.ModelClient) *RoomService {
@@ -428,6 +439,7 @@ func (service *RoomService) StartGame(ctx context.Context, input StartGameInput)
 
 	gameState := models.Game{
 		ID:                gameID,
+		ReplayID:          newToken(),
 		Status:            models.GameStatusInProgress,
 		Mode:              room.Settings.Mode,
 		TotalRounds:       room.Settings.TotalRounds,
@@ -599,7 +611,15 @@ func (service *RoomService) NextRound(ctx context.Context, input NextRoundInput)
 		return models.Room{}, err
 	}
 	roundID := newID()
-	roundSeed, err := service.generateRoundScoped(ctx, room.Code, room.CurrentGame.ID, roundID, room.Settings, nextRoundIndex, []string{room.CurrentGame.CurrentRound.Question.Text}, now, priorAudits)
+	rounds, err := service.repository.ListGameRounds(ctx, room.CurrentGame.ID)
+	if err != nil {
+		return models.Room{}, err
+	}
+	usedQuestions := make([]string, 0, len(rounds))
+	for _, priorRound := range rounds {
+		usedQuestions = append(usedQuestions, priorRound.Question.Text)
+	}
+	roundSeed, err := service.generateRoundScoped(ctx, room.Code, room.CurrentGame.ID, roundID, room.Settings, nextRoundIndex, usedQuestions, now, priorAudits)
 	if err != nil {
 		return models.Room{}, err
 	}
@@ -628,6 +648,91 @@ func (service *RoomService) NextRound(ctx context.Context, input NextRoundInput)
 		updated = service.publishRoomEvent(ctx, updated, models.RoomEventRoundStarted)
 	}
 	return updated, err
+}
+
+func (service *RoomService) GetReplay(ctx context.Context, replayID string) (models.ReplaySummary, error) {
+	replayID = strings.TrimSpace(replayID)
+	if len(replayID) < 32 || len(replayID) > 128 {
+		return models.ReplaySummary{}, ErrReplayNotFound
+	}
+	room, err := service.repository.GetRoomByReplayID(ctx, replayID)
+	if err != nil {
+		return models.ReplaySummary{}, err
+	}
+	if room.CurrentGame == nil || room.CurrentGame.Status != models.GameStatusCompleted || room.CurrentGame.EndedAt == nil {
+		return models.ReplaySummary{}, ErrReplayNotFound
+	}
+	rounds, err := service.repository.ListGameRounds(ctx, room.CurrentGame.ID)
+	if err != nil {
+		return models.ReplaySummary{}, err
+	}
+	summary := models.ReplaySummary{
+		ID: replayID, RoomName: room.Name, Mode: room.CurrentGame.Mode,
+		StartedAt: room.CurrentGame.StartedAt, EndedAt: *room.CurrentGame.EndedAt,
+		Rankings: append([]models.ScoreboardEntry(nil), room.CurrentGame.Scoreboard...),
+		Rounds:   make([]models.ReplayRound, 0, len(rounds)),
+	}
+	sort.Slice(summary.Rankings, func(i, j int) bool {
+		if summary.Rankings[i].Score == summary.Rankings[j].Score {
+			return summary.Rankings[i].DisplayName < summary.Rankings[j].DisplayName
+		}
+		return summary.Rankings[i].Score > summary.Rankings[j].Score
+	})
+	for _, round := range rounds {
+		if round.Status != models.RoundStatusRevealed || round.Board == nil {
+			return models.ReplaySummary{}, ErrReplayNotReady
+		}
+		deltas := make(map[string]int)
+		for _, guess := range round.Guesses {
+			deltas[guess.PlayerID] += guess.ScoreAwarded
+		}
+		entries := make([]models.ScoreboardEntry, 0, len(room.Players))
+		for _, player := range room.Players {
+			entries = append(entries, models.ScoreboardEntry{
+				PlayerID: player.ID, DisplayName: player.DisplayName, IsHost: player.IsHost, Score: deltas[player.ID],
+			})
+		}
+		replayRound := models.ReplayRound{
+			RoundIndex: round.RoundIndex, Question: round.Question.Text,
+			Board:   make([]models.ReplayAnswer, 0, len(round.Board.Answers)),
+			Guesses: make([]models.ReplayGuess, 0, len(round.Guesses)), ScoreDeltas: entries,
+		}
+		for _, answer := range round.Board.Answers {
+			replayRound.Board = append(replayRound.Board, models.ReplayAnswer{
+				ID: answer.ID, CanonicalAnswer: answer.CanonicalAnswer, Rank: answer.Rank, Score: answer.Score,
+			})
+		}
+		for _, guess := range round.Guesses {
+			replayRound.Guesses = append(replayRound.Guesses, models.ReplayGuess{
+				PlayerDisplayName: guess.PlayerDisplayName, RawAnswer: guess.RawAnswer,
+				MatchedPredictionAnswerID: guess.MatchedPredictionAnswerID,
+				ScoreAwarded:              guess.ScoreAwarded, Duplicate: guess.Duplicate,
+			})
+		}
+		summary.Rounds = append(summary.Rounds, replayRound)
+	}
+	return summary, nil
+}
+
+func (service *RoomService) PlayAgain(ctx context.Context, input PlayAgainInput) (models.Room, models.Player, error) {
+	code, err := normalizeRoomCode(input.Code)
+	if err != nil {
+		return models.Room{}, models.Player{}, err
+	}
+	room, err := service.repository.GetRoom(ctx, code)
+	if err != nil {
+		return models.Room{}, models.Player{}, err
+	}
+	host, ok := findPlayerByToken(room.Players, strings.TrimSpace(input.PlayerToken))
+	if !ok || !host.IsHost {
+		return models.Room{}, models.Player{}, ErrUnauthorizedPlayAgain
+	}
+	if room.CurrentGame == nil || room.CurrentGame.Status != models.GameStatusCompleted {
+		return models.Room{}, models.Player{}, ErrReplayNotReady
+	}
+	return service.CreateRoom(ctx, CreateRoomInput{
+		RoomName: room.Name, HostDisplayName: host.DisplayName, Settings: room.Settings,
+	})
 }
 
 func (service *RoomService) OverrideMatch(ctx context.Context, input OverrideMatchInput) (models.Room, error) {

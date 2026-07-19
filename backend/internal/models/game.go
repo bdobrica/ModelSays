@@ -150,6 +150,7 @@ type JudgeSuggestion struct {
 
 type Game struct {
 	ID                string            `json:"id"`
+	ReplayID          string            `json:"replayId,omitempty"`
 	Status            GameStatus        `json:"status"`
 	Mode              GameMode          `json:"mode"`
 	TotalRounds       int               `json:"totalRounds"`
@@ -159,4 +160,37 @@ type Game struct {
 	CreatedAt         time.Time         `json:"createdAt"`
 	StartedAt         time.Time         `json:"startedAt"`
 	EndedAt           *time.Time        `json:"endedAt,omitempty"`
+}
+
+type ReplayRound struct {
+	RoundIndex  int               `json:"roundIndex"`
+	Question    string            `json:"question"`
+	Board       []ReplayAnswer    `json:"board"`
+	Guesses     []ReplayGuess     `json:"guesses"`
+	ScoreDeltas []ScoreboardEntry `json:"scoreDeltas"`
+}
+
+type ReplayAnswer struct {
+	ID              string `json:"id"`
+	CanonicalAnswer string `json:"canonicalAnswer"`
+	Rank            int    `json:"rank"`
+	Score           int    `json:"score"`
+}
+
+type ReplayGuess struct {
+	PlayerDisplayName         string  `json:"playerDisplayName"`
+	RawAnswer                 string  `json:"rawAnswer"`
+	MatchedPredictionAnswerID *string `json:"matchedPredictionAnswerId,omitempty"`
+	ScoreAwarded              int     `json:"scoreAwarded"`
+	Duplicate                 bool    `json:"duplicate"`
+}
+
+type ReplaySummary struct {
+	ID        string            `json:"id"`
+	RoomName  string            `json:"roomName"`
+	Mode      GameMode          `json:"mode"`
+	StartedAt time.Time         `json:"startedAt"`
+	EndedAt   time.Time         `json:"endedAt"`
+	Rankings  []ScoreboardEntry `json:"rankings"`
+	Rounds    []ReplayRound     `json:"rounds"`
 }

@@ -1591,3 +1591,67 @@ func scoreForPlayer(room models.Room, playerID string) int {
 	}
 	return 0
 }
+
+func TestCompletedReplayAndPlayAgainArePublicSafeAndIsolated(t *testing.T) {
+	service := NewInMemoryRoomService()
+	original, host, err := service.CreateRoom(context.Background(), CreateRoomInput{
+		RoomName: "Replay room", HostDisplayName: "Host",
+		Settings: models.RoomSettings{TotalRounds: 1, AnswerTimerSeconds: 30},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, player, err := service.JoinRoom(context.Background(), JoinRoomInput{Code: original.Code, DisplayName: "Player"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, err := service.StartGame(context.Background(), StartGameInput{Code: original.Code, PlayerToken: host.Token})
+	if err != nil {
+		t.Fatal(err)
+	}
+	answer := started.CurrentGame.CurrentRound.Board.Answers[0]
+	if _, err := service.SubmitGuess(context.Background(), SubmitGuessInput{
+		Code: original.Code, RoundID: started.CurrentGame.CurrentRound.ID,
+		PlayerToken: player.Token, Answer: answer.CanonicalAnswer,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.RevealRound(context.Background(), RevealRoundInput{
+		Code: original.Code, RoundID: started.CurrentGame.CurrentRound.ID, PlayerToken: host.Token,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	completed, err := service.NextRound(context.Background(), NextRoundInput{Code: original.Code, PlayerToken: host.Token})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completed.CurrentGame.ReplayID == "" {
+		t.Fatal("completed game has no replay id")
+	}
+	replay, err := service.GetReplay(context.Background(), completed.CurrentGame.ReplayID)
+	if err != nil {
+		reloaded, _ := service.GetRoom(context.Background(), original.Code)
+		t.Fatalf("%v (status=%v ended=%v replay=%q)", err, reloaded.CurrentGame.Status, reloaded.CurrentGame.EndedAt, reloaded.CurrentGame.ReplayID)
+	}
+	if len(replay.Rounds) != 1 || replay.Rounds[0].Question == "" || len(replay.Rounds[0].Board) != 5 {
+		t.Fatalf("incomplete replay: %#v", replay)
+	}
+	if replay.Rankings[0].PlayerID != player.ID || replay.Rankings[0].Score != answer.Score {
+		t.Fatalf("unexpected rankings: %#v", replay.Rankings)
+	}
+
+	fresh, freshHost, err := service.PlayAgain(context.Background(), PlayAgainInput{Code: original.Code, PlayerToken: host.Token})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fresh.Code == original.Code || freshHost.ID == host.ID || freshHost.Token == host.Token {
+		t.Fatal("play again reused original room, player, or credential")
+	}
+	if fresh.CurrentGame != nil || len(fresh.Players) != 1 || fresh.Status != models.RoomStatusLobby {
+		t.Fatalf("fresh room inherited game state: %#v", fresh)
+	}
+	originalReloaded, err := service.GetRoom(context.Background(), original.Code)
+	if err != nil || originalReloaded.CurrentGame.Status != models.GameStatusCompleted {
+		t.Fatalf("original game changed: room=%#v err=%v", originalReloaded, err)
+	}
+}
