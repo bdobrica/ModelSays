@@ -158,7 +158,7 @@ make verify
 
 Without `OPENAI_API_KEY`, games use a five-question English curated bank and support the full 1–5 round MVP flow. With OpenAI enabled, question and board responses use strict JSON schemas and are validated independently of the provider. Invalid or failed generation is retried once, then the server selects the unused curated entry for that round. Only failure of both paths returns a temporary content-unavailable response.
 
-The supported MVP room contract is intentionally narrow: simultaneous mode, 1–5 rounds, a 15–120 second answer timer, English (`en`), and the server-configured `DEFAULT_PREDICTION_MODEL`. Room names are 3–48 Unicode characters and display names are 2–24; control characters are rejected. Room codes are six characters from the displayed invite alphabet. New players may join only while the room is in the lobby; attempting to reuse an invite after start returns a conflict response. JSON mutation requests are limited to 16 KiB and reject unknown fields, trailing values, and malformed input.
+The supported MVP room contract is intentionally narrow: simultaneous mode, 1–5 rounds, a 15–120 second answer timer, English (`en`), and the server-configured `DEFAULT_PREDICTION_MODEL`. Room names are 3–48 Unicode characters and display names are 2–24; control characters are rejected. Room codes are six characters from the displayed invite alphabet. New players may join only while the room is in the lobby; attempting to reuse an invite after start returns a conflict response. JSON mutation requests are limited to 16 KiB and reject unknown fields, trailing values, and malformed input. The browser validates its stored player token with the server after refresh and offers a clear-session action.
 
 ## Suggested Tech Stack
 
@@ -291,7 +291,7 @@ Semantic model-based matching is not active in the MVP. It is a post-MVP option 
 
 ## Development Status
 
-This project has a working static/polling simultaneous-game path and is being hardened toward a playable MVP.
+This project has a working simultaneous-game browser flow with deadline countdowns, safe non-overlapping polling, same-browser session recovery, host controls, and ranked final scores. WebSockets, cross-device session transfer, presence/heartbeat, and automatic deadline reveal remain outside the polling MVP.
 
 Recommended implementation order:
 

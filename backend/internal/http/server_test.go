@@ -179,6 +179,45 @@ func TestExpiredSubmissionReturnsStableConflictResponse(t *testing.T) {
 	}
 }
 
+func TestRecoverSessionValidatesTokenAndReturnsAuthoritativePlayer(t *testing.T) {
+	t.Parallel()
+
+	service := game.NewInMemoryRoomService()
+	room, host, err := service.CreateRoom(context.Background(), game.CreateRoomInput{
+		RoomName: "Reconnect room", HostDisplayName: "Host",
+	})
+	if err != nil {
+		t.Fatalf("CreateRoom returned error: %v", err)
+	}
+	server := NewServer(config.Config{}, slog.New(slog.NewTextHandler(io.Discard, nil)), service)
+
+	recovered := performRoomRequest(
+		t,
+		server,
+		http.MethodPost,
+		fmt.Sprintf("/api/rooms/%s/session", strings.ToLower(room.Code)),
+		fmt.Sprintf(`{"playerToken":%q}`, host.Token),
+	)
+	player := nestedMap(t, recovered, "player")
+	if player["id"] != host.ID || player["isHost"] != true || player["token"] != host.Token {
+		t.Fatalf("recovered player = %#v, want authoritative host identity", player)
+	}
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(
+		http.MethodPost,
+		fmt.Sprintf("/api/rooms/%s/session", room.Code),
+		strings.NewReader(`{"playerToken":"invalid"}`),
+	)
+	server.Handler().ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("invalid token status = %d, want %d; body=%s", recorder.Code, http.StatusForbidden, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), game.ErrPlayerNotFound.Error()) {
+		t.Fatalf("invalid token response = %s, want stable player-not-found error", recorder.Body.String())
+	}
+}
+
 func TestCreateRoomRejectsInvalidSettingsAndMalformedBodies(t *testing.T) {
 	t.Parallel()
 

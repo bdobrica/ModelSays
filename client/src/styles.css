@@ -304,6 +304,16 @@ input {
     color: var(--text-dim);
 }
 
+.countdown {
+    display: inline-block;
+    margin: 0.5rem 0;
+    padding: 0.45rem 0.75rem;
+    border-radius: 999px;
+    background: rgba(115, 210, 186, 0.12);
+    color: var(--secondary);
+    font-weight: 700;
+}
+
 .round-meta,
 .action-row,
 .answer-form,
@@ -363,6 +373,15 @@ input {
 .guess-row {
     align-items: flex-start;
     flex-wrap: wrap;
+}
+
+.score-row-winner {
+    border: 1px solid rgba(255, 178, 120, 0.55);
+    background: rgba(255, 154, 90, 0.12);
+}
+
+.score-rank {
+    color: var(--secondary);
 }
 
 .override-select {

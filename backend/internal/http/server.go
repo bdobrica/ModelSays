@@ -33,6 +33,10 @@ type joinRoomRequest struct {
 	DisplayName string `json:"displayName"`
 }
 
+type recoverSessionRequest struct {
+	PlayerToken string `json:"playerToken"`
+}
+
 type startGameRequest struct {
 	PlayerToken string `json:"playerToken"`
 }
@@ -174,6 +178,8 @@ func (server *Server) handleRoomRoutes(writer http.ResponseWriter, request *http
 		server.handleGetRoom(writer, request, code)
 	case request.Method == http.MethodPost && len(parts) == 2 && parts[1] == "join":
 		server.handleJoinRoom(writer, request, code)
+	case request.Method == http.MethodPost && len(parts) == 2 && parts[1] == "session":
+		server.handleRecoverSession(writer, request, code)
 	case request.Method == http.MethodPost && len(parts) == 2 && parts[1] == "start":
 		server.handleStartGame(writer, request, code)
 	case request.Method == http.MethodPost && len(parts) == 2 && parts[1] == "next-round":
@@ -187,6 +193,25 @@ func (server *Server) handleRoomRoutes(writer http.ResponseWriter, request *http
 	default:
 		writeError(writer, http.StatusNotFound, "room route not found")
 	}
+}
+
+func (server *Server) handleRecoverSession(writer http.ResponseWriter, request *http.Request, code string) {
+	var payload recoverSessionRequest
+	if err := decodeJSONBody(writer, request, &payload); err != nil {
+		writeError(writer, http.StatusBadRequest, "invalid JSON payload")
+		return
+	}
+
+	room, player, err := server.roomService.RecoverSession(request.Context(), game.RecoverSessionInput{
+		Code:        code,
+		PlayerToken: payload.PlayerToken,
+	})
+	if err != nil {
+		server.writeDomainError(writer, err)
+		return
+	}
+
+	writeJSON(writer, http.StatusOK, roomResponse{Room: projectRoom(room), Player: &player})
 }
 
 func (server *Server) handleGetRoom(writer http.ResponseWriter, request *http.Request, code string) {

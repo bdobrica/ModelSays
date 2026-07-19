@@ -314,6 +314,7 @@ Suggested initial endpoints:
 - `POST /api/rooms`
 - `GET /api/rooms/{code}`
 - `POST /api/rooms/{code}/join`
+- `POST /api/rooms/{code}/session`
 - `POST /api/rooms/{code}/start`
 - `POST /api/rooms/{code}/players/{playerID}/heartbeat`
 - `POST /api/rooms/{code}/rounds/{roundID}/guesses`
@@ -322,7 +323,9 @@ Suggested initial endpoints:
 
 Guess submission returns `409 Conflict` with `{"error":"answer phase has expired"}` when server time is equal to or later than the round deadline.
 
-Room responses use one phase-aware public projection across create, join, start, submit, fetch, reveal, advance, and override operations. During `answering`, the response includes the question, board hash, deadline, player list, per-player `submissionMade` status, and scores through the last revealed round. It omits the board, every guess field, match and duplicate results, awarded points, and current-round score changes. During `revealed`, the response includes the frozen board, guesses and their outcomes, and the updated scoreboard. Player tokens appear only in the top-level `player` returned when that player creates or joins a room; tokens never appear in `room.players`.
+Room responses use one phase-aware public projection across create, join, session recovery, start, submit, fetch, reveal, advance, and override operations. During `answering`, the response includes the question, board hash, deadline, player list, per-player `submissionMade` status, and scores through the last revealed round. It omits the board, every guess field, match and duplicate results, awarded points, and current-round score changes. During `revealed`, the response includes the frozen board, guesses and their outcomes, and the updated scoreboard. Player tokens appear only in the top-level `player` returned when that player creates, joins, or successfully recovers a session; tokens never appear in `room.players`.
+
+`POST /api/rooms/{code}/session` accepts `{"playerToken":"..."}`. It validates that the token belongs to a player in that room and returns the authoritative public room plus that player identity. Invalid or cross-room tokens return HTTP 403. This supports controlled same-browser refresh; transferable sessions and presence heartbeats remain deferred.
 
 Host-only endpoints:
 

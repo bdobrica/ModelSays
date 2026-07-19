@@ -2,9 +2,13 @@ import type { Player } from './api'
 
 const storageKey = 'modelsays.session'
 
-interface StoredSession {
+export interface StoredSession {
   roomCode: string
   player: Player
+}
+
+export function clearSession() {
+  window.localStorage.removeItem(storageKey)
 }
 
 export function saveSession(roomCode: string, player: Player) {

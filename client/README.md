@@ -6,6 +6,8 @@ This client is a React app for joining rooms, playing rounds, submitting answers
 
 The current creation form follows the backend MVP contract: simultaneous mode, 1–5 rounds, a 15–120 second timer, English locale, and the default `gpt-4.1-mini` prediction model. Room and display-name inputs are capped at the server's 48- and 24-character limits. Invite links stop accepting new players once the host starts the game.
 
+The playable client uses one request at a time with sequenced polling, refetches after every mutation, slows polling in a hidden tab, and stops it after completion. It validates a matching local token with the backend on refresh instead of trusting the stored host role. The answering view derives its countdown from the server deadline and disables local input at expiry; the server remains authoritative. Final scores are ranked with winners and ties identified. WebSockets, presence heartbeats, and cross-device session transfer are deferred.
+
 ## Core Experience
 
 Players are not guessing real survey data.
@@ -202,7 +204,7 @@ Do not compute authoritative scores on the client.
 
 ## API Integration
 
-The client should use REST for setup actions and WebSocket for live game state.
+The current MVP uses REST for actions and resilient polling for live game state. WebSockets are a post-MVP transport improvement.
 
 ### REST
 
@@ -210,6 +212,7 @@ Expected calls:
 
 - create room;
 - join room;
+- validate/recover a stored player session;
 - get current room state;
 - start game;
 - submit guess;

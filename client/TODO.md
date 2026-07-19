@@ -6,7 +6,8 @@ Status note:
 - Some nearby items are only partially implemented and remain unchecked.
 - Current scope changes:
 	- the current client uses a single room route that switches between lobby, answer, reveal, and completion states instead of separate screens;
-	- live room updates currently use 3-second polling, not WebSockets;
+	- live room updates use sequenced, non-overlapping 3-second polling (slower in hidden tabs), not WebSockets;
+	- same-browser refresh validates the stored token with the server; presence and cross-device transfer remain deferred;
 	- loading and error handling still exist as inline page states, not shared reusable components;
 	- the create-room flow currently fixes game mode to simultaneous instead of exposing a mode selector.
 	- the creation form and backend now share the MVP bounds of 1–5 rounds, a 15–120 second timer, and bounded names.
@@ -33,7 +34,7 @@ Status note:
 - [ ] Add card component.
 - [ ] Add modal/dialog component.
 - [ ] Add toast/notification component.
-- [ ] Add countdown timer component.
+- [x] Add countdown timer to the room flow.
 - [ ] Add scoreboard row component.
 - [ ] Add answer board component.
 - [ ] Add player badge component.
@@ -90,8 +91,8 @@ Status note:
 - [ ] Create WebSocket connection manager.
 - [ ] Authenticate socket with room/player token.
 - [ ] Subscribe to room events.
-- [ ] Handle reconnect.
-- [ ] Refetch room state after reconnect.
+- [x] Recover and validate the stored session during same-browser refresh.
+- [x] Refetch room state after polling/mutations.
 - [ ] Handle `room.updated`.
 - [ ] Handle `game.started`.
 - [ ] Handle `round.started`.
@@ -107,7 +108,7 @@ Status note:
 - [x] Show round number.
 - [x] Show question text.
 - [ ] Show model name if known mode is enabled.
-- [ ] Show countdown timer.
+- [x] Show countdown timer.
 - [x] Build answer input.
 - [x] Submit answer on button click.
 - [x] Submit answer on Enter.
@@ -115,7 +116,7 @@ Status note:
 - [x] Show submitted confirmation.
 - [x] Show player submission progress.
 - [x] Keep board, guess, match, and current-round score data hidden until reveal (enforced by the API projection).
-- [ ] Handle timer expiry.
+- [x] Handle timer expiry locally while preserving server authority.
 - [x] Prevent duplicate local submissions.
 - [x] Handle backend rejection gracefully.
 
@@ -152,10 +153,10 @@ Status note:
 
 - [x] Build live scoreboard.
 - [x] Build final scoreboard.
-- [ ] Show player rankings.
+- [x] Show player rankings.
 - [ ] Show team rankings if enabled.
 - [ ] Show round-by-round point changes.
-- [ ] Highlight winner.
+- [x] Highlight winner and ties.
 - [ ] Add play-again button.
 - [ ] Add back-to-lobby button.
 - [ ] Add share results button if desired.
@@ -198,13 +199,13 @@ Status note:
 - [x] Test home screen.
 - [ ] Test create-room form.
 - [ ] Test join-room form.
-- [ ] Test lobby rendering.
-- [ ] Test timer display.
-- [ ] Test answer submission state.
-- [ ] Test reveal board rendering.
-- [ ] Test scoreboard rendering.
+- [x] Test lobby rendering and host start.
+- [x] Test timer display and expiry.
+- [x] Test answer submission state.
+- [x] Test reveal board and override controls.
+- [x] Test final scoreboard rendering.
 - [ ] Test WebSocket event reducer.
-- [ ] Test reconnect/refetch behavior.
+- [x] Test session recovery and stale/out-of-order refetch behavior.
 
 ## Phase 14 — MVP Acceptance Criteria
 

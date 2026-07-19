@@ -154,8 +154,16 @@ export async function joinRoom(code: string, payload: JoinRoomPayload): Promise<
   })
 }
 
-export async function getRoom(code: string): Promise<RoomResponse> {
-  return request<RoomResponse>(`/api/rooms/${code}`)
+export async function getRoom(code: string, signal?: AbortSignal): Promise<RoomResponse> {
+  return request<RoomResponse>(`/api/rooms/${code}`, { signal })
+}
+
+export async function recoverSession(code: string, payload: PlayerTokenPayload, signal?: AbortSignal): Promise<RoomResponse> {
+  return request<RoomResponse>(`/api/rooms/${code}/session`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+    signal,
+  })
 }
 
 export async function startGame(code: string, payload: PlayerTokenPayload): Promise<RoomResponse> {

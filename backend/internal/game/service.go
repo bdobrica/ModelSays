@@ -74,6 +74,11 @@ type JoinRoomInput struct {
 	DisplayName string
 }
 
+type RecoverSessionInput struct {
+	Code        string
+	PlayerToken string
+}
+
 type StartGameInput struct {
 	Code        string
 	PlayerToken string
@@ -228,6 +233,25 @@ func (service *RoomService) CreateRoom(ctx context.Context, input CreateRoomInpu
 	}
 
 	return models.Room{}, models.Player{}, fmt.Errorf("unable to create room after repeated code collisions")
+}
+
+func (service *RoomService) RecoverSession(ctx context.Context, input RecoverSessionInput) (models.Room, models.Player, error) {
+	code, err := normalizeRoomCode(input.Code)
+	if err != nil {
+		return models.Room{}, models.Player{}, err
+	}
+
+	room, err := service.repository.GetRoom(ctx, code)
+	if err != nil {
+		return models.Room{}, models.Player{}, err
+	}
+
+	player, ok := findPlayerByToken(room.Players, strings.TrimSpace(input.PlayerToken))
+	if !ok {
+		return models.Room{}, models.Player{}, ErrPlayerNotFound
+	}
+
+	return room, player, nil
 }
 
 func (service *RoomService) GetRoom(ctx context.Context, code string) (models.Room, error) {

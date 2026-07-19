@@ -12,6 +12,7 @@ Status note:
   - MVP matching is deterministic Unicode-aware normalization plus exact canonical/alias equality; semantic judge-model matching is deferred.
   - model content uses strict schemas, provider-independent validation, one retry, and a five-round curated fallback; raw response and cost auditing remain deferred.
   - room creation now enforces the narrow MVP settings and name/code bounds, strict bounded JSON decoding, and lobby-only joins in both repositories; public-launch rate limiting remains deferred.
+  - same-browser refresh validates the stored token through the room session endpoint; heartbeat/presence and cross-device transfer remain deferred.
 
 ## Phase 0 — Project Setup
 
@@ -61,6 +62,7 @@ Status note:
 - [x] Enforce MVP settings and strict bounded JSON request decoding.
 - [x] Implement host assignment.
 - [x] Implement player reconnect token.
+- [x] Implement authenticated same-browser session recovery.
 - [ ] Implement player heartbeat.
 - [x] Implement basic room state response.
 - [ ] Implement host-only authorization checks.
@@ -227,4 +229,4 @@ Status note:
 - [x] Scores are persisted.
 - [x] Round reveal works.
 - [x] Final scoreboard works.
-- [ ] Browser refresh/reconnect does not break the game.
+- [x] Same-browser refresh validates and restores the player session without breaking the game.
