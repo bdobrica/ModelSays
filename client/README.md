@@ -45,6 +45,8 @@ A player can:
 - see revealed results;
 - see their score.
 
+During answering, room API data intentionally exposes only scores from previously revealed rounds plus each player's submission status. Board contents, guess text, match/duplicate outcomes, awarded points, and current-round score changes become available only after reveal.
+
 ## Primary Screens
 
 ### Home

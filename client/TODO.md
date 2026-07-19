@@ -113,6 +113,7 @@ Status note:
 - [x] Disable input after submit.
 - [x] Show submitted confirmation.
 - [x] Show player submission progress.
+- [x] Keep board, guess, match, and current-round score data hidden until reveal (enforced by the API projection).
 - [ ] Handle timer expiry.
 - [x] Prevent duplicate local submissions.
 - [x] Handle backend rejection gracefully.

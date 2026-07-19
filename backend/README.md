@@ -322,6 +322,8 @@ Suggested initial endpoints:
 
 Guess submission returns `409 Conflict` with `{"error":"answer phase has expired"}` when server time is equal to or later than the round deadline.
 
+Room responses use one phase-aware public projection across create, join, start, submit, fetch, reveal, advance, and override operations. During `answering`, the response includes the question, board hash, deadline, player list, per-player `submissionMade` status, and scores through the last revealed round. It omits the board, every guess field, match and duplicate results, awarded points, and current-round score changes. During `revealed`, the response includes the frozen board, guesses and their outcomes, and the updated scoreboard. Player tokens appear only in the top-level `player` returned when that player creates or joins a room; tokens never appear in `room.players`.
+
 Host-only endpoints:
 
 - `POST /api/rooms/{code}/settings`

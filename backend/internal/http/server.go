@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/bogdandobrica/modelsays/backend/internal/config"
 	"github.com/bogdandobrica/modelsays/backend/internal/game"
@@ -54,8 +55,53 @@ type overrideMatchRequest struct {
 }
 
 type roomResponse struct {
-	Room   models.Room    `json:"room"`
+	Room   publicRoom     `json:"room"`
 	Player *models.Player `json:"player,omitempty"`
+}
+
+type publicRoom struct {
+	Code        string              `json:"code"`
+	Name        string              `json:"name"`
+	Status      models.RoomStatus   `json:"status"`
+	Settings    models.RoomSettings `json:"settings"`
+	Players     []publicPlayer      `json:"players"`
+	CurrentGame *publicGame         `json:"currentGame,omitempty"`
+	CreatedAt   time.Time           `json:"createdAt"`
+	UpdatedAt   time.Time           `json:"updatedAt"`
+}
+
+type publicPlayer struct {
+	ID          string    `json:"id"`
+	DisplayName string    `json:"displayName"`
+	IsHost      bool      `json:"isHost"`
+	JoinedAt    time.Time `json:"joinedAt"`
+}
+
+type publicGame struct {
+	ID                string                   `json:"id"`
+	Status            models.GameStatus        `json:"status"`
+	Mode              models.GameMode          `json:"mode"`
+	TotalRounds       int                      `json:"totalRounds"`
+	CurrentRoundIndex int                      `json:"currentRoundIndex"`
+	CurrentRound      *publicRound             `json:"currentRound,omitempty"`
+	Scoreboard        []models.ScoreboardEntry `json:"scoreboard,omitempty"`
+	CreatedAt         time.Time                `json:"createdAt"`
+	StartedAt         time.Time                `json:"startedAt"`
+	EndedAt           *time.Time               `json:"endedAt,omitempty"`
+}
+
+type publicRound struct {
+	ID                   string                  `json:"id"`
+	RoundIndex           int                     `json:"roundIndex"`
+	Status               models.RoundStatus      `json:"status"`
+	Question             models.Question         `json:"question"`
+	BoardHash            string                  `json:"boardHash"`
+	Board                *models.PredictionBoard `json:"board,omitempty"`
+	Guesses              []models.Guess          `json:"guesses,omitempty"`
+	AnswerPhaseStartedAt time.Time               `json:"answerPhaseStartedAt"`
+	AnswerPhaseEndsAt    time.Time               `json:"answerPhaseEndsAt"`
+	RevealStartedAt      *time.Time              `json:"revealStartedAt,omitempty"`
+	CreatedAt            time.Time               `json:"createdAt"`
 }
 
 type errorResponse struct {
@@ -106,7 +152,7 @@ func (server *Server) handleCreateRoom(writer http.ResponseWriter, request *http
 		return
 	}
 
-	writeJSON(writer, http.StatusCreated, roomResponse{Room: sanitizeRoom(room), Player: &host})
+	writeJSON(writer, http.StatusCreated, roomResponse{Room: projectRoom(room), Player: &host})
 }
 
 func (server *Server) handleRoomRoutes(writer http.ResponseWriter, request *http.Request) {
@@ -147,7 +193,7 @@ func (server *Server) handleGetRoom(writer http.ResponseWriter, request *http.Re
 		return
 	}
 
-	writeJSON(writer, http.StatusOK, roomResponse{Room: sanitizeRoom(room)})
+	writeJSON(writer, http.StatusOK, roomResponse{Room: projectRoom(room)})
 }
 
 func (server *Server) handleJoinRoom(writer http.ResponseWriter, request *http.Request, code string) {
@@ -166,7 +212,7 @@ func (server *Server) handleJoinRoom(writer http.ResponseWriter, request *http.R
 		return
 	}
 
-	writeJSON(writer, http.StatusCreated, roomResponse{Room: sanitizeRoom(room), Player: &player})
+	writeJSON(writer, http.StatusCreated, roomResponse{Room: projectRoom(room), Player: &player})
 }
 
 func (server *Server) handleStartGame(writer http.ResponseWriter, request *http.Request, code string) {
@@ -185,7 +231,7 @@ func (server *Server) handleStartGame(writer http.ResponseWriter, request *http.
 		return
 	}
 
-	writeJSON(writer, http.StatusOK, roomResponse{Room: sanitizeRoom(room)})
+	writeJSON(writer, http.StatusOK, roomResponse{Room: projectRoom(room)})
 }
 
 func (server *Server) handleSubmitGuess(writer http.ResponseWriter, request *http.Request, code string, roundID string) {
@@ -206,7 +252,7 @@ func (server *Server) handleSubmitGuess(writer http.ResponseWriter, request *htt
 		return
 	}
 
-	writeJSON(writer, http.StatusCreated, roomResponse{Room: sanitizeRoom(room)})
+	writeJSON(writer, http.StatusCreated, roomResponse{Room: projectRoom(room)})
 }
 
 func (server *Server) handleRevealRound(writer http.ResponseWriter, request *http.Request, code string, roundID string) {
@@ -226,7 +272,7 @@ func (server *Server) handleRevealRound(writer http.ResponseWriter, request *htt
 		return
 	}
 
-	writeJSON(writer, http.StatusOK, roomResponse{Room: sanitizeRoom(room)})
+	writeJSON(writer, http.StatusOK, roomResponse{Room: projectRoom(room)})
 }
 
 func (server *Server) handleNextRound(writer http.ResponseWriter, request *http.Request, code string) {
@@ -245,7 +291,7 @@ func (server *Server) handleNextRound(writer http.ResponseWriter, request *http.
 		return
 	}
 
-	writeJSON(writer, http.StatusOK, roomResponse{Room: sanitizeRoom(room)})
+	writeJSON(writer, http.StatusOK, roomResponse{Room: projectRoom(room)})
 }
 
 func (server *Server) handleOverrideMatch(writer http.ResponseWriter, request *http.Request, code string) {
@@ -267,7 +313,7 @@ func (server *Server) handleOverrideMatch(writer http.ResponseWriter, request *h
 		return
 	}
 
-	writeJSON(writer, http.StatusOK, roomResponse{Room: sanitizeRoom(room)})
+	writeJSON(writer, http.StatusOK, roomResponse{Room: projectRoom(room)})
 }
 
 func (server *Server) writeDomainError(writer http.ResponseWriter, err error) {
@@ -328,14 +374,71 @@ func writeError(writer http.ResponseWriter, status int, message string) {
 	writeJSON(writer, status, errorResponse{Error: message})
 }
 
-func sanitizeRoom(room models.Room) models.Room {
-	for index := range room.Players {
-		room.Players[index].Token = ""
+func projectRoom(room models.Room) publicRoom {
+	projected := publicRoom{
+		Code:      room.Code,
+		Name:      room.Name,
+		Status:    room.Status,
+		Settings:  room.Settings,
+		Players:   make([]publicPlayer, 0, len(room.Players)),
+		CreatedAt: room.CreatedAt,
+		UpdatedAt: room.UpdatedAt,
 	}
-	if room.CurrentGame != nil && room.CurrentGame.CurrentRound != nil && room.CurrentGame.CurrentRound.Status != models.RoundStatusRevealed {
-		room.CurrentGame.CurrentRound.Board = nil
-		room.CurrentGame.CurrentRound.Guesses = nil
+	for _, player := range room.Players {
+		projected.Players = append(projected.Players, publicPlayer{
+			ID:          player.ID,
+			DisplayName: player.DisplayName,
+			IsHost:      player.IsHost,
+			JoinedAt:    player.JoinedAt,
+		})
 	}
 
-	return room
+	if room.CurrentGame == nil {
+		return projected
+	}
+
+	gameState := room.CurrentGame
+	projectedGame := &publicGame{
+		ID:                gameState.ID,
+		Status:            gameState.Status,
+		Mode:              gameState.Mode,
+		TotalRounds:       gameState.TotalRounds,
+		CurrentRoundIndex: gameState.CurrentRoundIndex,
+		Scoreboard:        append([]models.ScoreboardEntry(nil), gameState.Scoreboard...),
+		CreatedAt:         gameState.CreatedAt,
+		StartedAt:         gameState.StartedAt,
+		EndedAt:           gameState.EndedAt,
+	}
+	projected.CurrentGame = projectedGame
+	if gameState.CurrentRound == nil {
+		return projected
+	}
+
+	round := gameState.CurrentRound
+	projectedGame.CurrentRound = &publicRound{
+		ID:                   round.ID,
+		RoundIndex:           round.RoundIndex,
+		Status:               round.Status,
+		Question:             round.Question,
+		BoardHash:            round.BoardHash,
+		AnswerPhaseStartedAt: round.AnswerPhaseStartedAt,
+		AnswerPhaseEndsAt:    round.AnswerPhaseEndsAt,
+		RevealStartedAt:      round.RevealStartedAt,
+		CreatedAt:            round.CreatedAt,
+	}
+	if round.Status == models.RoundStatusRevealed {
+		projectedGame.CurrentRound.Board = round.Board
+		projectedGame.CurrentRound.Guesses = round.Guesses
+		return projected
+	}
+
+	currentRoundScores := make(map[string]int, len(round.Guesses))
+	for _, guess := range round.Guesses {
+		currentRoundScores[guess.PlayerID] += guess.ScoreAwarded
+	}
+	for index := range projectedGame.Scoreboard {
+		projectedGame.Scoreboard[index].Score -= currentRoundScores[projectedGame.Scoreboard[index].PlayerID]
+	}
+
+	return projected
 }
