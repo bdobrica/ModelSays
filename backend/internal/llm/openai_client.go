@@ -176,10 +176,6 @@ func (client *OpenAIModelClient) GenerateBoard(ctx context.Context, req Generate
 	return &GenerateBoardResponse{Board: board}, nil
 }
 
-func (client *OpenAIModelClient) MatchGuess(_ context.Context, _ MatchGuessRequest) (*MatchGuessResponse, error) {
-	return &MatchGuessResponse{}, nil
-}
-
 func (client *OpenAIModelClient) completeJSON(ctx context.Context, model string, prompt string) ([]byte, error) {
 	reqBody, err := json.Marshal(openAIChatRequest{
 		Model: model,

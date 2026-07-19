@@ -2,16 +2,32 @@ package game
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/bogdandobrica/modelsays/backend/internal/llm"
 	"github.com/bogdandobrica/modelsays/backend/internal/models"
 )
 
 type fakeClock struct {
 	mu  sync.RWMutex
 	now time.Time
+}
+
+type fixedBoardModelClient struct {
+	board models.PredictionBoard
+}
+
+func (client fixedBoardModelClient) GenerateQuestions(_ context.Context, _ llm.GenerateQuestionsRequest) (*llm.GenerateQuestionsResponse, error) {
+	return &llm.GenerateQuestionsResponse{Questions: []models.Question{{
+		ID: "question-1", Text: "Name something.", Locale: "en", Category: "party",
+	}}}, nil
+}
+
+func (client fixedBoardModelClient) GenerateBoard(_ context.Context, _ llm.GenerateBoardRequest) (*llm.GenerateBoardResponse, error) {
+	return &llm.GenerateBoardResponse{Board: client.board}, nil
 }
 
 func (clock *fakeClock) Now() time.Time {
@@ -239,6 +255,132 @@ func TestSubmitGuessMatchesAliasAndScores(t *testing.T) {
 	}
 	if len(updatedRoom.CurrentGame.Scoreboard) < 2 {
 		t.Fatalf("expected scoreboard entries for both players, got %d", len(updatedRoom.CurrentGame.Scoreboard))
+	}
+}
+
+func TestNormalizeAnswerAndExactMatching(t *testing.T) {
+	t.Parallel()
+
+	answerID := "answer-1"
+	answers := []models.PredictionAnswer{{
+		ID:              answerID,
+		CanonicalAnswer: "Crème brûlée",
+		Aliases:         []string{"French dessert"},
+		Score:           40,
+	}}
+	tests := []struct {
+		name           string
+		input          string
+		wantNormalized string
+		wantMatch      bool
+	}{
+		{name: "capitalization", input: "CRÈME BRÛLÉE", wantNormalized: "crème brûlée", wantMatch: true},
+		{name: "repeated whitespace", input: "  crème\t\n brûlée  ", wantNormalized: "crème brûlée", wantMatch: true},
+		{name: "punctuation", input: "Crème, brûlée!!!", wantNormalized: "crème brûlée", wantMatch: true},
+		{name: "accented characters remain significant", input: "creme brulee", wantNormalized: "creme brulee", wantMatch: false},
+		{name: "alias", input: "FRENCH... DESSERT", wantNormalized: "french dessert", wantMatch: true},
+		{name: "semantic equivalent is not inferred", input: "custard", wantNormalized: "custard", wantMatch: false},
+	}
+
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			normalized := normalizeAnswer(test.input)
+			if normalized != test.wantNormalized {
+				t.Fatalf("normalizeAnswer(%q) = %q, want %q", test.input, normalized, test.wantNormalized)
+			}
+			matchedID, score := matchGuess(answers, normalized)
+			if !test.wantMatch {
+				if matchedID != nil || score != 0 {
+					t.Fatalf("expected no exact canonical/alias match, got id=%v score=%d", matchedID, score)
+				}
+				return
+			}
+			if matchedID == nil || *matchedID != answerID || score != 40 {
+				t.Fatalf("expected answer %q with score 40, got id=%v score=%d", answerID, matchedID, score)
+			}
+		})
+	}
+}
+
+func TestValidateMatchingAliasesRejectsAmbiguousOwnership(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		answers []models.PredictionAnswer
+		wantErr bool
+	}{
+		{
+			name: "distinct normalized phrases",
+			answers: []models.PredictionAnswer{
+				{CanonicalAnswer: "Artificial intelligence", Aliases: []string{"AI"}},
+				{CanonicalAnswer: "Machine learning", Aliases: []string{"ML"}},
+			},
+		},
+		{
+			name: "duplicate alias within one answer is harmless",
+			answers: []models.PredictionAnswer{
+				{CanonicalAnswer: "Artificial intelligence", Aliases: []string{"AI", "A.I."}},
+			},
+		},
+		{
+			name: "alias owned by two answers",
+			answers: []models.PredictionAnswer{
+				{CanonicalAnswer: "Artificial intelligence", Aliases: []string{"AI"}},
+				{CanonicalAnswer: "AI assistant", Aliases: []string{"A.I."}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "canonical collides with another alias",
+			answers: []models.PredictionAnswer{
+				{CanonicalAnswer: "Crème brûlée"},
+				{CanonicalAnswer: "Dessert", Aliases: []string{"CRÈME, BRÛLÉE!"}},
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := validateMatchingAliases(test.answers)
+			if test.wantErr && !errors.Is(err, ErrAmbiguousBoardAnswer) {
+				t.Fatalf("expected ErrAmbiguousBoardAnswer, got %v", err)
+			}
+			if !test.wantErr && err != nil {
+				t.Fatalf("expected valid board matching phrases, got %v", err)
+			}
+		})
+	}
+}
+
+func TestStartGameRejectsBoardWithAmbiguousAliasOwnership(t *testing.T) {
+	t.Parallel()
+
+	modelClient := fixedBoardModelClient{board: models.PredictionBoard{
+		Provider: "test",
+		Answers: []models.PredictionAnswer{
+			{CanonicalAnswer: "Artificial intelligence", Aliases: []string{"AI"}, Rank: 1, Score: 50},
+			{CanonicalAnswer: "AI assistant", Aliases: []string{"A.I."}, Rank: 2, Score: 30},
+		},
+	}}
+	service := NewRoomService(NewInMemoryRoomRepository(), modelClient)
+	room, host, err := service.CreateRoom(context.Background(), CreateRoomInput{
+		RoomName: "Ambiguous board", HostDisplayName: "Host",
+	})
+	if err != nil {
+		t.Fatalf("CreateRoom returned error: %v", err)
+	}
+
+	_, err = service.StartGame(context.Background(), StartGameInput{Code: room.Code, PlayerToken: host.Token})
+	if !errors.Is(err, ErrAmbiguousBoardAnswer) {
+		t.Fatalf("expected ErrAmbiguousBoardAnswer, got %v", err)
 	}
 }
 
@@ -672,6 +814,54 @@ func TestOverrideMatchAdjustsScore(t *testing.T) {
 
 	if overriddenRoom.CurrentGame.CurrentRound.Guesses[0].ScoreAwarded != 25 {
 		t.Fatalf("expected overridden score 25, got %d", overriddenRoom.CurrentGame.CurrentRound.Guesses[0].ScoreAwarded)
+	}
+}
+
+func TestResolveOverrideSupportsHitToMissAndMissToHit(t *testing.T) {
+	t.Parallel()
+
+	answerID := "answer-1"
+	board := &models.PredictionBoard{Answers: []models.PredictionAnswer{{ID: answerID, Score: 40}}}
+	tests := []struct {
+		name      string
+		guess     models.Guess
+		matchID   *string
+		wantScore int
+		wantDelta int
+	}{
+		{
+			name:      "hit to miss",
+			guess:     models.Guess{ID: "guess-1", MatchedPredictionAnswerID: &answerID, ScoreAwarded: 40},
+			matchID:   nil,
+			wantScore: 0,
+			wantDelta: -40,
+		},
+		{
+			name:      "miss to hit",
+			guess:     models.Guess{ID: "guess-1"},
+			matchID:   &answerID,
+			wantScore: 40,
+			wantDelta: 40,
+		},
+	}
+
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			updated, delta, err := ResolveOverride(
+				GuessOverride{GuessID: test.guess.ID, MatchedPredictionAnswerID: test.matchID},
+				board,
+				[]models.Guess{test.guess},
+			)
+			if err != nil {
+				t.Fatalf("ResolveOverride returned error: %v", err)
+			}
+			if updated.ScoreAwarded != test.wantScore || delta != test.wantDelta || updated.Duplicate {
+				t.Fatalf("got score=%d delta=%d duplicate=%t, want score=%d delta=%d duplicate=false", updated.ScoreAwarded, delta, updated.Duplicate, test.wantScore, test.wantDelta)
+			}
+		})
 	}
 }
 

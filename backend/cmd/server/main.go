@@ -24,7 +24,6 @@ func main() {
 		modelClient = llm.NewOpenAIModelClient(cfg.OpenAIAPIKey, llm.ClientDefaults{
 			QuestionModel:   cfg.DefaultModels.Question,
 			PredictionModel: cfg.DefaultModels.Prediction,
-			JudgeModel:      cfg.DefaultModels.Judge,
 		})
 		logger.Info("using openai model client")
 	} else {

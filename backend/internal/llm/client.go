@@ -29,17 +29,12 @@ type GenerateBoardResponse struct {
 	Board models.PredictionBoard
 }
 
-type MatchGuessRequest struct{}
-type MatchGuessResponse struct{}
-
 type ClientDefaults struct {
 	QuestionModel   string
 	PredictionModel string
-	JudgeModel      string
 }
 
 type ModelClient interface {
 	GenerateQuestions(ctx context.Context, req GenerateQuestionsRequest) (*GenerateQuestionsResponse, error)
 	GenerateBoard(ctx context.Context, req GenerateBoardRequest) (*GenerateBoardResponse, error)
-	MatchGuess(ctx context.Context, req MatchGuessRequest) (*MatchGuessResponse, error)
 }

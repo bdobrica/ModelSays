@@ -162,13 +162,12 @@ Elements:
 
 Purpose:
 
-- allow the host to fix low-confidence model matches.
+- allow the host to correct deterministic matches and misses after reveal.
 
 Elements:
 
 - raw player answer;
 - suggested match;
-- confidence;
 - board answers;
 - override dropdown;
 - accept/reject controls.
@@ -282,14 +281,15 @@ The UI should make it clear that:
 - the board was generated before answers;
 - the board is AI-generated;
 - the game is about guessing the model;
-- low-confidence matches can be reviewed by the host.
+- MVP matching is exact after case, punctuation, and whitespace normalization;
+- the host can correct disputed matches after reveal.
 
 ### Copy Ideas
 
 - “What would the model say?”
 - “The board is frozen. Answers locked.”
 - “You’re not guessing people. You’re guessing the AI.”
-- “Model confidence is not reality. That’s the game.”
+- “Not an exact match? The host can review it after reveal.”
 - “Board generated before answers.”
 
 ## Environment Variables

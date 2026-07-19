@@ -18,7 +18,7 @@ For each round:
 1. A question is shown to all players.
 2. Before players answer, an AI model generates a hidden answer board.
 3. Players submit their guesses.
-4. A judge model matches player guesses to the hidden board.
+4. The server matches normalized guesses exactly to canonical answers or curated aliases.
 5. The board is revealed.
 6. Points are awarded.
 7. The next round begins.
@@ -208,11 +208,11 @@ The frontend should not make final decisions about:
 
 ### Host override should exist
 
-AI matching will sometimes be debatable.
+Deterministic matching will sometimes miss a reasonable semantic equivalent that is not listed as an alias.
 
 That is part of the fun, but it should not break the game.
 
-The host should be able to override low-confidence matches during the reveal phase.
+The host can correct a match or miss after reveal.
 
 ## Game Modes
 
@@ -224,7 +224,7 @@ All players answer at the same time. The server accepts guesses only before the 
 
 While a round is accepting answers, every public API response hides the frozen board, guess text, normalized answers, match and duplicate outcomes, awarded points, and the current round's score changes. Players can see who has submitted and the scoreboard through the last revealed round. Reveal publishes the frozen board and round results and applies the new totals to the public scoreboard.
 
-For the MVP, matching is deterministic: a normalized guess must equal a canonical board answer or one of its aliases. Only the earliest committed guess that claims a board answer receives its points. Later guesses matching that same answer are recorded as duplicates and score zero.
+For the MVP, matching is deterministic: Unicode letters and numbers are lowercased, punctuation is removed, and whitespace is collapsed. The result must exactly equal a similarly normalized canonical board answer or alias; accents remain significant, and no semantic or fuzzy inference is performed. A board is rejected if the same normalized phrase belongs to multiple answers. Only the earliest committed guess that claims a board answer receives its points. Later guesses matching that same answer are recorded as duplicates and score zero. After reveal, the host can correct a hit, miss, or disputed answer with an override.
 
 This is ideal for:
 
@@ -281,15 +281,13 @@ Generates the hidden answer board.
 
 This is the model players are trying to guess.
 
-### Judge Model
+### Future Judge Model
 
-Matches player answers to the stored board.
-
-This should usually be a strong and stable model, even if the prediction model changes from round to round.
+Semantic model-based matching is not active in the MVP. It is a post-MVP option for suggesting broader matches; the frozen board, transactional duplicate rule, and post-reveal host override remain authoritative.
 
 ## Development Status
 
-This project is currently in the planning/prototyping stage.
+This project has a working static/polling simultaneous-game path and is being hardened toward a playable MVP.
 
 Recommended implementation order:
 
@@ -300,7 +298,7 @@ Recommended implementation order:
 5. Simultaneous game mode.
 6. Static questions and static boards.
 7. OpenAI-generated boards.
-8. AI-based answer matching.
+8. Deterministic canonical/alias matching.
 9. Scoring and reveal UI.
 10. Host override.
 11. Team mode.
@@ -320,7 +318,6 @@ DATABASE_URL=postgres://...
 OPENAI_API_KEY=...
 HTTP_ADDR=:8080
 DEFAULT_PREDICTION_MODEL=gpt-4.1-mini
-DEFAULT_JUDGE_MODEL=gpt-4.1
 ```
 
 Example client variables:

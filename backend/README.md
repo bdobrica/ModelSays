@@ -14,7 +14,7 @@ For each round:
 2. A chosen prediction model generates an answer board.
 3. The board is stored before players submit answers.
 4. Players submit answers before the server-enforced deadline.
-5. A judge model matches player answers to the stored board.
+5. The server matches normalized guesses exactly to canonical answers or configured aliases.
 6. Scores are awarded.
 7. The board is revealed.
 8. The next round begins.
@@ -368,7 +368,6 @@ HTTP_ADDR=:8080
 APP_ENV=development
 CORS_ALLOWED_ORIGINS=http://localhost:5173
 DEFAULT_PREDICTION_MODEL=gpt-4.1-mini
-DEFAULT_JUDGE_MODEL=gpt-4.1
 DEFAULT_QUESTION_MODEL=gpt-4.1-mini
 ```
 
@@ -416,7 +415,6 @@ Example:
 type ModelClient interface {
     GenerateQuestions(ctx context.Context, req GenerateQuestionsRequest) (*GenerateQuestionsResponse, error)
     GenerateBoard(ctx context.Context, req GenerateBoardRequest) (*GenerateBoardResponse, error)
-    MatchGuess(ctx context.Context, req MatchGuessRequest) (*MatchGuessResponse, error)
 }
 ```
 
@@ -437,23 +435,24 @@ Team-building mode should have stricter filtering.
 
 ## Matching and Duplicate Rules
 
-The current MVP matcher normalizes case, whitespace, and punctuation, then requires an exact match with a canonical answer or configured alias. Broader semantic judge-model matching is planned after the deterministic MVP path is playable.
+The MVP matcher preserves Unicode letters and numbers, lowercases them, removes punctuation, and collapses whitespace. It then requires exact equality with a canonical answer or configured alias normalized by the same rule. Accents remain significant, and the matcher performs no stemming, fuzzy comparison, translation, or semantic inference.
 
 Examples:
 
-- `cartofi prăjiți` should match `fries`;
-- `boss` may match `manager`;
-- `ChatGPT` may match `AI chatbot`;
-- `money` should probably not match `salary` unless the board allows it.
+- `CRÈME, BRÛLÉE!` matches `crème brûlée`;
+- `boss` matches `manager` only when `boss` is an alias for that answer;
+- `money` does not match `salary` unless the board explicitly includes it as an alias.
 
-The future judge response should include:
+Board generation fails validation when one normalized canonical answer or alias belongs to multiple board answers. This prevents answer ordering from silently deciding an ambiguous match.
+
+Semantic judge-model matching is deferred until after the deterministic MVP. A future judge response may include:
 
 - matched answer id or null;
 - confidence;
 - short hidden rationale;
 - whether host review is recommended.
 
-Low-confidence matches should be marked for host override.
+The current correction mechanism is the post-reveal host override. It can turn a hit into a miss, a miss into a hit, or select a different board answer; an override cannot create a second scoring claim for an answer.
 
 Submission scoring is authoritative inside the repository transaction. The transaction locks the round, resolves the match against its frozen board, and checks existing positive-scoring claims before inserting the guess and score event together. Only the earliest transaction to commit a claim receives the answer score; later equivalent guesses remain visible as duplicates and score zero. Host overrides use the same locked claim rule and append an auditable score event when they change a score.
 

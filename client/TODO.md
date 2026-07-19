@@ -135,6 +135,7 @@ Status note:
 
 ## Phase 8 — Host Review and Overrides
 
+- [x] Support post-reveal correction for deterministic matches and misses.
 - [ ] Show low-confidence matches.
 - [x] Show raw player answer.
 - [x] Show suggested match.

@@ -9,6 +9,7 @@ Status note:
   - host-only authorization is currently implemented for start, reveal, next-round, and override actions, not every future host action;
   - the round state machine enforces the answer deadline during submission and covers reveal, next-round transition, and final completion, but expiry does not yet trigger automatic reveal or progression;
   - the public room projection hides boards, guesses, outcomes, awarded points, and current-round score changes until reveal while preserving submission progress.
+  - MVP matching is deterministic Unicode-aware normalization plus exact canonical/alias equality; semantic judge-model matching is deferred.
 
 ## Phase 0 — Project Setup
 
@@ -120,6 +121,8 @@ Status note:
 
 ## Phase 7 — Guess Matching
 
+- [x] Define and document deterministic MVP normalization and exact matching.
+- [x] Reject canonical/alias phrases owned by multiple board answers after normalization.
 - [ ] Define judge prompt.
 - [ ] Require structured JSON output.
 - [x] Match raw player answer to canonical board answers.
@@ -129,7 +132,8 @@ Status note:
 - [x] Prevent duplicate scoring atomically for submissions and host overrides.
 - [ ] Store judge model metadata.
 - [x] Add host override endpoint.
-- [ ] Add tests for fuzzy matching.
+- [x] Add tests for deterministic normalization and alias matching.
+- [ ] Add tests for future fuzzy/semantic matching.
 
 ## Phase 8 — Scoring
 

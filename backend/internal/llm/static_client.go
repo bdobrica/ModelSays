@@ -134,7 +134,3 @@ func (client *StaticModelClient) GenerateBoard(_ context.Context, req GenerateBo
 
 	return nil, fmt.Errorf("no curated board available for question %q", req.Question.ID)
 }
-
-func (client *StaticModelClient) MatchGuess(_ context.Context, _ MatchGuessRequest) (*MatchGuessResponse, error) {
-	return &MatchGuessResponse{}, nil
-}

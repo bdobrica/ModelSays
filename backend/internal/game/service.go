@@ -37,6 +37,7 @@ var (
 	ErrGuessAlreadySubmitted    = errors.New("guess already submitted for this round")
 	ErrGuessNotFound            = errors.New("guess not found")
 	ErrPredictionAnswerNotFound = errors.New("prediction answer not found")
+	ErrAmbiguousBoardAnswer     = errors.New("board contains a canonical answer or alias owned by multiple answers")
 	ErrAnswerInvalid            = errors.New("answer must be between 1 and 120 characters")
 )
 
@@ -604,6 +605,25 @@ func matchGuess(answers []models.PredictionAnswer, normalizedAnswer string) (*st
 	return nil, 0
 }
 
+func validateMatchingAliases(answers []models.PredictionAnswer) error {
+	owners := make(map[string]int)
+	for answerIndex, answer := range answers {
+		phrases := append([]string{answer.CanonicalAnswer}, answer.Aliases...)
+		for _, phrase := range phrases {
+			normalized := normalizeAnswer(phrase)
+			if normalized == "" {
+				continue
+			}
+			if owner, exists := owners[normalized]; exists && owner != answerIndex {
+				return fmt.Errorf("%w: %q", ErrAmbiguousBoardAnswer, normalized)
+			}
+			owners[normalized] = answerIndex
+		}
+	}
+
+	return nil
+}
+
 func answerAlreadyClaimed(guesses []models.Guess, matchedAnswerID string, skipGuessID string) bool {
 	for _, guess := range guesses {
 		if guess.ID == skipGuessID {
@@ -742,6 +762,9 @@ func (service *RoomService) generateRound(ctx context.Context, settings models.R
 	}
 	if boardResponse == nil {
 		return generatedRound{}, fmt.Errorf("board generator returned no response")
+	}
+	if err := validateMatchingAliases(boardResponse.Board.Answers); err != nil {
+		return generatedRound{}, err
 	}
 
 	board := prepareBoard(boardResponse.Board, question, now)

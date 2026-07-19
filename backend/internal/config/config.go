@@ -16,7 +16,6 @@ type Config struct {
 
 type DefaultModels struct {
 	Prediction string
-	Judge      string
 	Question   string
 }
 
@@ -29,7 +28,6 @@ func Load() Config {
 		CORSAllowedOrigins: splitCSV(getEnv("CORS_ALLOWED_ORIGINS", "http://localhost:5173")),
 		DefaultModels: DefaultModels{
 			Prediction: getEnv("DEFAULT_PREDICTION_MODEL", "gpt-4.1-mini"),
-			Judge:      getEnv("DEFAULT_JUDGE_MODEL", "gpt-4.1"),
 			Question:   getEnv("DEFAULT_QUESTION_MODEL", "gpt-4.1-mini"),
 		},
 	}
