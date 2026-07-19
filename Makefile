@@ -90,13 +90,13 @@ baseline: build-client
 	cd $(BACKEND_DIR) && go run ./cmd/baseline -database-url '$(DATABASE_URL)' -client-dist ../client/dist
 
 ops-backup:
-	./scripts/ops-backup.sh '$(DATABASE_URL)' '$(BACKUP_DIR)'
+	bash ./scripts/ops-backup.sh '$(DATABASE_URL)' '$(BACKUP_DIR)'
 
 ops-restore:
-	./scripts/ops-restore.sh '$(DATABASE_URL)' '$(BACKUP_FILE)' '$(RESTORE_DATABASE)' '$(CONFIRM_RESTORE)'
+	bash ./scripts/ops-restore.sh '$(DATABASE_URL)' '$(BACKUP_FILE)' '$(RESTORE_DATABASE)' '$(CONFIRM_RESTORE)'
 
 ops-retention:
-	./scripts/ops-retention.sh '$(DATABASE_URL)' '$(RETENTION_DAYS)' '$(APPLY_RETENTION)'
+	bash ./scripts/ops-retention.sh '$(DATABASE_URL)' '$(RETENTION_DAYS)' '$(APPLY_RETENTION)'
 
 format:
 	gofmt -w $$(find $(BACKEND_DIR) -type f -name '*.go')
