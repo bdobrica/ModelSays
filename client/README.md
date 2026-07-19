@@ -12,7 +12,7 @@ The playable client authenticates an SSE stream with a request header and treats
 
 The client supports individual simultaneous, team, and sequential game paths: create/join, team setup, live lobby, host start, server-authoritative countdowns, guesses and passes, automatic expiry transitions, host early reveal and override, private post-reveal semantic suggestions for the host, rankings/ties, replay, play-again, and same-browser refresh recovery. The layout collapses to one column below 900 px for phone-sized player views.
 
-The client suite covers the event contract and every event type, header authentication, burst coalescing, duplicate/out-of-order/gapped revisions, malformed/secret-bearing payload rejection, reconnect/resume, offline/online and stop behavior, plus room-flow stale-response protection. The PostgreSQL lifecycle gate separately exercises one host and two player identities across the persisted API flow.
+The client suite covers the event contract and every event type, header authentication, burst coalescing, duplicate/out-of-order/gapped revisions, malformed/secret-bearing payload rejection, reconnect/resume, offline/online and stop behavior, plus room-flow stale-response protection. It also runs serious/critical axe checks on primary entry routes and asserts phase focus, live feedback, copy/fullscreen controls, all modes, and the phone/tablet/laptop/shared-display policy. The PostgreSQL lifecycle gate separately exercises one host and two player identities across the persisted API flow. See [`docs/accessibility.md`](../docs/accessibility.md).
 
 The root `make baseline` command builds the production client and records its uncompressed asset size alongside 3-, 8-, and 12-player API polling workloads. Current bundle evidence and beta budgets are documented in [`docs/baselines/pb-00.md`](../docs/baselines/pb-00.md).
 
@@ -22,7 +22,7 @@ The client opens `GET /api/rooms/{code}/events` with `X-Player-Token`; credentia
 
 ## Known Limitations
 
-Next-round advancement remains a host action, and automatic reveal/turn timeout requires the backend's PostgreSQL worker. Matching corrections happen only after reveal. Sessions do not transfer across devices, and presence is not tracked. Animations and a dedicated browser end-to-end harness are deferred. Physical-device and lossy mobile-network playtesting is still recommended before public release.
+Next-round advancement remains a host action, and automatic reveal/turn timeout requires the backend's PostgreSQL worker. Matching corrections happen only after reveal. Sessions do not transfer across devices, and presence is not tracked. A dedicated browser end-to-end harness is deferred. The responsive and accessibility policy is automated, but the physical phone, screen-reader, screen-share, and lossy-network release checklist must still be run in an authorized environment.
 
 ## Core Experience
 

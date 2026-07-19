@@ -41,12 +41,14 @@ export function RoomPage() {
   const [judgeSuggestions, setJudgeSuggestions] = useState<JudgeSuggestion[]>([])
   const [connectionState, setConnectionState] = useState<RoomConnectionState>('connecting')
   const [shareStatus, setShareStatus] = useState('')
+  const [presentationStatus, setPresentationStatus] = useState('')
   const [teamName, setTeamName] = useState('')
   const [now, setNow] = useState(() => Date.now())
   const requestSequence = useRef(0)
   const activeRequest = useRef<AbortController | null>(null)
   const mutationInFlight = useRef(false)
   const eventClient = useRef<RoomEventClient | null>(null)
+  const phaseHeading = useRef<HTMLHeadingElement | null>(null)
 
   const refreshRoom = useCallback(async (showLoading = false) => {
     const sequence = ++requestSequence.current
@@ -179,6 +181,10 @@ export function RoomPage() {
     setOverrideSelections({})
     setNow(Date.now())
   }, [currentRound?.id])
+
+  useEffect(() => {
+    if (!isLoading && (currentRound?.status || room?.status)) phaseHeading.current?.focus()
+  }, [currentRound?.id, currentRound?.status, isLoading, room?.status])
 
   useEffect(() => {
     if (!isHost || !activePlayerToken || currentRound?.status !== 'revealed') {
@@ -325,6 +331,29 @@ export function RoomPage() {
     }
   }
 
+  async function handleCopyInvite() {
+    try {
+      await navigator.clipboard.writeText(`${window.location.origin}/join?code=${code}`)
+      setShareStatus('Invite link copied')
+    } catch {
+      setShareStatus(`Copy unavailable. Share room code ${code}.`)
+    }
+  }
+
+  async function handleFullscreen() {
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen()
+        setPresentationStatus('Exited presentation mode')
+      } else {
+        await document.documentElement.requestFullscreen()
+        setPresentationStatus('Presentation mode enabled')
+      }
+    } catch {
+      setPresentationStatus('Fullscreen is unavailable in this browser')
+    }
+  }
+
   async function handleOverrideMatch(guessId: string) {
     if (!activePlayerToken || !currentRound) return setErrorMessage('Missing player session or round state')
     const selectedValue = overrideSelections[guessId] ?? ''
@@ -349,7 +378,7 @@ export function RoomPage() {
 
   return (
     <section className="room-grid">
-      <article className="panel room-overview">
+      <article aria-busy={isLoading || isMutating} className="panel room-overview">
         <div className="section-heading">
           <p className="eyebrow">Room state</p>
           <h1>{room?.name || code}</h1>
@@ -368,6 +397,11 @@ export function RoomPage() {
         </div>
 
         <div className="room-code-row"><span>Room code</span><strong>{code}</strong></div>
+        <div className="action-row room-tools">
+          <button className="button button-secondary" onClick={() => void handleCopyInvite()} type="button">Copy invite</button>
+          <button className="button button-secondary" onClick={() => void handleFullscreen()} type="button">Presentation mode</button>
+        </div>
+        <p aria-atomic="true" aria-live="polite" className="status-note" role="status">{shareStatus} {presentationStatus}</p>
         <div className="settings-grid">
           <div><span>Status</span><strong>{room?.status || 'loading'}</strong></div>
           <div><span>Mode</span><strong>{room?.settings.mode || 'simultaneous'}</strong></div>
@@ -388,7 +422,7 @@ export function RoomPage() {
 
         {showLobbyState ? (
           <section className="phase-card">
-            <h2>Lobby</h2>
+            <h2 ref={phaseHeading} tabIndex={-1}>Lobby</h2>
             <p className="info-note">Start when everyone has joined. New players cannot join after the game begins.</p>
             {room?.settings.mode === 'teams' ? (
               <div className="team-setup">
@@ -426,9 +460,9 @@ export function RoomPage() {
               <span className="eyebrow">Round {currentRound.roundIndex}</span>
               <strong>{currentRound.roundIndex}/{currentGame?.totalRounds}</strong>
             </div>
-            <h2>{currentRound.question.text}</h2>
+            <h2 ref={phaseHeading} tabIndex={-1}>{currentRound.question.text}</h2>
             <p className="countdown" role="timer">{hasLocallyExpired ? 'Time expired' : `${secondsRemaining}s remaining`}</p>
-            <p className="status-note">
+            <p aria-atomic="true" aria-live="polite" className="status-note" role="status">
               {isSequential && !isActiveTurn
                 ? `Waiting for ${currentTurnPlayer?.displayName ?? 'the current player'} to answer.`
                 : hasSubmitted
@@ -468,10 +502,10 @@ export function RoomPage() {
         ) : null}
 
         {showRevealState && currentRound ? (
-          <section className="phase-card">
+          <section className="phase-card reveal-card">
             <div className="round-meta"><span className="eyebrow">Revealed</span><strong>Board hash {currentRound.boardHash}</strong></div>
-            <h2>{currentRound.question.text}</h2>
-            <p className="status-note">Answers and awarded scores are now revealed.</p>
+            <h2 ref={phaseHeading} tabIndex={-1}>{currentRound.question.text}</h2>
+            <p aria-live="polite" className="status-note" role="status">Answers and awarded scores are now revealed.</p>
             <div className="answer-board">
               {currentRound.board?.answers.map((answer) => (
                 <div className="answer-row" key={answer.id}><span>#{answer.rank}</span><strong>{answer.canonicalAnswer}</strong><em>{answer.score} pts</em></div>
@@ -525,13 +559,12 @@ export function RoomPage() {
                 <button className="button button-secondary" onClick={() => navigate('/')} type="button">Back to home</button>
               </div>
             ) : null}
-            {shareStatus ? <p className="status-note" aria-live="polite" role="status">{shareStatus}</p> : null}
           </section>
         ) : null}
 
-        {isLoading ? <p className="status-note">Loading room…</p> : null}
-        {isMutating ? <p className="status-note">Updating room…</p> : null}
-        {errorMessage ? <p className="form-error">{errorMessage}</p> : null}
+        {isLoading ? <p aria-live="polite" className="status-note" role="status">Loading room…</p> : null}
+        {isMutating ? <p aria-live="polite" className="status-note" role="status">Updating room…</p> : null}
+        {errorMessage ? <p className="form-error" role="alert">{errorMessage}</p> : null}
       </article>
 
       <aside className="panel player-panel">

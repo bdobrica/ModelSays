@@ -7,6 +7,7 @@ Use this guide for facilitated tests of the existing simultaneous mode. Record r
 - Ask each participant to explain the premise after reading the home page. Record whether they understand that they are predicting a model-generated board, not survey answers.
 - Ask the host to create and share a room without coaching. Note hesitation, failed joins, and time to start.
 - Include at least one phone-sized or physical mobile participant.
+- Record anonymous device/browser descriptions and whether the host uses a projector, television, or screen-sharing software. Do not record participant names.
 
 ## During each round
 
@@ -16,6 +17,7 @@ Use this guide for facilitated tests of the existing simultaneous mode. Record r
 - Count host interventions and estimate host effort per round.
 - Observe the live-update indicator during normal play, a backend restart, and a short offline/online cycle. Record mutation-to-visible delay, reconnect delay, stale state, and whether fallback polling is understandable.
 - On a phone or throttled mobile-network profile, background and restore the tab. Confirm it catches up without revealing hidden state, duplicating actions, or requiring a manual refresh.
+- Complete the keyboard-only, screen-reader, reduced-motion, and Presentation mode checks in [`accessibility.md`](accessibility.md).
 
 ## After play
 

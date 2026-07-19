@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import axe from 'axe-core'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -137,6 +138,27 @@ afterEach(() => {
 })
 
 describe('RoomPage', () => {
+  it('has no serious or critical accessibility violations in a maximum-player lobby', async () => {
+    saveSession('ABC234', host)
+    const maximumPlayerRoom = roomState('lobby')
+    maximumPlayerRoom.name = 'A deliberately long room name that reaches the maximum'
+    maximumPlayerRoom.players = Array.from({ length: 12 }, (_, index) => ({
+      ...player,
+      id: `player-${index}`,
+      displayName: `Long player name ${String(index + 1).padStart(2, '0')}`,
+      isHost: index === 0,
+      token: index === 0 ? host.token : `token-${index}`,
+    }))
+    const recoveredHost = maximumPlayerRoom.players[0]
+    vi.mocked(api.recoverSession).mockResolvedValue({ room: maximumPlayerRoom, player: recoveredHost })
+
+    const { container } = renderRoom()
+    await screen.findByRole('heading', { name: 'Lobby' })
+    expect(screen.getAllByRole('listitem')).toHaveLength(12)
+    const result = await axe.run(container, { rules: { 'color-contrast': { enabled: false } } })
+    expect(result.violations.filter((violation) => ['serious', 'critical'].includes(violation.impact ?? ''))).toEqual([])
+  })
+
   it('recovers a normalized host session and drives the host game flow with authoritative refetches', async () => {
     saveSession('ABC234', host)
     let current = roomState('lobby')
@@ -237,6 +259,26 @@ describe('RoomPage', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Leave this session' }))
     expect(screen.getByText('Home')).toBeInTheDocument()
     expect(window.localStorage.getItem('modelsays.session')).toBeNull()
+  })
+
+  it('focuses the current phase, copies an invite, and announces presentation state', async () => {
+    saveSession('ABC234', host)
+    vi.mocked(api.recoverSession).mockResolvedValue({ room: roomState('lobby'), player: host })
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    const requestFullscreen = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(document.documentElement, 'requestFullscreen', { configurable: true, value: requestFullscreen })
+
+    renderRoom()
+    const heading = await screen.findByRole('heading', { name: 'Lobby' })
+    await waitFor(() => expect(heading).toHaveFocus())
+    fireEvent.click(screen.getByRole('button', { name: 'Copy invite' }))
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('http://localhost:3000/join?code=ABC234'))
+    expect(screen.getByText(/Invite link copied/)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Presentation mode' }))
+    await waitFor(() => expect(requestFullscreen).toHaveBeenCalled())
+    expect(screen.getByText(/Presentation mode enabled/)).toBeInTheDocument()
   })
 
   it('copies completed results and lets only the host create a clean next lobby', async () => {

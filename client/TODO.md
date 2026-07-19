@@ -177,23 +177,23 @@ Status note:
 - [ ] Validate the join flow on physical mobile devices.
 - [ ] Validate answer input on physical mobile devices.
 - [ ] Validate the host board on a real screen share.
-- [ ] Increase reveal-screen text size.
-- [ ] Add fullscreen-friendly layout.
-- [ ] Add reduced-motion option.
-- [ ] Add clear “submitted” visual state.
-- [ ] Add fun but not slow reveal animations.
+- [x] Increase reveal-screen text size in fullscreen presentation mode.
+- [x] Add fullscreen-friendly layout without hiding host controls.
+- [x] Honor `prefers-reduced-motion`.
+- [x] Add clear submitted, expired, reconnecting, and host-review text states.
+- [x] Add a 420 ms reveal animation that never delays controls.
 
 ## Phase 12 — Error Handling
 
-- [ ] Handle backend unavailable.
+- [x] Expose backend/unavailable refresh errors through an assertive alert.
 - [x] Handle room not found.
 - [x] Handle game already started.
-- [ ] Handle player disconnected.
+- [x] Show offline/reconnecting text and preserve polling recovery.
 - [x] Handle answer submission failure.
 - [x] Surface the backend error when model generation and curated fallback both fail.
 - [x] Handle unauthorized host actions.
 - [x] Add fallback route.
-- [ ] Add user-friendly empty states.
+- [x] Show loading, no-guesses, unavailable replay, and action-error states.
 
 ## Phase 13 — Tests
 

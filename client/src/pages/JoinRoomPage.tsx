@@ -1,12 +1,13 @@
 import { FormEvent, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 
 import { joinRoom } from '../lib/api'
 import { saveSession } from '../lib/session'
 
 export function JoinRoomPage() {
     const navigate = useNavigate()
-    const [roomCode, setRoomCode] = useState('')
+    const [searchParams] = useSearchParams()
+    const [roomCode, setRoomCode] = useState(() => (searchParams.get('code') ?? '').trim().toUpperCase())
     const [displayName, setDisplayName] = useState('')
     const [isSubmitting, setIsSubmitting] = useState(false)
     const [errorMessage, setErrorMessage] = useState<string | null>(null)
@@ -34,7 +35,7 @@ export function JoinRoomPage() {
             <div className="section-heading">
                 <p className="eyebrow">Player entry</p>
                 <h1>Join a room</h1>
-                <p>Players can already join against the backend in-memory room service.</p>
+                <p>Enter the shared code and choose the name other players will see.</p>
             </div>
 
             <form className="form-grid" onSubmit={handleSubmit}>
@@ -57,7 +58,7 @@ export function JoinRoomPage() {
                     />
                 </label>
 
-                {errorMessage ? <p className="form-error">{errorMessage}</p> : null}
+                {errorMessage ? <p className="form-error" role="alert">{errorMessage}</p> : null}
 
                 <button className="button button-primary" disabled={isSubmitting} type="submit">
                     {isSubmitting ? 'Joining…' : 'Join room'}

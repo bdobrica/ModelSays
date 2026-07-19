@@ -58,7 +58,7 @@ After the first installation, `make start` starts the stack without reinstalling
 Use separate browser profiles, private windows, or devices so each participant has separate browser storage.
 
 1. The host opens `http://localhost:5173`, selects **Create room**, enters a name, chooses individual, team, or sequential mode, 1–5 rounds, and a 15–120 second timer, then creates the room.
-2. Share the six-character room code or the room URL before starting.
+2. Select **Copy invite** and share the join link, or share the six-character room code before starting. Invite links pre-fill the code.
 3. Each player opens **Join room**, enters the code and a display name, and joins the lobby.
 4. The host waits for everyone to appear. In team mode, create 2–4 teams and assign every player; every team must have a player. Then select **Start game**. Team assignments cannot change afterward.
 5. Each participant submits one answer before the countdown expires. The answer board and round scoring stay hidden during this phase.
@@ -75,6 +75,8 @@ In sequential mode, players act in lobby join order. The timer resets for each p
 Refreshing the same browser restores its player session. Do not clear browser storage during a game. Cross-device session transfer is not currently supported.
 
 When the final round is complete, use **Share results** to share or copy the unguessable replay link. The replay shows winners/ties and every revealed round without exposing session credentials or private provider records. The host can select **Play again** to create a fresh lobby with the same room name and settings; other players join the new code, and no prior guesses, claims, boards, deadlines, scores, or credentials carry over.
+
+For a projector or screen share, the host can select **Presentation mode**. The browser enters fullscreen, removes setup details, and enlarges revealed answers while keeping host controls available. Press `Esc` or select **Presentation mode** again to exit. Keyboard users can use the initial **Skip to game content** link; phase changes move focus to the current phase heading, and live states are announced. The reveal respects the operating system/browser reduced-motion preference. See [`docs/accessibility.md`](docs/accessibility.md) for the supported viewport contract and release checklist.
 
 ## Optional OpenAI content
 

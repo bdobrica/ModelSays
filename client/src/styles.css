@@ -38,8 +38,54 @@ a {
 }
 
 button,
-input {
+input,
+select {
     font: inherit;
+}
+
+button,
+a,
+input,
+select {
+    touch-action: manipulation;
+}
+
+input,
+select {
+    min-width: 0;
+    max-width: 100%;
+}
+
+:focus-visible {
+    outline: 3px solid #fff2a8;
+    outline-offset: 3px;
+}
+
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+.skip-link {
+    position: fixed;
+    top: 0.5rem;
+    left: 0.5rem;
+    z-index: 100;
+    padding: 0.75rem 1rem;
+    border-radius: 0.75rem;
+    background: #fff2a8;
+    color: #171412;
+    transform: translateY(-150%);
+}
+
+.skip-link:focus {
+    transform: translateY(0);
 }
 
 #root {
@@ -251,7 +297,7 @@ input {
 
 .button:disabled {
     opacity: 0.7;
-    cursor: progress;
+    cursor: not-allowed;
 }
 
 .button-primary {
@@ -283,6 +329,15 @@ input {
     border-radius: 1rem;
     border: 1px solid rgba(255, 255, 255, 0.1);
     background: rgba(255, 255, 255, 0.04);
+    color: #fff;
+}
+
+.form-grid select {
+    min-height: 3rem;
+    padding: 0.75rem 0.9rem;
+    border-radius: 1rem;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: #252426;
     color: #fff;
 }
 
@@ -444,6 +499,37 @@ input {
 .room-code-row strong {
     font-size: 1.8rem;
     letter-spacing: 0.1em;
+    overflow-wrap: anywhere;
+}
+
+.reveal-card {
+    animation: reveal-in 420ms ease-out both;
+}
+
+@keyframes reveal-in {
+    from {
+        opacity: 0;
+        transform: translateY(0.75rem);
+    }
+}
+
+:fullscreen .topbar,
+:fullscreen .room-tools,
+:fullscreen .settings-grid {
+    display: none;
+}
+
+:fullscreen .page-frame {
+    width: min(1500px, calc(100% - 2rem));
+    padding-top: 1rem;
+}
+
+:fullscreen .room-overview {
+    font-size: clamp(1rem, 1.6vw, 1.6rem);
+}
+
+:fullscreen .answer-row strong {
+    font-size: clamp(1.3rem, 2.8vw, 2.8rem);
 }
 
 .settings-grid {
@@ -507,5 +593,55 @@ input {
 
     .settings-grid {
         grid-template-columns: 1fr;
+    }
+
+    .page-frame {
+        width: min(calc(100% - 1rem), 48rem);
+        padding-top: 0.75rem;
+    }
+
+    .panel-hero,
+    .form-panel,
+    .room-overview,
+    .player-panel {
+        padding: 1rem;
+        border-radius: 1.2rem;
+    }
+
+    .action-row > .button,
+    .answer-form > .button {
+        flex: 1 1 11rem;
+    }
+}
+
+@media (max-width: 480px) {
+    .topbar {
+        padding: 0.75rem;
+    }
+
+    .brand small {
+        display: none;
+    }
+
+    .room-code-row {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .answer-row,
+    .score-row {
+        align-items: flex-start;
+        flex-wrap: wrap;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        scroll-behavior: auto !important;
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
     }
 }

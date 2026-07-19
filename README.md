@@ -250,7 +250,7 @@ The controlled MVP is playable with one host and at least two players:
 - deterministic canonical/alias matching with first committed claim wins;
 - server-enforced deadlines, hidden answering-state outcomes, durable automatic reveal, early host reveal, and post-reveal overrides;
 - authenticated ordered SSE invalidations, authoritative sequenced refetches, bounded reconnect/resume, polling recovery, and server-validated same-browser session recovery;
-- responsive host/player layouts, including the single-column layout below 900 px;
+- accessible responsive host/player layouts with skip/focus/live feedback, 48 px controls, phone/tablet breakpoints, reduced-motion reveal, invite copying, and fullscreen presentation;
 - automated backend, client, and PostgreSQL lifecycle gates through `make verify`.
 
 The repeatable MVP playtest gate uses a host and two player identities across two curated rounds. It verifies a shared board hash, refresh/session recovery during answering and reveal, equivalent-answer duplicate handling, expiry rejection, host override, final ranking, and score recovery after backend reconstruction. This technical operator simulation passed on 2026-07-19. The browser room-flow suite covers the corresponding UI states; an external-player fun/usability session is still recommended before a public launch.
@@ -262,7 +262,7 @@ The repeatable MVP playtest gate uses a host and two player identities across tw
 - Expiry closes answering and the PostgreSQL worker automatically reveals; round advancement remains a manual host action.
 - Reconnect is limited to the same browser’s stored room token; there is no presence heartbeat or cross-device transfer.
 - Team and sequential are separate modes and cannot be combined. Completed games have a non-enumerable results link, and **Play again** creates a clean lobby with the same mode and settings.
-- The responsive UI is automated at the component/CSS level, but physical-device and external-participant playtesting remains a release follow-up.
+- Automated axe and component checks cover primary entry routes, focus/live feedback, all modes, and the declared responsive/motion policy. The physical phone, screen-reader, screen-share, and external-participant checklist in [`docs/accessibility.md`](docs/accessibility.md) remains a release gate.
 - Public API/provider abuse boundaries, privacy-safe logs and bounded metrics, dependency-aware readiness, graceful drain, and recovery controls are documented and tested. The supported public-beta topology remains one API replica; an operator-controlled TLS/proxy and physical-network staging drill is still required before uncontrolled public traffic.
 
 ## Game Modes

@@ -124,7 +124,7 @@ export function CreateRoomPage() {
                     Team-building safe mode
                 </label>
 
-                {errorMessage ? <p className="form-error">{errorMessage}</p> : null}
+                {errorMessage ? <p className="form-error" role="alert">{errorMessage}</p> : null}
 
                 <button className="button button-primary" disabled={isSubmitting} type="submit">
                     {isSubmitting ? 'Creating room…' : 'Create room'}

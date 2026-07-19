@@ -60,6 +60,7 @@ Deterministic local push and deadline-transition evidence is recorded under `doc
 - Disputed matches and host action:
 - Mobile/accessibility observations:
 - Requested next mode:
+- Accessibility checklist from `docs/accessibility.md`: Pass / Fail / Not run
 
 ## Regressions, decisions, and follow-up
 
