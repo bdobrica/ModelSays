@@ -54,13 +54,13 @@ The frontend should not be trusted for game-state decisions.
 
 ## Supported MVP
 
-The backend supports individual and team-based simultaneous English games with 1–5 rounds, 15–120 second answer windows, curated offline content or validated and audited OpenAI generation, PostgreSQL persistence, deterministic canonical/alias scoring, optional advisory semantic judging for misses, first-claim duplicate scoring, phase-aware response secrecy, durable automatic reveal, host early-reveal/review/override/advance controls, room-scoped same-browser session recovery, and layered public API/provider abuse controls. Provider operations are documented in [`docs/provider-operations.md`](../docs/provider-operations.md); deadline-worker behavior is documented in [`docs/deadline-transitions.md`](../docs/deadline-transitions.md); the threat model, proxy trust, limiter policies, moderation, and `429` contract are in [`docs/security.md`](../docs/security.md).
+The backend supports individual simultaneous, team, and sequential English games with 1–5 rounds and 15–120 second timers, curated offline content or validated and audited OpenAI generation, PostgreSQL persistence, deterministic canonical/alias scoring, optional advisory semantic judging for misses, first-claim duplicate scoring, phase-aware response secrecy, durable deadline transitions, host early-reveal/review/override/advance controls, room-scoped same-browser session recovery, and layered public API/provider abuse controls. Provider operations are documented in [`docs/provider-operations.md`](../docs/provider-operations.md); deadline-worker behavior is documented in [`docs/deadline-transitions.md`](../docs/deadline-transitions.md); the threat model, proxy trust, limiter policies, moderation, and `429` contract are in [`docs/security.md`](../docs/security.md).
 
 The PostgreSQL lifecycle gate runs a host plus two players through two curated rounds and covers shared board identity, session recovery during answering and reveal, equivalent guesses, deadline rejection, override, completion, and score reload after the repository/service/server are rebuilt.
 
 ## Known Limitations
 
-Clients use authenticated SSE invalidations with polling recovery. Automatic reveal requires PostgreSQL, while advancement remains host-controlled. Presence, cross-device session transfer, non-English locales, and non-simultaneous modes are not supported. Abuse limits are process-local, so public deployments must use one API replica. Privacy-safe JSON logs, authenticated bounded metrics, dependency-aware readiness, graceful drain, and opt-in recovery/retention tooling are implemented; environment-specific staging evidence remains an operator responsibility. See [`docs/operations.md`](../docs/operations.md).
+Clients use authenticated SSE invalidations with polling recovery. Automatic reveal and sequential timeout advancement require PostgreSQL, while next-round advancement remains host-controlled. Presence, cross-device session transfer, and non-English locales are not supported. Abuse limits are process-local, so public deployments must use one API replica. Privacy-safe JSON logs, authenticated bounded metrics, dependency-aware readiness, graceful drain, and opt-in recovery/retention tooling are implemented; environment-specific staging evidence remains an operator responsibility. See [`docs/operations.md`](../docs/operations.md).
 
 Completed games receive a random 128-bit replay identifier. `GET /api/replays/{replayID}` returns rankings, ties, revealed question/board answers, guesses, answer matches, and per-round score deltas. It deliberately omits tokens, normalized guesses, aliases, provider/model/prompt metadata, audits, judge records, and raw provider content. `POST /api/rooms/{code}/play-again` is host-token protected and creates a distinct lobby with copied settings and a new host identity; no gameplay rows or credentials are reused.
 
@@ -99,12 +99,13 @@ A more classic turn-based mode.
 
 Flow:
 
-1. A random player order is generated per round.
+1. Lobby join order is frozen for each round.
 2. Players answer one at a time.
-3. Previously revealed answers cannot be reused.
-4. Each player consumes their own timer, like a chess clock.
+3. Prior raw claims are visible; hidden match and score outcomes are not.
+4. Submit, pass, or timeout advances durably; the final turn reveals.
+5. First claim and scoring use the same auditable rules as simultaneous mode.
 
-This can be implemented after simultaneous mode.
+Sequential is a separate mode and cannot be combined with teams.
 
 ### Team Mode
 
@@ -448,7 +449,7 @@ The MVP requests strict JSON-schema responses from OpenAI, then applies the same
 
 ## Supported MVP API input
 
-Room creation accepts only simultaneous mode, 1–5 rounds, a 15–120 second answer timer, locale `en`, and the prediction model configured by `DEFAULT_PREDICTION_MODEL` (default `gpt-4.1-mini`). Omitted settings retain the defaults of five rounds and 45 seconds. Room names must contain 3–48 Unicode characters and display names 2–24; control characters are rejected. Route room codes must be six characters from the invite-code alphabet.
+Room creation accepts individual simultaneous, team, or sequential mode, 1–5 rounds, a 15–120 second answer timer, locale `en`, and the prediction model configured by `DEFAULT_PREDICTION_MODEL` (default `gpt-4.1-mini`). Omitted settings retain the defaults of five rounds and 45 seconds. Room names must contain 3–48 Unicode characters and display names 2–24; control characters are rejected. Route room codes must be six characters from the invite-code alphabet.
 
 Joining creates a new player only while the room is in the lobby. Once start wins the room lock, later joins return HTTP `409` with `game has started; new players cannot join`. Player-token mutations resolve the token only within the requested room and operate only on that room's current requested round.
 

@@ -55,6 +55,7 @@ var (
 	ErrTeamNameInvalid          = errors.New("team name must be between 2 and 24 characters")
 	ErrTeamNotFound             = errors.New("team not found")
 	ErrTeamConfigurationInvalid = errors.New("team games require 2 to 4 non-empty teams and every player assigned")
+	ErrNotPlayersTurn           = errors.New("it is not this player's turn")
 )
 
 const (
@@ -105,6 +106,10 @@ type RevealRoundInput struct {
 	Code        string
 	RoundID     string
 	PlayerToken string
+}
+
+type PassTurnInput struct {
+	Code, RoundID, PlayerToken string
 }
 
 type NextRoundInput struct {
@@ -196,6 +201,7 @@ type RoomRepository interface {
 	ListGameRounds(ctx context.Context, gameID string) ([]models.Round, error)
 	CreateTeam(ctx context.Context, code string, team models.Team) (models.Room, error)
 	AssignPlayerTeam(ctx context.Context, code, playerID, teamID string) (models.Room, error)
+	PassTurn(ctx context.Context, code, roundID, playerID string, occurredAt time.Time) (models.Room, error)
 }
 
 func NewRoomService(repository RoomRepository, modelClient llm.ModelClient) *RoomService {
@@ -480,6 +486,18 @@ func (service *RoomService) StartGame(ctx context.Context, input StartGameInput)
 			ProviderAudits:       roundSeed.Audits,
 		},
 	}
+	if room.Settings.Mode == models.GameModeSequential {
+		order := make([]string, len(room.Players))
+		for index, player := range room.Players {
+			order[index] = player.ID
+		}
+		first := 0
+		turnEndsAt := now.Add(time.Duration(room.Settings.AnswerTimerSeconds) * time.Second)
+		gameState.CurrentRound.TurnOrder = order
+		gameState.CurrentRound.CurrentTurnIndex = &first
+		gameState.CurrentRound.TurnEndsAt = &turnEndsAt
+		gameState.CurrentRound.AnswerPhaseEndsAt = turnEndsAt
+	}
 
 	updated, err := service.repository.StartGame(ctx, code, gameState)
 	if err == nil {
@@ -516,6 +534,11 @@ func (service *RoomService) SubmitGuess(ctx context.Context, input SubmitGuessIn
 	if round.Status != models.RoundStatusAnswering {
 		return models.Room{}, ErrRoundNotAcceptingGuesses
 	}
+	if room.Settings.Mode == models.GameModeSequential {
+		if round.CurrentTurnIndex == nil || *round.CurrentTurnIndex >= len(round.TurnOrder) || round.TurnOrder[*round.CurrentTurnIndex] != player.ID {
+			return models.Room{}, ErrNotPlayersTurn
+		}
+	}
 	now := service.clock.Now()
 	if !now.Before(round.AnswerPhaseEndsAt) {
 		return models.Room{}, ErrAnswerPhaseExpired
@@ -540,7 +563,9 @@ func (service *RoomService) SubmitGuess(ctx context.Context, input SubmitGuessIn
 	if err != nil {
 		return models.Room{}, err
 	}
-	updated = service.publishRoomEvent(ctx, updated, models.RoomEventSubmissionProgress)
+	if room.Settings.Mode != models.GameModeSequential {
+		updated = service.publishRoomEvent(ctx, updated, models.RoomEventSubmissionProgress)
+	}
 	submittedRound := updated.CurrentGame.CurrentRound
 	var submitted models.Guess
 	for _, guess := range submittedRound.Guesses {
@@ -556,6 +581,36 @@ func (service *RoomService) SubmitGuess(ctx context.Context, input SubmitGuessIn
 		return models.Room{}, err
 	}
 	return updated, nil
+}
+
+func (service *RoomService) PassTurn(ctx context.Context, input PassTurnInput) (models.Room, error) {
+	code, err := normalizeRoomCode(input.Code)
+	if err != nil {
+		return models.Room{}, err
+	}
+	room, err := service.repository.GetRoom(ctx, code)
+	if err != nil {
+		return models.Room{}, err
+	}
+	if room.Settings.Mode != models.GameModeSequential {
+		return models.Room{}, ErrRoundNotAcceptingGuesses
+	}
+	player, ok := findPlayerByToken(room.Players, strings.TrimSpace(input.PlayerToken))
+	if !ok {
+		return models.Room{}, ErrPlayerNotFound
+	}
+	round, err := currentRound(room, strings.TrimSpace(input.RoundID))
+	if err != nil {
+		return models.Room{}, err
+	}
+	if round.CurrentTurnIndex == nil || *round.CurrentTurnIndex >= len(round.TurnOrder) || round.TurnOrder[*round.CurrentTurnIndex] != player.ID {
+		return models.Room{}, ErrNotPlayersTurn
+	}
+	updated, err := service.repository.PassTurn(ctx, code, round.ID, player.ID, service.clock.Now())
+	if err == nil && room.Settings.Mode != models.GameModeSequential {
+		updated = service.publishRoomEvent(ctx, updated, models.RoomEventSubmissionProgress)
+	}
+	return updated, err
 }
 
 func (service *RoomService) RevealRound(ctx context.Context, input RevealRoundInput) (models.Room, error) {
@@ -655,6 +710,18 @@ func (service *RoomService) NextRound(ctx context.Context, input NextRoundInput)
 		AnswerPhaseEndsAt:    now.Add(time.Duration(room.Settings.AnswerTimerSeconds) * time.Second),
 		CreatedAt:            now,
 		ProviderAudits:       roundSeed.Audits,
+	}
+	if room.Settings.Mode == models.GameModeSequential {
+		order := make([]string, len(room.Players))
+		for index, player := range room.Players {
+			order[index] = player.ID
+		}
+		first := 0
+		turnEndsAt := now.Add(time.Duration(room.Settings.AnswerTimerSeconds) * time.Second)
+		nextRound.TurnOrder = order
+		nextRound.CurrentTurnIndex = &first
+		nextRound.TurnEndsAt = &turnEndsAt
+		nextRound.AnswerPhaseEndsAt = turnEndsAt
 	}
 
 	nextGame := cloneGame(room.CurrentGame)
@@ -1082,8 +1149,8 @@ func validateDisplayName(displayName string) error {
 }
 
 func (service *RoomService) validateSettings(settings models.RoomSettings) error {
-	if settings.Mode != models.GameModeSimultaneous && settings.Mode != models.GameModeTeams {
-		return fmt.Errorf("%w: mode must be simultaneous or teams", ErrRoomSettingsInvalid)
+	if settings.Mode != models.GameModeSimultaneous && settings.Mode != models.GameModeTeams && settings.Mode != models.GameModeSequential {
+		return fmt.Errorf("%w: mode must be simultaneous, teams, or sequential", ErrRoomSettingsInvalid)
 	}
 	if settings.TotalRounds < minTotalRounds || settings.TotalRounds > maxTotalRounds {
 		return fmt.Errorf("%w: total rounds must be between %d and %d", ErrRoomSettingsInvalid, minTotalRounds, maxTotalRounds)
@@ -1187,6 +1254,15 @@ func cloneGame(gameState *models.Game) *models.Game {
 	if gameState.CurrentRound != nil {
 		clonedRound := *gameState.CurrentRound
 		clonedRound.Guesses = append([]models.Guess(nil), gameState.CurrentRound.Guesses...)
+		clonedRound.TurnOrder = append([]string(nil), gameState.CurrentRound.TurnOrder...)
+		if gameState.CurrentRound.CurrentTurnIndex != nil {
+			index := *gameState.CurrentRound.CurrentTurnIndex
+			clonedRound.CurrentTurnIndex = &index
+		}
+		if gameState.CurrentRound.TurnEndsAt != nil {
+			deadline := *gameState.CurrentRound.TurnEndsAt
+			clonedRound.TurnEndsAt = &deadline
+		}
 		if gameState.CurrentRound.Board != nil {
 			clonedBoard := *gameState.CurrentRound.Board
 			clonedBoard.Answers = append([]models.PredictionAnswer(nil), gameState.CurrentRound.Board.Answers...)

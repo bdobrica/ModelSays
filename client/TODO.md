@@ -52,7 +52,7 @@ Status note:
 - [x] Add join-room CTA.
 - [x] Build create-room screen.
 - [x] Add host display-name input.
-- [ ] Add game mode selector.
+- [x] Add game mode selector for individual, team, and sequential play.
 - [x] Add round count selector.
 - [x] Add answer timer selector.
 - [x] Add locale selector.

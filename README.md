@@ -25,7 +25,7 @@ For each round:
 
 The generated board is stored persistently so every player competes against the same frozen set of answers.
 
-Rooms may use individual simultaneous mode or team mode. In team mode the host creates 2–4 teams and assigns every player before starting. Players still submit individually, first claims remain global across all teams, and each team total is derived from its members' auditable player scores.
+Rooms may use individual simultaneous mode, team mode, or sequential mode. Team mode aggregates individual scores into 2–4 host-configured teams. Sequential mode gives every player one timed turn in lobby join order.
 
 ## Example
 
@@ -244,7 +244,7 @@ The host can correct a match or miss after reveal.
 
 The controlled MVP is playable with one host and at least two players:
 
-- simultaneous English games with 1–5 rounds and 15–120 second timers;
+- simultaneous, team, or sequential English games with 1–5 rounds and 15–120 second timers;
 - PostgreSQL-persisted rooms, frozen boards, guesses, score events, and final rankings;
 - a five-round curated bank that works without an OpenAI key, plus validated OpenAI generation when configured;
 - deterministic canonical/alias matching with first committed claim wins;
@@ -261,7 +261,7 @@ The repeatable MVP playtest gate uses a host and two player identities across tw
 - Automatic scoring remains deterministic. Optional semantic suggestions still require an explicit post-reveal host decision.
 - Expiry closes answering and the PostgreSQL worker automatically reveals; round advancement remains a manual host action.
 - Reconnect is limited to the same browser’s stored room token; there is no presence heartbeat or cross-device transfer.
-- Only simultaneous English games are supported; teams and sequential play are deferred. Completed games now have a non-enumerable results link with final rankings, round deltas, revealed boards/guesses, and answer matches. The host can create a clean new lobby with the same settings through **Play again**.
+- Team and sequential are separate modes and cannot be combined. Completed games have a non-enumerable results link, and **Play again** creates a clean lobby with the same mode and settings.
 - The responsive UI is automated at the component/CSS level, but physical-device and external-participant playtesting remains a release follow-up.
 - Public API/provider abuse boundaries, privacy-safe logs and bounded metrics, dependency-aware readiness, graceful drain, and recovery controls are documented and tested. The supported public-beta topology remains one API replica; an operator-controlled TLS/proxy and physical-network staging drill is still required before uncontrolled public traffic.
 
@@ -289,9 +289,9 @@ This is ideal for:
 
 ### Sequential Mode
 
-Players answer one at a time, with a timer.
+Players take one turn each in deterministic lobby join order; the configured answer timer applies independently to every turn. A player may submit one guess or pass. Disconnecting has the same result as waiting: the durable worker passes that player when their turn expires. Raw prior claims are visible, but their hidden-board match, duplicate, and score outcomes remain secret until reveal.
 
-This creates more pressure and strategy, but has more downtime and is better for smaller groups.
+First claim remains global and scores exactly as in simultaneous mode. Submission or pass advances immediately, the final action reveals automatically, the host may reveal early, and every new round restarts the same frozen player order. Teams and sequential cannot be combined.
 
 ### Team Mode
 

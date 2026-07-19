@@ -206,6 +206,104 @@ func TestTeamModeMigrationDownAndUp(t *testing.T) {
 	executeMigrationSection(t, pool, path, true)
 }
 
+func TestSequentialModeMigrationDownAndUp(t *testing.T) {
+	pool := integrationPool(t)
+	path := migrationPath(t, "000012_sequential_mode.sql")
+	executeMigrationSection(t, pool, path, false)
+	executeMigrationSection(t, pool, path, true)
+}
+
+func TestPostgresSequentialSubmissionAndTwoWorkerTimeout(t *testing.T) {
+	pool := integrationPool(t)
+	repository := db.NewPostgresRoomRepository(pool)
+	service := game.NewRoomService(repository, nil)
+	ctx := context.Background()
+	room, host, err := service.CreateRoom(ctx, game.CreateRoomInput{RoomName: "Sequential persistence", HostDisplayName: "Host",
+		Settings: models.RoomSettings{Mode: models.GameModeSequential, TotalRounds: 1, AnswerTimerSeconds: 15}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = service.JoinRoom(ctx, game.JoinRoomInput{Code: room.Code, DisplayName: "Guest"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, waitingGuest, err := service.JoinRoom(ctx, game.JoinRoomInput{Code: room.Code, DisplayName: "Waiting"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	room, err = service.StartGame(ctx, game.StartGameInput{Code: room.Code, PlayerToken: host.Token})
+	if err != nil {
+		t.Fatal(err)
+	}
+	roundID := room.CurrentGame.CurrentRound.ID
+	answer := room.CurrentGame.CurrentRound.Board.Answers[0].CanonicalAnswer
+	errs := make(chan error, 2)
+	go func() {
+		_, submitErr := service.SubmitGuess(ctx, game.SubmitGuessInput{Code: room.Code, RoundID: roundID, PlayerToken: host.Token, Answer: answer})
+		errs <- submitErr
+	}()
+	go func() {
+		_, submitErr := service.SubmitGuess(ctx, game.SubmitGuessInput{Code: room.Code, RoundID: roundID, PlayerToken: waitingGuest.Token, Answer: "too early"})
+		errs <- submitErr
+	}()
+	var successes, rejected int
+	for range 2 {
+		if submitErr := <-errs; submitErr == nil {
+			successes++
+		} else if errors.Is(submitErr, game.ErrNotPlayersTurn) {
+			rejected++
+		} else {
+			t.Fatalf("unexpected concurrent submission error: %v", submitErr)
+		}
+	}
+	if successes != 1 || rejected != 1 {
+		t.Fatalf("successes=%d rejected=%d", successes, rejected)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE rounds SET turn_ends_at=now()-interval '1 second', answer_phase_ends_at=now()-interval '1 second' WHERE id=$1`, roundID); err != nil {
+		t.Fatal(err)
+	}
+	counts := make(chan int, 2)
+	for range 2 {
+		go func() {
+			count, processErr := repository.RevealDueRounds(ctx, time.Now(), time.Now(), 25)
+			if processErr != nil {
+				errs <- processErr
+				return
+			}
+			counts <- count
+		}()
+	}
+	total := 0
+	for range 2 {
+		select {
+		case processErr := <-errs:
+			t.Fatal(processErr)
+		case count := <-counts:
+			total += count
+		}
+	}
+	if total != 1 {
+		t.Fatalf("processed timeout count=%d, want 1", total)
+	}
+	reloaded, err := repository.GetRoom(ctx, room.Code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.CurrentGame.CurrentRound.Status != models.RoundStatusAnswering || *reloaded.CurrentGame.CurrentRound.CurrentTurnIndex != 2 {
+		t.Fatalf("timeout did not advance exactly once: %#v", reloaded.CurrentGame.CurrentRound)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE rounds SET turn_ends_at=now()-interval '1 second', answer_phase_ends_at=now()-interval '1 second' WHERE id=$1`, roundID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.RevealDueRounds(ctx, time.Now(), time.Now(), 25); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err = repository.GetRoom(ctx, room.Code)
+	if err != nil || reloaded.CurrentGame.CurrentRound.Status != models.RoundStatusRevealed {
+		t.Fatalf("final timeout did not reveal: room=%#v err=%v", reloaded, err)
+	}
+}
+
 func TestPostgresReplayAndPlayAgainIsolation(t *testing.T) {
 	pool := integrationPool(t)
 	service := game.NewRoomService(db.NewPostgresRoomRepository(pool), nil)

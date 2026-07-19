@@ -15,6 +15,7 @@ vi.mock('../lib/api', async () => {
     startGame: vi.fn(),
     submitGuess: vi.fn(),
     revealRound: vi.fn(),
+    passTurn: vi.fn(),
     nextRound: vi.fn(),
     playAgain: vi.fn(),
     createTeam: vi.fn(),
@@ -279,5 +280,33 @@ describe('RoomPage', () => {
 
     fireEvent.change(screen.getByLabelText('Team for Player'), { target: { value: 'gold' } })
     await waitFor(() => expect(api.assignTeam).toHaveBeenCalledWith('ABC234', player.id, { playerToken: host.token, teamId: 'gold' }))
+  })
+
+  it('shows waiting and active sequential turn states with prior claims and pass', async () => {
+    saveSession('ABC234', player)
+    const sequential = roomState('answering')
+    sequential.settings = { ...settings, mode: 'sequential' }
+    sequential.currentGame!.mode = 'sequential'
+    sequential.currentGame!.currentRound = {
+      ...sequential.currentGame!.currentRound!,
+      turnOrder: [host.id, player.id],
+      currentTurnIndex: 0,
+      turnEndsAt: new Date(Date.now() + 30_000).toISOString(),
+      guesses: [{ id: 'prior', playerId: host.id, playerDisplayName: 'Host', rawAnswer: 'Apple', normalizedAnswer: '', scoreAwarded: 0, duplicate: false, createdAt: '2026-07-19T12:00:01Z' }],
+    }
+    vi.mocked(api.recoverSession).mockResolvedValue({ room: sequential, player })
+    vi.mocked(api.getRoom).mockResolvedValue({ room: sequential })
+    vi.mocked(api.passTurn).mockResolvedValue({ room: sequential })
+    const firstView = renderRoom()
+    expect(await screen.findByText('Waiting for Host to answer.')).toBeInTheDocument()
+    expect(screen.getByLabelText('Your guess')).toBeDisabled()
+    expect(screen.getByText('Prior claims')).toBeInTheDocument()
+
+    firstView.unmount()
+    sequential.currentGame!.currentRound!.currentTurnIndex = 1
+    vi.mocked(api.recoverSession).mockResolvedValue({ room: sequential, player })
+    renderRoom()
+    fireEvent.click(await screen.findByRole('button', { name: 'Pass turn' }))
+    await waitFor(() => expect(api.passTurn).toHaveBeenCalledWith('ABC234', 'round-1', { playerToken: player.token }))
   })
 })

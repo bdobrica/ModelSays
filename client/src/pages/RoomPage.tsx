@@ -9,6 +9,7 @@ import {
   nextRound,
   playAgain,
   overrideMatch,
+  passTurn,
   recoverSession,
   revealRound,
   startGame,
@@ -122,8 +123,14 @@ export function RoomPage() {
   const activeScore = currentGame?.scoreboard.find((entry) => entry.playerId === activePlayer?.id)
   const hasSubmitted = activeScore?.submissionMade ?? false
   const isGameCompleted = currentGame?.status === 'completed'
+  const isSequential = currentGame?.mode === 'sequential'
+  const currentTurnPlayerId = currentRound?.currentTurnIndex == null
+    ? undefined
+    : currentRound.turnOrder?.[currentRound.currentTurnIndex]
+  const currentTurnPlayer = room?.players.find((player) => player.id === currentTurnPlayerId)
+  const isActiveTurn = !isSequential || currentTurnPlayerId === activePlayer?.id
   const answerPhaseEndsAt = currentRound?.status === 'answering'
-    ? Date.parse(currentRound.answerPhaseEndsAt)
+    ? Date.parse(isSequential && currentRound.turnEndsAt ? currentRound.turnEndsAt : currentRound.answerPhaseEndsAt)
     : Number.NaN
   const secondsRemaining = Number.isFinite(answerPhaseEndsAt)
     ? Math.max(0, Math.ceil((answerPhaseEndsAt - now) / 1000))
@@ -278,6 +285,11 @@ export function RoomPage() {
     await mutateRoom(() => revealRound(code, currentRound.id, { playerToken: activePlayerToken }))
   }
 
+  async function handlePassTurn() {
+    if (!activePlayerToken || !currentRound) return setErrorMessage('Missing player session or round state')
+    await mutateRoom(() => passTurn(code, currentRound.id, { playerToken: activePlayerToken }))
+  }
+
   async function handleNextRound() {
     if (!activePlayerToken) return setErrorMessage('Missing player session token')
     await mutateRoom(() => nextRound(code, { playerToken: activePlayerToken }))
@@ -417,7 +429,9 @@ export function RoomPage() {
             <h2>{currentRound.question.text}</h2>
             <p className="countdown" role="timer">{hasLocallyExpired ? 'Time expired' : `${secondsRemaining}s remaining`}</p>
             <p className="status-note">
-              {hasSubmitted
+              {isSequential && !isActiveTurn
+                ? `Waiting for ${currentTurnPlayer?.displayName ?? 'the current player'} to answer.`
+                : hasSubmitted
                 ? 'Submitted. Your guess is locked while you wait for reveal.'
                 : hasLocallyExpired
                   ? 'Answering has expired. The server will reveal the round automatically.'
@@ -426,16 +440,25 @@ export function RoomPage() {
             <form className="answer-form" onSubmit={handleSubmitGuess}>
               <input
                 aria-label="Your guess"
-                disabled={hasSubmitted || hasLocallyExpired || isMutating || !activePlayerToken}
+                disabled={!isActiveTurn || hasSubmitted || hasLocallyExpired || isMutating || !activePlayerToken}
                 maxLength={120}
                 onChange={(event) => setGuessAnswer(event.target.value)}
                 placeholder="Type your guess"
                 value={guessAnswer}
               />
-              <button className="button button-primary" disabled={hasSubmitted || hasLocallyExpired || isMutating || !guessAnswer.trim()} type="submit">
+              <button className="button button-primary" disabled={!isActiveTurn || hasSubmitted || hasLocallyExpired || isMutating || !guessAnswer.trim()} type="submit">
                 {hasSubmitted ? 'Submitted' : hasLocallyExpired ? 'Time expired' : isMutating ? 'Submitting…' : 'Submit guess'}
               </button>
             </form>
+            {isSequential && isActiveTurn && !hasSubmitted && !hasLocallyExpired ? (
+              <button className="button button-secondary" disabled={isMutating} onClick={() => void handlePassTurn()} type="button">Pass turn</button>
+            ) : null}
+            {isSequential && currentRound.guesses?.length ? (
+              <div className="guess-list">
+                <h3>Prior claims</h3>
+                {currentRound.guesses.map((guess) => <div className="guess-row" key={guess.id}><strong>{guess.playerDisplayName}</strong><span>{guess.rawAnswer}</span></div>)}
+              </div>
+            ) : null}
             {isHost ? (
               <div className="action-row">
                 <button className="button button-secondary" disabled={isMutating} onClick={() => void handleRevealRound()} type="button">Reveal round</button>

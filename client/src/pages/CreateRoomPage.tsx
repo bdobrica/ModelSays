@@ -13,7 +13,7 @@ export function CreateRoomPage() {
     const [locale, setLocale] = useState('en')
     const [predictionModel, setPredictionModel] = useState('gpt-4.1-mini')
     const [teamSafeMode, setTeamSafeMode] = useState(false)
-    const [mode, setMode] = useState<'simultaneous' | 'teams'>('simultaneous')
+    const [mode, setMode] = useState<'simultaneous' | 'teams' | 'sequential'>('simultaneous')
     const [isSubmitting, setIsSubmitting] = useState(false)
     const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
@@ -59,9 +59,10 @@ export function CreateRoomPage() {
             <form className="form-grid" onSubmit={handleSubmit}>
                 <label>
                     Game mode
-                    <select value={mode} onChange={(event) => setMode(event.target.value as 'simultaneous' | 'teams')}>
+                    <select value={mode} onChange={(event) => setMode(event.target.value as 'simultaneous' | 'teams' | 'sequential')}>
                         <option value="simultaneous">Individual</option>
                         <option value="teams">Teams</option>
+                        <option value="sequential">Sequential turns</option>
                     </select>
                 </label>
                 <label>

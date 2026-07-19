@@ -14,6 +14,7 @@ type GameMode string
 const (
 	GameModeSimultaneous GameMode = "simultaneous"
 	GameModeTeams        GameMode = "teams"
+	GameModeSequential   GameMode = "sequential"
 )
 
 type RoomSettings struct {

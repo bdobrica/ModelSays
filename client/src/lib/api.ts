@@ -1,6 +1,6 @@
 import { env } from './env'
 
-export type GameMode = 'simultaneous' | 'teams'
+export type GameMode = 'simultaneous' | 'teams' | 'sequential'
 
 export interface RoomSettings {
   mode: GameMode
@@ -86,6 +86,9 @@ export interface Round {
   answerPhaseEndsAt: string
   revealStartedAt?: string
   createdAt: string
+  turnOrder?: string[]
+  currentTurnIndex?: number
+  turnEndsAt?: string
 }
 
 export interface Game {
@@ -241,6 +244,13 @@ export async function submitGuess(code: string, roundId: string, payload: Submit
 
 export async function revealRound(code: string, roundId: string, payload: PlayerTokenPayload): Promise<RoomResponse> {
   return request<RoomResponse>(`/api/rooms/${code}/rounds/${roundId}/reveal`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function passTurn(code: string, roundId: string, payload: PlayerTokenPayload): Promise<RoomResponse> {
+  return request<RoomResponse>(`/api/rooms/${code}/rounds/${roundId}/pass`, {
     method: 'POST',
     body: JSON.stringify(payload),
   })

@@ -36,24 +36,31 @@ func (repository *PostgresRoomRepository) RevealDueRounds(ctx context.Context, d
 	defer tx.Rollback(ctx)
 
 	rows, err := tx.Query(ctx, `
-		SELECT rooms.code, games.id, rounds.id
+		SELECT rooms.code, games.id, rounds.id, games.mode, rounds.turn_order_jsonb,
+		       rounds.current_turn_index, COALESCE((rooms.settings_jsonb->>'answerTimerSeconds')::integer,45)
 		FROM rounds
 		INNER JOIN games ON games.id = rounds.game_id
 		INNER JOIN rooms ON rooms.code = games.room_code
 		WHERE rounds.status = $1 AND games.status = $2
-		  AND rounds.answer_phase_ends_at <= $3
-		ORDER BY rounds.answer_phase_ends_at, rounds.id
+		  AND (CASE WHEN games.mode = 'sequential' THEN rounds.turn_ends_at ELSE rounds.answer_phase_ends_at END) <= $3
+		ORDER BY (CASE WHEN games.mode = 'sequential' THEN rounds.turn_ends_at ELSE rounds.answer_phase_ends_at END), rounds.id
 		FOR UPDATE OF rounds SKIP LOCKED
 		LIMIT $4
 	`, models.RoundStatusAnswering, models.GameStatusInProgress, dueAt, limit)
 	if err != nil {
 		return 0, fmt.Errorf("claim due rounds: %w", err)
 	}
-	type dueRound struct{ code, gameID, roundID string }
+	type dueRound struct {
+		code, gameID, roundID string
+		mode                  models.GameMode
+		order                 []string
+		index                 *int
+		timer                 int
+	}
 	var due []dueRound
 	for rows.Next() {
 		var item dueRound
-		if err := rows.Scan(&item.code, &item.gameID, &item.roundID); err != nil {
+		if err := rows.Scan(&item.code, &item.gameID, &item.roundID, &item.mode, &item.order, &item.index, &item.timer); err != nil {
 			rows.Close()
 			return 0, fmt.Errorf("scan due round: %w", err)
 		}
@@ -66,6 +73,12 @@ func (repository *PostgresRoomRepository) RevealDueRounds(ctx context.Context, d
 	rows.Close()
 
 	for _, item := range due {
+		if item.mode == models.GameModeSequential && item.index != nil {
+			if err := advanceSequentialRoundTx(ctx, tx, item.code, item.gameID, item.roundID, *item.index, len(item.order), item.timer, occurredAt, models.RoundTransitionActorScheduler, "turn_deadline_elapsed"); err != nil {
+				return 0, err
+			}
+			continue
+		}
 		tag, err := tx.Exec(ctx, `UPDATE rounds SET status = $2, reveal_started_at = $3 WHERE id = $1 AND status = $4`,
 			item.roundID, models.RoundStatusRevealed, occurredAt, models.RoundStatusAnswering)
 		if err != nil {
@@ -123,8 +136,8 @@ func (repository *PostgresRoomRepository) Ready(ctx context.Context) error {
 	if err := repository.pool.QueryRow(checkCtx, `SELECT version_id, is_applied = false FROM goose_db_version ORDER BY id DESC LIMIT 1`).Scan(&version, &dirty); err != nil {
 		return fmt.Errorf("migration compatibility: %w", err)
 	}
-	if dirty || version != 11 {
-		return fmt.Errorf("migration compatibility: database version %d dirty=%t, want 11 clean", version, dirty)
+	if dirty || version != 12 {
+		return fmt.Errorf("migration compatibility: database version %d dirty=%t, want 12 clean", version, dirty)
 	}
 	return nil
 }
@@ -597,9 +610,9 @@ func (repository *PostgresRoomRepository) StartGame(ctx context.Context, code st
 	}
 
 	_, err = tx.Exec(ctx, `
-		INSERT INTO rounds (id, game_id, round_index, question_id, board_id, status, answer_phase_started_at, answer_phase_ends_at, reveal_started_at, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-	`, gameState.CurrentRound.ID, gameState.ID, gameState.CurrentRound.RoundIndex, question.ID, board.ID, gameState.CurrentRound.Status, gameState.CurrentRound.AnswerPhaseStartedAt, gameState.CurrentRound.AnswerPhaseEndsAt, gameState.CurrentRound.RevealStartedAt, gameState.CurrentRound.CreatedAt)
+		INSERT INTO rounds (id, game_id, round_index, question_id, board_id, status, answer_phase_started_at, answer_phase_ends_at, reveal_started_at, created_at, turn_order_jsonb, current_turn_index, turn_ends_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11, '[]'::jsonb), $12, $13)
+	`, gameState.CurrentRound.ID, gameState.ID, gameState.CurrentRound.RoundIndex, question.ID, board.ID, gameState.CurrentRound.Status, gameState.CurrentRound.AnswerPhaseStartedAt, gameState.CurrentRound.AnswerPhaseEndsAt, gameState.CurrentRound.RevealStartedAt, gameState.CurrentRound.CreatedAt, gameState.CurrentRound.TurnOrder, gameState.CurrentRound.CurrentTurnIndex, gameState.CurrentRound.TurnEndsAt)
 	if err != nil {
 		return models.Room{}, fmt.Errorf("insert round: %w", err)
 	}
@@ -636,14 +649,21 @@ func (repository *PostgresRoomRepository) SubmitGuess(ctx context.Context, code 
 	var boardID string
 	var gameID string
 	var answerPhaseEndsAt time.Time
+	var mode models.GameMode
+	var turnOrder []string
+	var currentTurnIndex *int
+	var timerSeconds int
 	err = tx.QueryRow(ctx, `
 		-- lock round for guess submission
-		SELECT r.id, r.status, r.board_id, g.id, r.answer_phase_ends_at
+		SELECT r.id, r.status, r.board_id, g.id, r.answer_phase_ends_at, g.mode,
+		       r.turn_order_jsonb, r.current_turn_index,
+		       COALESCE((rooms.settings_jsonb->>'answerTimerSeconds')::integer, 45)
 		FROM rounds r
 		INNER JOIN games g ON g.id = r.game_id
+		INNER JOIN rooms ON rooms.code = g.room_code
 		WHERE g.room_code = $1 AND r.id = $2
 		FOR UPDATE
-	`, code, roundID).Scan(&lockedRoundID, &roundStatus, &boardID, &gameID, &answerPhaseEndsAt)
+	`, code, roundID).Scan(&lockedRoundID, &roundStatus, &boardID, &gameID, &answerPhaseEndsAt, &mode, &turnOrder, &currentTurnIndex, &timerSeconds)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return models.Room{}, game.ErrRoundNotFound
@@ -657,6 +677,9 @@ func (repository *PostgresRoomRepository) SubmitGuess(ctx context.Context, code 
 	}
 	if !clock.Now().Before(answerPhaseEndsAt) {
 		return models.Room{}, game.ErrAnswerPhaseExpired
+	}
+	if mode == models.GameModeSequential && (currentTurnIndex == nil || *currentTurnIndex >= len(turnOrder) || turnOrder[*currentTurnIndex] != submission.PlayerID) {
+		return models.Room{}, game.ErrNotPlayersTurn
 	}
 
 	board, err := repository.loadBoard(ctx, tx, boardID)
@@ -690,6 +713,11 @@ func (repository *PostgresRoomRepository) SubmitGuess(ctx context.Context, code 
 			return models.Room{}, fmt.Errorf("insert score event: %w", err)
 		}
 	}
+	if mode == models.GameModeSequential {
+		if err := advanceSequentialRoundTx(ctx, tx, code, gameID, lockedRoundID, *currentTurnIndex, len(turnOrder), timerSeconds, submission.CreatedAt, models.RoundTransitionActorPlayer, "answer_submitted"); err != nil {
+			return models.Room{}, err
+		}
+	}
 
 	room, err := repository.loadRoom(ctx, tx, code)
 	if err != nil {
@@ -701,6 +729,67 @@ func (repository *PostgresRoomRepository) SubmitGuess(ctx context.Context, code 
 	}
 
 	return room, nil
+}
+
+func (repository *PostgresRoomRepository) PassTurn(ctx context.Context, code, roundID, playerID string, occurredAt time.Time) (models.Room, error) {
+	tx, err := repository.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return models.Room{}, fmt.Errorf("begin pass turn tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	var gameID string
+	var order []string
+	var index *int
+	var timer int
+	err = tx.QueryRow(ctx, `SELECT g.id, r.turn_order_jsonb, r.current_turn_index, COALESCE((rooms.settings_jsonb->>'answerTimerSeconds')::integer,45)
+		FROM rounds r JOIN games g ON g.id=r.game_id JOIN rooms ON rooms.code=g.room_code
+		WHERE rooms.code=$1 AND r.id=$2 AND r.status='answering' AND g.mode='sequential' FOR UPDATE OF r`,
+		code, roundID).Scan(&gameID, &order, &index, &timer)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return models.Room{}, game.ErrRoundNotFound
+	}
+	if err != nil {
+		return models.Room{}, fmt.Errorf("lock round for pass: %w", err)
+	}
+	if index == nil || *index >= len(order) || order[*index] != playerID {
+		return models.Room{}, game.ErrNotPlayersTurn
+	}
+	if err := advanceSequentialRoundTx(ctx, tx, code, gameID, roundID, *index, len(order), timer, occurredAt, models.RoundTransitionActorPlayer, "player_passed"); err != nil {
+		return models.Room{}, err
+	}
+	room, err := repository.loadRoom(ctx, tx, code)
+	if err != nil {
+		return models.Room{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return models.Room{}, fmt.Errorf("commit pass turn: %w", err)
+	}
+	return room, nil
+}
+
+func advanceSequentialRoundTx(ctx context.Context, tx pgx.Tx, code, gameID, roundID string, index, count, timer int, at time.Time, actor models.RoundTransitionActor, reason string) error {
+	transition := models.RoundTransition{ID: newEventID(), RoomCode: code, GameID: gameID, RoundID: roundID, Actor: actor, Reason: reason, CreatedAt: at, TurnIndex: &index}
+	if index+1 >= count {
+		transition.Action = "reveal"
+		transition.TurnIndex = nil
+		if _, err := tx.Exec(ctx, `UPDATE rounds SET status='revealed', reveal_started_at=$2, current_turn_index=NULL, turn_ends_at=NULL WHERE id=$1`, roundID, at); err != nil {
+			return fmt.Errorf("reveal after final turn: %w", err)
+		}
+	} else {
+		transition.Action = "advance_turn"
+		if _, err := tx.Exec(ctx, `UPDATE rounds SET current_turn_index=$2, turn_ends_at=$3, answer_phase_ends_at=$3 WHERE id=$1`, roundID, index+1, at.Add(time.Duration(timer)*time.Second)); err != nil {
+			return fmt.Errorf("advance turn: %w", err)
+		}
+	}
+	if err := insertRoundTransition(ctx, tx, transition); err != nil {
+		return err
+	}
+	eventType := models.RoomEventSubmissionProgress
+	if transition.Action == "reveal" {
+		eventType = models.RoomEventRoundRevealed
+	}
+	_, err := appendRoomEventTx(ctx, tx, code, eventType, at)
+	return err
 }
 
 func (repository *PostgresRoomRepository) RevealRound(ctx context.Context, code string, roundID string, transition models.RoundTransition) (models.Room, error) {
@@ -759,10 +848,10 @@ func (repository *PostgresRoomRepository) RevealRound(ctx context.Context, code 
 
 func insertRoundTransition(ctx context.Context, tx pgx.Tx, transition models.RoundTransition) error {
 	_, err := tx.Exec(ctx, `
-		INSERT INTO round_transitions (id, room_code, game_id, round_id, action, actor, reason, created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+		INSERT INTO round_transitions (id, room_code, game_id, round_id, action, actor, reason, created_at, turn_index)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
 	`, transition.ID, transition.RoomCode, transition.GameID, transition.RoundID, transition.Action,
-		transition.Actor, transition.Reason, transition.CreatedAt)
+		transition.Actor, transition.Reason, transition.CreatedAt, transition.TurnIndex)
 	if err != nil {
 		return fmt.Errorf("insert round transition: %w", err)
 	}
@@ -828,9 +917,9 @@ func (repository *PostgresRoomRepository) AdvanceGame(ctx context.Context, code 
 		}
 
 		_, err = tx.Exec(ctx, `
-			INSERT INTO rounds (id, game_id, round_index, question_id, board_id, status, answer_phase_started_at, answer_phase_ends_at, reveal_started_at, created_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-		`, nextRound.ID, gameState.ID, nextRound.RoundIndex, question.ID, board.ID, nextRound.Status, nextRound.AnswerPhaseStartedAt, nextRound.AnswerPhaseEndsAt, nextRound.RevealStartedAt, nextRound.CreatedAt)
+			INSERT INTO rounds (id, game_id, round_index, question_id, board_id, status, answer_phase_started_at, answer_phase_ends_at, reveal_started_at, created_at, turn_order_jsonb, current_turn_index, turn_ends_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11, '[]'::jsonb), $12, $13)
+		`, nextRound.ID, gameState.ID, nextRound.RoundIndex, question.ID, board.ID, nextRound.Status, nextRound.AnswerPhaseStartedAt, nextRound.AnswerPhaseEndsAt, nextRound.RevealStartedAt, nextRound.CreatedAt, nextRound.TurnOrder, nextRound.CurrentTurnIndex, nextRound.TurnEndsAt)
 		if err != nil {
 			return models.Room{}, fmt.Errorf("insert next round: %w", err)
 		}
@@ -1068,6 +1157,9 @@ func (repository *PostgresRoomRepository) loadCurrentGame(ctx context.Context, q
 		roundCreatedAt    *time.Time
 		revealStartedAt   *time.Time
 		questionCreatedAt *time.Time
+		turnOrderJSON     []byte
+		currentTurnIndex  *int
+		turnEndsAt        *time.Time
 	)
 
 	err := querier.QueryRow(ctx, `
@@ -1089,6 +1181,9 @@ func (repository *PostgresRoomRepository) loadCurrentGame(ctx context.Context, q
 			r.answer_phase_ends_at,
 			r.reveal_started_at,
 			r.created_at,
+			r.turn_order_jsonb,
+			r.current_turn_index,
+			r.turn_ends_at,
 			q.id,
 			q.text,
 			q.locale,
@@ -1118,6 +1213,9 @@ func (repository *PostgresRoomRepository) loadCurrentGame(ctx context.Context, q
 		&roundEndsAt,
 		&revealStartedAt,
 		&roundCreatedAt,
+		&turnOrderJSON,
+		&currentTurnIndex,
+		&turnEndsAt,
 		&questionID,
 		&questionText,
 		&questionLocale,
@@ -1165,6 +1263,13 @@ func (repository *PostgresRoomRepository) loadCurrentGame(ctx context.Context, q
 			AnswerPhaseEndsAt:    *roundEndsAt,
 			RevealStartedAt:      revealStartedAt,
 			CreatedAt:            *roundCreatedAt,
+			CurrentTurnIndex:     currentTurnIndex,
+			TurnEndsAt:           turnEndsAt,
+		}
+		if len(turnOrderJSON) > 0 {
+			if err := json.Unmarshal(turnOrderJSON, &gameState.CurrentRound.TurnOrder); err != nil {
+				return nil, fmt.Errorf("decode turn order: %w", err)
+			}
 		}
 	}
 

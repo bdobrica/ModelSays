@@ -20,7 +20,7 @@ On `SIGTERM`, the backend stops accepting connections, cancels event streams and
 
 ## Signals
 
-`GET /healthz` is process-only liveness. `GET /readyz` checks PostgreSQL connectivity, clean migration version `000011`, and recent successful transition-worker processing. A failure returns only `not_ready`; details remain in private logs.
+`GET /healthz` is process-only liveness. `GET /readyz` checks PostgreSQL connectivity, clean migration version `000012`, and recent successful transition-worker processing. A failure returns only `not_ready`; details remain in private logs.
 
 `GET /metrics` uses `Authorization: Bearer $METRICS_TOKEN` when configured and must not be exposed publicly. Metrics cover bounded HTTP route/status/latency, active rooms and event connections, subscriptions/reconnects, transition passes/latency, database-pool state, provider outcomes/tokens/estimated cost, and limiter decisions. Labels are fixed categories—never room codes, IPs, player IDs, tokens, prompts, or guesses.
 

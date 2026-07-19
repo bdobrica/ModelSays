@@ -698,7 +698,7 @@ func TestCreateRoomRejectsInvalidSettingsAndMalformedBodies(t *testing.T) {
 		{name: "zero rounds after explicit invalid timer", body: strings.Replace(valid, `"totalRounds":1`, `"totalRounds":6`, 1)},
 		{name: "timer below lower bound", body: strings.Replace(valid, `"answerTimerSeconds":15`, `"answerTimerSeconds":14`, 1)},
 		{name: "timer above upper bound", body: strings.Replace(valid, `"answerTimerSeconds":15`, `"answerTimerSeconds":121`, 1)},
-		{name: "unsupported mode", body: strings.Replace(valid, `"simultaneous"`, `"sequential"`, 1)},
+		{name: "unsupported mode", body: strings.Replace(valid, `"simultaneous"`, `"cooperative"`, 1)},
 		{name: "unsupported locale", body: strings.Replace(valid, `"locale":"en"`, `"locale":"ro"`, 1)},
 		{name: "unsupported model", body: strings.Replace(valid, `"gpt-4.1-mini"`, `"other-model"`, 1)},
 		{name: "unknown field", body: strings.Replace(valid, `"roomName"`, `"unexpected":true,"roomName"`, 1)},
@@ -868,5 +868,31 @@ func TestTeamProjectionDoesNotLeakCurrentRoundScore(t *testing.T) {
 	projected := projectRoom(room)
 	if projected.CurrentGame.Scoreboard[0].Score != 0 || projected.CurrentGame.TeamScoreboard[0].Score != 0 {
 		t.Fatalf("answering projection leaked score: %#v", projected.CurrentGame)
+	}
+}
+
+func TestSequentialProjectionShowsPriorClaimsWithoutMatchOrScoreLeakage(t *testing.T) {
+	index := 1
+	deadline := time.Now().Add(time.Minute)
+	match := "answer-1"
+	room := models.Room{
+		Code: "ABC234", Players: []models.Player{{ID: "one", DisplayName: "One"}, {ID: "two", DisplayName: "Two"}},
+		CurrentGame: &models.Game{
+			Mode:       models.GameModeSequential,
+			Scoreboard: []models.ScoreboardEntry{{PlayerID: "one", Score: 50}, {PlayerID: "two"}},
+			CurrentRound: &models.Round{
+				Status: models.RoundStatusAnswering, TurnOrder: []string{"one", "two"},
+				CurrentTurnIndex: &index, TurnEndsAt: &deadline,
+				Guesses: []models.Guess{{ID: "guess", PlayerID: "one", PlayerDisplayName: "One", RawAnswer: "Apple", NormalizedAnswer: "apple", MatchedPredictionAnswerID: &match, ScoreAwarded: 50}},
+			},
+		},
+	}
+	projected := projectRoom(room)
+	guess := projected.CurrentGame.CurrentRound.Guesses[0]
+	if guess.RawAnswer != "Apple" || guess.NormalizedAnswer != "" || guess.MatchedPredictionAnswerID != nil || guess.ScoreAwarded != 0 {
+		t.Fatalf("unsafe sequential prior claim: %#v", guess)
+	}
+	if projected.CurrentGame.Scoreboard[0].Score != 0 || *projected.CurrentGame.CurrentRound.CurrentTurnIndex != 1 {
+		t.Fatalf("sequential projection leaked score or lost turn: %#v", projected.CurrentGame)
 	}
 }

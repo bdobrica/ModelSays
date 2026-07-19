@@ -92,6 +92,9 @@ type Round struct {
 	RevealStartedAt      *time.Time          `json:"revealStartedAt,omitempty"`
 	CreatedAt            time.Time           `json:"createdAt"`
 	ProviderAudits       []ProviderCallAudit `json:"-"`
+	TurnOrder            []string            `json:"turnOrder,omitempty"`
+	CurrentTurnIndex     *int                `json:"currentTurnIndex,omitempty"`
+	TurnEndsAt           *time.Time          `json:"turnEndsAt,omitempty"`
 }
 
 type RoundTransitionActor string
@@ -99,6 +102,7 @@ type RoundTransitionActor string
 const (
 	RoundTransitionActorHost      RoundTransitionActor = "host"
 	RoundTransitionActorScheduler RoundTransitionActor = "scheduler"
+	RoundTransitionActorPlayer    RoundTransitionActor = "player"
 )
 
 type RoundTransition struct {
@@ -110,6 +114,7 @@ type RoundTransition struct {
 	Actor     RoundTransitionActor `json:"actor"`
 	Reason    string               `json:"reason"`
 	CreatedAt time.Time            `json:"createdAt"`
+	TurnIndex *int                 `json:"turnIndex,omitempty"`
 }
 
 type ProviderCallAudit struct {

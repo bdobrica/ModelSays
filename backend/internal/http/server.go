@@ -62,6 +62,10 @@ type revealRoundRequest struct {
 	PlayerToken string `json:"playerToken"`
 }
 
+type passTurnRequest struct {
+	PlayerToken string `json:"playerToken"`
+}
+
 type nextRoundRequest struct {
 	PlayerToken string `json:"playerToken"`
 }
@@ -140,6 +144,9 @@ type publicRound struct {
 	AnswerPhaseStartedAt time.Time               `json:"answerPhaseStartedAt"`
 	AnswerPhaseEndsAt    time.Time               `json:"answerPhaseEndsAt"`
 	RevealStartedAt      *time.Time              `json:"revealStartedAt,omitempty"`
+	TurnOrder            []string                `json:"turnOrder,omitempty"`
+	CurrentTurnIndex     *int                    `json:"currentTurnIndex,omitempty"`
+	TurnEndsAt           *time.Time              `json:"turnEndsAt,omitempty"`
 	CreatedAt            time.Time               `json:"createdAt"`
 }
 
@@ -290,9 +297,25 @@ func (server *Server) handleRoomRoutes(writer http.ResponseWriter, request *http
 		server.handleSubmitGuess(writer, request, code, parts[2])
 	case request.Method == http.MethodPost && len(parts) == 4 && parts[1] == "rounds" && parts[3] == "reveal":
 		server.handleRevealRound(writer, request, code, parts[2])
+	case request.Method == http.MethodPost && len(parts) == 4 && parts[1] == "rounds" && parts[3] == "pass":
+		server.handlePassTurn(writer, request, code, parts[2])
 	default:
 		writeError(writer, http.StatusNotFound, "room route not found")
 	}
+}
+
+func (server *Server) handlePassTurn(writer http.ResponseWriter, request *http.Request, code, roundID string) {
+	var payload passTurnRequest
+	if err := decodeJSONBody(writer, request, &payload); err != nil {
+		writeError(writer, http.StatusBadRequest, "invalid JSON payload")
+		return
+	}
+	room, err := server.roomService.PassTurn(request.Context(), game.PassTurnInput{Code: code, RoundID: roundID, PlayerToken: payload.PlayerToken})
+	if err != nil {
+		server.writeDomainError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, roomResponse{Room: projectRoom(room)})
 }
 
 func (server *Server) handleCreateTeam(writer http.ResponseWriter, request *http.Request, code string) {
@@ -814,7 +837,7 @@ func (server *Server) writeDomainError(writer http.ResponseWriter, err error) {
 		writeError(writer, http.StatusNotFound, err.Error())
 	case errors.Is(err, game.ErrGameAlreadyStarted), errors.Is(err, game.ErrGameAlreadyCompleted), errors.Is(err, game.ErrRoomJoinClosed):
 		writeError(writer, http.StatusConflict, err.Error())
-	case errors.Is(err, game.ErrRoundNotAcceptingGuesses), errors.Is(err, game.ErrAnswerPhaseExpired), errors.Is(err, game.ErrRoundAlreadyRevealed), errors.Is(err, game.ErrRoundNotRevealed), errors.Is(err, game.ErrGuessAlreadySubmitted), errors.Is(err, game.ErrReplayNotReady):
+	case errors.Is(err, game.ErrRoundNotAcceptingGuesses), errors.Is(err, game.ErrAnswerPhaseExpired), errors.Is(err, game.ErrRoundAlreadyRevealed), errors.Is(err, game.ErrRoundNotRevealed), errors.Is(err, game.ErrGuessAlreadySubmitted), errors.Is(err, game.ErrReplayNotReady), errors.Is(err, game.ErrNotPlayersTurn):
 		writeError(writer, http.StatusConflict, err.Error())
 	case errors.Is(err, game.ErrContentUnavailable):
 		writeError(writer, http.StatusServiceUnavailable, game.ErrContentUnavailable.Error())
@@ -960,6 +983,9 @@ func projectRoom(room models.Room) publicRoom {
 		AnswerPhaseEndsAt:    round.AnswerPhaseEndsAt,
 		RevealStartedAt:      round.RevealStartedAt,
 		CreatedAt:            round.CreatedAt,
+		TurnOrder:            append([]string(nil), round.TurnOrder...),
+		CurrentTurnIndex:     round.CurrentTurnIndex,
+		TurnEndsAt:           round.TurnEndsAt,
 	}
 	if round.Status == models.RoundStatusRevealed {
 		projectedGame.CurrentRound.Board = round.Board
@@ -975,6 +1001,15 @@ func projectRoom(room models.Room) publicRoom {
 		projectedGame.Scoreboard[index].Score -= currentRoundScores[projectedGame.Scoreboard[index].PlayerID]
 	}
 	projectedGame.TeamScoreboard = projectTeamScores(room.Teams, room.Players, projectedGame.Scoreboard)
+	if gameState.Mode == models.GameModeSequential {
+		projectedGame.CurrentRound.Guesses = make([]models.Guess, 0, len(round.Guesses))
+		for _, guess := range round.Guesses {
+			projectedGame.CurrentRound.Guesses = append(projectedGame.CurrentRound.Guesses, models.Guess{
+				ID: guess.ID, PlayerID: guess.PlayerID, PlayerDisplayName: guess.PlayerDisplayName,
+				RawAnswer: guess.RawAnswer, CreatedAt: guess.CreatedAt,
+			})
+		}
+	}
 
 	return projected
 }

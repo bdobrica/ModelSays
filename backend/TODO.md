@@ -84,6 +84,7 @@ Status note:
 
 - [x] Define game settings.
 - [x] Implement simultaneous mode.
+- [x] Implement sequential mode with persisted join-order turns, pass/timeout advancement, and separate projections.
 - [x] Implement game creation from a room.
 - [x] Implement round creation.
 - [x] Implement current round state machine.

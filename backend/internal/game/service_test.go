@@ -395,7 +395,7 @@ func TestCreateRoomValidatesMVPSettings(t *testing.T) {
 		name     string
 		settings models.RoomSettings
 	}{
-		{name: "unsupported mode", settings: models.RoomSettings{Mode: "sequential"}},
+		{name: "unsupported mode", settings: models.RoomSettings{Mode: "cooperative"}},
 		{name: "too many rounds", settings: models.RoomSettings{TotalRounds: 6}},
 		{name: "timer too short", settings: models.RoomSettings{AnswerTimerSeconds: 14}},
 		{name: "timer too long", settings: models.RoomSettings{AnswerTimerSeconds: 121}},
@@ -1701,5 +1701,54 @@ func TestTeamModeRequiresAssignmentsAndDerivesScores(t *testing.T) {
 	}
 	if _, err := service.AssignTeam(ctx, AssignTeamInput{Code: room.Code, PlayerToken: host.Token, PlayerID: guest.ID, TeamID: room.Teams[0].ID}); !errors.Is(err, ErrGameAlreadyStarted) {
 		t.Fatalf("post-start assignment error = %v", err)
+	}
+}
+
+func TestSequentialModeAdvancesTurnsAndRevealsAfterFinalAction(t *testing.T) {
+	ctx := context.Background()
+	service := NewInMemoryRoomService()
+	room, host, err := service.CreateRoom(ctx, CreateRoomInput{
+		RoomName: "Turn night", HostDisplayName: "Host",
+		Settings: models.RoomSettings{Mode: models.GameModeSequential, TotalRounds: 2, AnswerTimerSeconds: 15},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	room, guest, err := service.JoinRoom(ctx, JoinRoomInput{Code: room.Code, DisplayName: "Guest"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	room, err = service.StartGame(ctx, StartGameInput{Code: room.Code, PlayerToken: host.Token})
+	if err != nil {
+		t.Fatal(err)
+	}
+	round := room.CurrentGame.CurrentRound
+	if round.CurrentTurnIndex == nil || *round.CurrentTurnIndex != 0 || len(round.TurnOrder) != 2 || round.TurnOrder[0] != host.ID {
+		t.Fatalf("unexpected initial turn state: %#v", round)
+	}
+	if _, err := service.SubmitGuess(ctx, SubmitGuessInput{Code: room.Code, RoundID: round.ID, PlayerToken: guest.Token, Answer: "early"}); !errors.Is(err, ErrNotPlayersTurn) {
+		t.Fatalf("non-current submission error = %v", err)
+	}
+	answer := round.Board.Answers[0].CanonicalAnswer
+	room, err = service.SubmitGuess(ctx, SubmitGuessInput{Code: room.Code, RoundID: round.ID, PlayerToken: host.Token, Answer: answer})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if room.CurrentGame.CurrentRound.Status != models.RoundStatusAnswering || *room.CurrentGame.CurrentRound.CurrentTurnIndex != 1 {
+		t.Fatalf("first submission did not advance: %#v", room.CurrentGame.CurrentRound)
+	}
+	room, err = service.PassTurn(ctx, PassTurnInput{Code: room.Code, RoundID: round.ID, PlayerToken: guest.Token})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if room.CurrentGame.CurrentRound.Status != models.RoundStatusRevealed || room.CurrentGame.CurrentRound.CurrentTurnIndex != nil {
+		t.Fatalf("final pass did not reveal: %#v", room.CurrentGame.CurrentRound)
+	}
+	room, err = service.NextRound(ctx, NextRoundInput{Code: room.Code, PlayerToken: host.Token})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if room.CurrentGame.CurrentRound.RoundIndex != 2 || *room.CurrentGame.CurrentRound.CurrentTurnIndex != 0 || room.CurrentGame.CurrentRound.TurnOrder[0] != host.ID {
+		t.Fatalf("next round did not restart turn order: %#v", room.CurrentGame.CurrentRound)
 	}
 }

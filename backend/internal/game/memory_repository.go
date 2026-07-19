@@ -238,10 +238,61 @@ func (repository *InMemoryRoomRepository) SubmitGuess(_ context.Context, code st
 	guess := ResolveGuess(submission, round.Board.Answers, round.Guesses)
 	round.Guesses = append(round.Guesses, guess)
 	applyGuessToScoreboard(room.CurrentGame, guess)
+	if room.CurrentGame.Mode == models.GameModeSequential {
+		advanceSequentialRound(round, submission.CreatedAt, room.Settings.AnswerTimerSeconds)
+		appendSequentialEvent(repository, room, submission.CreatedAt)
+	}
 	room.CurrentGame.TeamScoreboard = deriveTeamScoreboard(room.Teams, room.Players, room.CurrentGame.Scoreboard)
 	room.UpdatedAt = time.Now().UTC()
 
 	return cloneRoom(*room), nil
+}
+
+func (repository *InMemoryRoomRepository) PassTurn(_ context.Context, code, roundID, playerID string, occurredAt time.Time) (models.Room, error) {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	room, ok := repository.rooms[code]
+	if !ok {
+		return models.Room{}, ErrRoomNotFound
+	}
+	if room.CurrentGame == nil || room.CurrentGame.Mode != models.GameModeSequential || room.CurrentGame.CurrentRound == nil || room.CurrentGame.CurrentRound.ID != roundID {
+		return models.Room{}, ErrRoundNotFound
+	}
+	round := room.CurrentGame.CurrentRound
+	if round.Status != models.RoundStatusAnswering || round.CurrentTurnIndex == nil || *round.CurrentTurnIndex >= len(round.TurnOrder) || round.TurnOrder[*round.CurrentTurnIndex] != playerID {
+		return models.Room{}, ErrNotPlayersTurn
+	}
+	advanceSequentialRound(round, occurredAt, room.Settings.AnswerTimerSeconds)
+	appendSequentialEvent(repository, room, occurredAt)
+	room.UpdatedAt = occurredAt
+	return cloneRoom(*room), nil
+}
+
+func appendSequentialEvent(repository *InMemoryRoomRepository, room *models.Room, occurredAt time.Time) {
+	room.Revision++
+	eventType := models.RoomEventSubmissionProgress
+	if room.CurrentGame.CurrentRound.Status == models.RoundStatusRevealed {
+		eventType = models.RoomEventRoundRevealed
+	}
+	repository.events[room.Code] = append(repository.events[room.Code], models.RoomEvent{
+		Version: models.RoomEventVersion, ID: newID(), RoomCode: room.Code,
+		Type: eventType, RoomRevision: room.Revision, OccurredAt: occurredAt,
+	})
+}
+
+func advanceSequentialRound(round *models.Round, occurredAt time.Time, timerSeconds int) {
+	next := *round.CurrentTurnIndex + 1
+	if next >= len(round.TurnOrder) {
+		round.Status = models.RoundStatusRevealed
+		round.RevealStartedAt = &occurredAt
+		round.CurrentTurnIndex = nil
+		round.TurnEndsAt = nil
+		return
+	}
+	round.CurrentTurnIndex = &next
+	deadline := occurredAt.Add(time.Duration(timerSeconds) * time.Second)
+	round.TurnEndsAt = &deadline
+	round.AnswerPhaseEndsAt = deadline
 }
 
 func (repository *InMemoryRoomRepository) RevealRound(_ context.Context, code string, roundID string, transition models.RoundTransition) (models.Room, error) {
