@@ -350,31 +350,11 @@ Host-only endpoints:
 - `GET /api/rooms/{code}/provider-audits` (host header)
 - `POST /api/rooms/{code}/end`
 
-### WebSocket Events
+### Server-Sent room events
 
-Suggested server-to-client events:
+`GET /api/rooms/{code}/events` accepts the room-scoped credential only in `X-Player-Token` and publishes ordered, versioned `room_invalidation` envelopes. Events carry a room revision and public type but no game content; clients must refetch the authoritative room projection. `Last-Event-ID` resumes after a revision, while duplicate/gap handling remains mandatory. The durable PostgreSQL log retains 1,000 events per room and survives backend reconstruction.
 
-- `room.updated`
-- `player.joined`
-- `player.left`
-- `game.started`
-- `round.started`
-- `timer.updated`
-- `guess.submitted`
-- `round.revealed`
-- `score.updated`
-- `game.ended`
-- `error`
-
-Suggested client-to-server events:
-
-- `join_room`
-- `set_ready`
-- `start_game`
-- `submit_guess`
-- `request_reveal`
-- `next_round`
-- `override_match`
+SSE was selected over WebSockets because mutations remain REST requests and transport is one-way. Heartbeats, origin validation, connection/write limits, and graceful shutdown are enforced. See [`../docs/events.md`](../docs/events.md) for the full contract, event types, configuration, secrecy, and fallback behavior.
 
 ## Configuration
 
@@ -396,6 +376,10 @@ MODEL_MAX_CALLS_PER_GAME=20
 MODEL_MAX_COST_USD_PER_GAME=0.10
 MODEL_CAPTURE_RAW_RESPONSES=false
 MODEL_RAW_RESPONSE_MAX_BYTES=4096
+EVENT_POLL_INTERVAL_MS=250
+EVENT_HEARTBEAT_SECONDS=15
+EVENT_MAX_CONNECTIONS=100
+EVENT_WRITE_TIMEOUT_SECONDS=5
 ```
 
 ## Local Development

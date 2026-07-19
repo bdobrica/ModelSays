@@ -14,13 +14,55 @@ type InMemoryRoomRepository struct {
 	rooms       map[string]*models.Room
 	audits      map[string][]models.ProviderCallAudit
 	suggestions map[string][]models.JudgeSuggestion
+	events      map[string][]models.RoomEvent
 }
 
 func NewInMemoryRoomRepository() *InMemoryRoomRepository {
 	return &InMemoryRoomRepository{
 		rooms: make(map[string]*models.Room), audits: make(map[string][]models.ProviderCallAudit),
 		suggestions: make(map[string][]models.JudgeSuggestion),
+		events:      make(map[string][]models.RoomEvent),
 	}
+}
+
+func (repository *InMemoryRoomRepository) AppendRoomEvent(_ context.Context, code string, eventType models.RoomEventType, occurredAt time.Time) (models.RoomEvent, error) {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	room, ok := repository.rooms[code]
+	if !ok {
+		return models.RoomEvent{}, ErrRoomNotFound
+	}
+	room.Revision++
+	event := models.RoomEvent{
+		Version: models.RoomEventVersion, ID: newID(), RoomCode: code, Type: eventType,
+		RoomRevision: room.Revision, OccurredAt: occurredAt,
+	}
+	repository.events[code] = append(repository.events[code], event)
+	if len(repository.events[code]) > 1000 {
+		repository.events[code] = append([]models.RoomEvent(nil), repository.events[code][len(repository.events[code])-1000:]...)
+	}
+	return event, nil
+}
+
+func (repository *InMemoryRoomRepository) ListRoomEvents(_ context.Context, code string, afterRevision int64, limit int) ([]models.RoomEvent, error) {
+	repository.mu.RLock()
+	defer repository.mu.RUnlock()
+	if _, ok := repository.rooms[code]; !ok {
+		return nil, ErrRoomNotFound
+	}
+	if limit < 1 || limit > 100 {
+		limit = 100
+	}
+	result := make([]models.RoomEvent, 0, limit)
+	for _, event := range repository.events[code] {
+		if event.RoomRevision > afterRevision {
+			result = append(result, event)
+			if len(result) == limit {
+				break
+			}
+		}
+	}
+	return result, nil
 }
 
 func (repository *InMemoryRoomRepository) CreateRoom(_ context.Context, room models.Room) error {

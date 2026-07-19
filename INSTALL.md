@@ -79,6 +79,8 @@ Then restart `make install` or `make start`. Model output is validated, retried 
 
 Raw provider response capture is disabled by default. See [`docs/provider-operations.md`](docs/provider-operations.md) before changing provider limits or retention settings.
 
+The backend also exposes authenticated SSE room invalidations. The shipped browser still polls until its event client is implemented, so streaming failure does not interrupt play. See [`docs/events.md`](docs/events.md) for the event contract and connection-limit configuration.
+
 ## Verification
 
 Run the same formatting, vetting, test, and client-build gate used by CI:

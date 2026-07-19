@@ -117,6 +117,44 @@ func TestPostgresAtomicAnswerClaimsAndReload(t *testing.T) {
 	}
 }
 
+func TestPostgresRoomEventsSurviveRepositoryReconstruction(t *testing.T) {
+	pool := integrationPool(t)
+	service := game.NewRoomService(db.NewPostgresRoomRepository(pool), nil)
+	ctx := context.Background()
+	room, _, err := service.CreateRoom(ctx, game.CreateRoomInput{RoomName: "Durable events", HostDisplayName: "Host"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := service.JoinRoom(ctx, game.JoinRoomInput{Code: room.Code, DisplayName: "Player"}); err != nil {
+		t.Fatal(err)
+	}
+	reconstructed := game.NewRoomService(db.NewPostgresRoomRepository(pool), nil)
+	events, err := reconstructed.ListRoomEvents(ctx, room.Code, 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].Type != models.RoomEventPlayerJoined || events[0].RoomRevision != 1 {
+		t.Fatalf("reconstructed events = %+v", events)
+	}
+	refetched, err := reconstructed.GetRoom(ctx, room.Code)
+	if err != nil || refetched.Revision != events[0].RoomRevision {
+		t.Fatalf("refetched revision = %d, err=%v", refetched.Revision, err)
+	}
+}
+
+func TestRoomEventsMigrationDownAndUp(t *testing.T) {
+	pool := integrationPool(t)
+	executeMigrationSection(t, pool, migrationPath(t, "000008_room_events.sql"), false)
+	executeMigrationSection(t, pool, migrationPath(t, "000008_room_events.sql"), true)
+	var exists bool
+	if err := pool.QueryRow(context.Background(), `SELECT to_regclass('room_events') IS NOT NULL`).Scan(&exists); err != nil {
+		t.Fatal(err)
+	}
+	if !exists {
+		t.Fatal("room_events table missing after migration up")
+	}
+}
+
 func TestPostgresJudgeSuggestionReloadAndAuditableAcceptance(t *testing.T) {
 	pool := integrationPool(t)
 	repository := db.NewPostgresRoomRepository(pool)

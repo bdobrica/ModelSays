@@ -10,13 +10,17 @@ import (
 )
 
 type Config struct {
-	AppEnv             string
-	DatabaseURL        string
-	OpenAIAPIKey       string
-	HTTPAddr           string
-	CORSAllowedOrigins []string
-	DefaultModels      DefaultModels
-	ModelPolicy        llm.Policy
+	AppEnv              string
+	DatabaseURL         string
+	OpenAIAPIKey        string
+	HTTPAddr            string
+	CORSAllowedOrigins  []string
+	DefaultModels       DefaultModels
+	ModelPolicy         llm.Policy
+	EventPollInterval   time.Duration
+	EventHeartbeat      time.Duration
+	EventMaxConnections int
+	EventWriteTimeout   time.Duration
 }
 
 type DefaultModels struct {
@@ -28,11 +32,15 @@ type DefaultModels struct {
 func Load() Config {
 	defaultPolicy := llm.DefaultPolicy()
 	return Config{
-		AppEnv:             getEnv("APP_ENV", "development"),
-		DatabaseURL:        getEnv("DATABASE_URL", ""),
-		OpenAIAPIKey:       getEnv("OPENAI_API_KEY", ""),
-		HTTPAddr:           getEnv("HTTP_ADDR", ":8080"),
-		CORSAllowedOrigins: splitCSV(getEnv("CORS_ALLOWED_ORIGINS", "http://localhost:5173")),
+		AppEnv:              getEnv("APP_ENV", "development"),
+		DatabaseURL:         getEnv("DATABASE_URL", ""),
+		OpenAIAPIKey:        getEnv("OPENAI_API_KEY", ""),
+		HTTPAddr:            getEnv("HTTP_ADDR", ":8080"),
+		CORSAllowedOrigins:  splitCSV(getEnv("CORS_ALLOWED_ORIGINS", "http://localhost:5173")),
+		EventPollInterval:   time.Duration(getEnvInt("EVENT_POLL_INTERVAL_MS", 250)) * time.Millisecond,
+		EventHeartbeat:      time.Duration(getEnvInt("EVENT_HEARTBEAT_SECONDS", 15)) * time.Second,
+		EventMaxConnections: getEnvInt("EVENT_MAX_CONNECTIONS", 100),
+		EventWriteTimeout:   time.Duration(getEnvInt("EVENT_WRITE_TIMEOUT_SECONDS", 5)) * time.Second,
 		DefaultModels: DefaultModels{
 			Prediction: getEnv("DEFAULT_PREDICTION_MODEL", "gpt-4.1-mini"),
 			Question:   getEnv("DEFAULT_QUESTION_MODEL", "gpt-4.1-mini"),

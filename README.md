@@ -188,7 +188,7 @@ The supported MVP room contract is intentionally narrow: simultaneous mode, 1–
 * Go
 * PostgreSQL
 * OpenAI API
-* WebSocket or Server-Sent Events
+* Server-Sent Events for authenticated room invalidations
 * REST API for setup and host actions
 
 ### Client
@@ -248,7 +248,7 @@ The controlled MVP is playable with one host and at least two players:
 - a five-round curated bank that works without an OpenAI key, plus validated OpenAI generation when configured;
 - deterministic canonical/alias matching with first committed claim wins;
 - server-enforced deadlines, hidden answering-state outcomes, host-triggered reveal, and post-reveal overrides;
-- three-second collision-safe polling and server-validated same-browser session recovery;
+- authenticated ordered SSE invalidations, plus three-second collision-safe polling and server-validated same-browser session recovery;
 - responsive host/player layouts, including the single-column layout below 900 px;
 - automated backend, client, and PostgreSQL lifecycle gates through `make verify`.
 
@@ -256,7 +256,7 @@ The repeatable MVP playtest gate uses a host and two player identities across tw
 
 ## Known Limitations
 
-- Room changes arrive by three-second polling rather than WebSockets or SSE.
+- The backend publishes durable SSE room invalidations, but the current browser continues to use three-second polling until its live-event client is added.
 - Automatic scoring remains deterministic. Optional semantic suggestions still require an explicit post-reveal host decision.
 - Expiry closes answering, but reveal and round advancement remain manual host actions.
 - Reconnect is limited to the same browser’s stored room token; there is no presence heartbeat or cross-device transfer.
@@ -337,7 +337,7 @@ Semantic model-based matching is not active in the MVP. It is a post-MVP option 
 
 ## Development Status
 
-This project has a working simultaneous-game browser flow with deadline countdowns, safe non-overlapping polling, same-browser session recovery, host controls, and ranked final scores. WebSockets, cross-device session transfer, presence/heartbeat, and automatic deadline reveal remain outside the polling MVP.
+This project has a working simultaneous-game browser flow with deadline countdowns, safe non-overlapping polling, same-browser session recovery, host controls, and ranked final scores. The backend now provides authenticated ordered SSE invalidations; browser consumption, cross-device session transfer, presence, and automatic deadline reveal remain follow-up work.
 
 The controlled MVP implementation is complete. The next work should be chosen from measured playtest feedback; likely candidates are semantic match suggestions, pushed updates, automatic round progression, and public-launch hardening.
 

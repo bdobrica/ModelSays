@@ -163,6 +163,8 @@ type RoomRepository interface {
 	ListProviderAudits(ctx context.Context, code string) ([]models.ProviderCallAudit, error)
 	StoreJudgeEvaluation(ctx context.Context, suggestion models.JudgeSuggestion, audits []models.ProviderCallAudit) error
 	ListJudgeSuggestions(ctx context.Context, code string, roundID string) ([]models.JudgeSuggestion, error)
+	AppendRoomEvent(ctx context.Context, code string, eventType models.RoomEventType, occurredAt time.Time) (models.RoomEvent, error)
+	ListRoomEvents(ctx context.Context, code string, afterRevision int64, limit int) ([]models.RoomEvent, error)
 }
 
 func NewRoomService(repository RoomRepository, modelClient llm.ModelClient) *RoomService {
@@ -284,6 +286,40 @@ func (service *RoomService) GetRoom(ctx context.Context, code string) (models.Ro
 	return service.repository.GetRoom(ctx, code)
 }
 
+func (service *RoomService) AuthenticateEventSubscription(ctx context.Context, code, playerToken string) error {
+	normalizedCode, err := normalizeRoomCode(code)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(playerToken) == "" {
+		return ErrPlayerNotFound
+	}
+	room, err := service.repository.GetRoom(ctx, normalizedCode)
+	if err != nil {
+		return err
+	}
+	if _, ok := findPlayerByToken(room.Players, strings.TrimSpace(playerToken)); ok {
+		return nil
+	}
+	return ErrPlayerNotFound
+}
+
+func (service *RoomService) ListRoomEvents(ctx context.Context, code string, afterRevision int64, limit int) ([]models.RoomEvent, error) {
+	normalizedCode, err := normalizeRoomCode(code)
+	if err != nil {
+		return nil, err
+	}
+	return service.repository.ListRoomEvents(ctx, normalizedCode, afterRevision, limit)
+}
+
+func (service *RoomService) publishRoomEvent(ctx context.Context, room models.Room, eventType models.RoomEventType) models.Room {
+	event, err := service.repository.AppendRoomEvent(ctx, room.Code, eventType, service.clock.Now())
+	if err == nil {
+		room.Revision = event.RoomRevision
+	}
+	return room
+}
+
 func (service *RoomService) GetProviderAudits(ctx context.Context, code string, playerToken string) ([]models.ProviderCallAudit, error) {
 	code, err := normalizeRoomCode(code)
 	if err != nil {
@@ -344,6 +380,7 @@ func (service *RoomService) JoinRoom(ctx context.Context, input JoinRoomInput) (
 		return models.Room{}, models.Player{}, err
 	}
 
+	room = service.publishRoomEvent(ctx, room, models.RoomEventPlayerJoined)
 	return room, player, nil
 }
 
@@ -398,7 +435,11 @@ func (service *RoomService) StartGame(ctx context.Context, input StartGameInput)
 		},
 	}
 
-	return service.repository.StartGame(ctx, code, gameState)
+	updated, err := service.repository.StartGame(ctx, code, gameState)
+	if err == nil {
+		updated = service.publishRoomEvent(ctx, updated, models.RoomEventGameStarted)
+	}
+	return updated, err
 }
 
 func (service *RoomService) SubmitGuess(ctx context.Context, input SubmitGuessInput) (models.Room, error) {
@@ -453,6 +494,7 @@ func (service *RoomService) SubmitGuess(ctx context.Context, input SubmitGuessIn
 	if err != nil {
 		return models.Room{}, err
 	}
+	updated = service.publishRoomEvent(ctx, updated, models.RoomEventSubmissionProgress)
 	submittedRound := updated.CurrentGame.CurrentRound
 	var submitted models.Guess
 	for _, guess := range submittedRound.Guesses {
@@ -495,7 +537,11 @@ func (service *RoomService) RevealRound(ctx context.Context, input RevealRoundIn
 		return models.Room{}, ErrRoundNotAcceptingGuesses
 	}
 
-	return service.repository.RevealRound(ctx, code, round.ID, service.clock.Now())
+	updated, err := service.repository.RevealRound(ctx, code, round.ID, service.clock.Now())
+	if err == nil {
+		updated = service.publishRoomEvent(ctx, updated, models.RoomEventRoundRevealed)
+	}
+	return updated, err
 }
 
 func (service *RoomService) NextRound(ctx context.Context, input NextRoundInput) (models.Room, error) {
@@ -525,7 +571,11 @@ func (service *RoomService) NextRound(ctx context.Context, input NextRoundInput)
 		completedGame := cloneGame(room.CurrentGame)
 		completedGame.Status = models.GameStatusCompleted
 		completedGame.EndedAt = &now
-		return service.repository.AdvanceGame(ctx, code, *completedGame, nil)
+		updated, err := service.repository.AdvanceGame(ctx, code, *completedGame, nil)
+		if err == nil {
+			updated = service.publishRoomEvent(ctx, updated, models.RoomEventGameCompleted)
+		}
+		return updated, err
 	}
 
 	nextRoundIndex := room.CurrentGame.CurrentRoundIndex + 1
@@ -558,7 +608,11 @@ func (service *RoomService) NextRound(ctx context.Context, input NextRoundInput)
 	nextGame.CurrentRound = nextRound
 	resetSubmissionFlags(nextGame.Scoreboard)
 
-	return service.repository.AdvanceGame(ctx, code, *nextGame, nextRound)
+	updated, err := service.repository.AdvanceGame(ctx, code, *nextGame, nextRound)
+	if err == nil {
+		updated = service.publishRoomEvent(ctx, updated, models.RoomEventRoundStarted)
+	}
+	return updated, err
 }
 
 func (service *RoomService) OverrideMatch(ctx context.Context, input OverrideMatchInput) (models.Room, error) {
@@ -623,7 +677,7 @@ func (service *RoomService) OverrideMatch(ctx context.Context, input OverrideMat
 		}
 	}
 
-	return service.repository.OverrideGuess(ctx, code, round.ID, GuessOverride{
+	updated, err := service.repository.OverrideGuess(ctx, code, round.ID, GuessOverride{
 		GuessID:                   guessID,
 		MatchedPredictionAnswerID: input.MatchedPredictionAnswerID,
 		ScoreEventID:              newID(),
@@ -631,6 +685,10 @@ func (service *RoomService) OverrideMatch(ctx context.Context, input OverrideMat
 		JudgeSuggestionID:         suggestionID,
 		ReviewDecision:            decision,
 	})
+	if err == nil {
+		updated = service.publishRoomEvent(ctx, updated, models.RoomEventScoreChanged)
+	}
+	return updated, err
 }
 
 func sameOptionalID(left *string, right *string) bool {

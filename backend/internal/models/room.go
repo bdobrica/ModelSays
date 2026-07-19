@@ -41,4 +41,5 @@ type Room struct {
 	CurrentGame *Game        `json:"currentGame,omitempty"`
 	CreatedAt   time.Time    `json:"createdAt"`
 	UpdatedAt   time.Time    `json:"updatedAt"`
+	Revision    int64        `json:"revision"`
 }

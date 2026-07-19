@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -42,6 +43,68 @@ func OpenPostgresPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, e
 
 func NewPostgresRoomRepository(pool *pgxpool.Pool) *PostgresRoomRepository {
 	return &PostgresRoomRepository{pool: pool}
+}
+
+func (repository *PostgresRoomRepository) AppendRoomEvent(ctx context.Context, code string, eventType models.RoomEventType, occurredAt time.Time) (models.RoomEvent, error) {
+	tx, err := repository.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return models.RoomEvent{}, fmt.Errorf("begin append room event tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	var revision int64
+	if err := tx.QueryRow(ctx, `UPDATE rooms SET revision = revision + 1 WHERE code = $1 RETURNING revision`, code).Scan(&revision); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return models.RoomEvent{}, game.ErrRoomNotFound
+		}
+		return models.RoomEvent{}, fmt.Errorf("increment room revision: %w", err)
+	}
+	event := models.RoomEvent{
+		Version: models.RoomEventVersion, ID: newEventID(), RoomCode: code, Type: eventType,
+		RoomRevision: revision, OccurredAt: occurredAt,
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO room_events (id, room_code, event_type, room_revision, occurred_at) VALUES ($1,$2,$3,$4,$5)`,
+		event.ID, event.RoomCode, event.Type, event.RoomRevision, event.OccurredAt); err != nil {
+		return models.RoomEvent{}, fmt.Errorf("insert room event: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM room_events WHERE room_code = $1 AND room_revision <= $2`, code, revision-1000); err != nil {
+		return models.RoomEvent{}, fmt.Errorf("prune room events: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return models.RoomEvent{}, fmt.Errorf("commit room event: %w", err)
+	}
+	return event, nil
+}
+
+func (repository *PostgresRoomRepository) ListRoomEvents(ctx context.Context, code string, afterRevision int64, limit int) ([]models.RoomEvent, error) {
+	if limit < 1 || limit > 100 {
+		limit = 100
+	}
+	rows, err := repository.pool.Query(ctx, `
+		SELECT id, room_code, event_type, room_revision, occurred_at
+		FROM room_events WHERE room_code = $1 AND room_revision > $2
+		ORDER BY room_revision LIMIT $3
+	`, code, afterRevision, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list room events: %w", err)
+	}
+	defer rows.Close()
+	events := make([]models.RoomEvent, 0)
+	for rows.Next() {
+		event := models.RoomEvent{Version: models.RoomEventVersion}
+		if err := rows.Scan(&event.ID, &event.RoomCode, &event.Type, &event.RoomRevision, &event.OccurredAt); err != nil {
+			return nil, fmt.Errorf("scan room event: %w", err)
+		}
+		events = append(events, event)
+	}
+	return events, rows.Err()
+}
+
+func newEventID() string {
+	var random [16]byte
+	if _, err := rand.Read(random[:]); err != nil {
+		return fmt.Sprintf("evt_%d", time.Now().UnixNano())
+	}
+	return fmt.Sprintf("evt_%x", random)
 }
 
 func (repository *PostgresRoomRepository) ListProviderAudits(ctx context.Context, code string) ([]models.ProviderCallAudit, error) {
@@ -643,10 +706,10 @@ func (repository *PostgresRoomRepository) loadRoom(ctx context.Context, querier 
 	var settingsJSON []byte
 
 	err := querier.QueryRow(ctx, `
-		SELECT code, name, status, settings_jsonb, created_at, updated_at
+		SELECT code, name, status, settings_jsonb, created_at, updated_at, revision
 		FROM rooms
 		WHERE code = $1
-	`, code).Scan(&room.Code, &room.Name, &room.Status, &settingsJSON, &room.CreatedAt, &room.UpdatedAt)
+	`, code).Scan(&room.Code, &room.Name, &room.Status, &settingsJSON, &room.CreatedAt, &room.UpdatedAt, &room.Revision)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return models.Room{}, game.ErrRoomNotFound

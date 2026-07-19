@@ -3,10 +3,13 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/bogdandobrica/modelsays/backend/internal/config"
@@ -17,10 +20,11 @@ import (
 const maxRequestBodyBytes = 16 * 1024
 
 type Server struct {
-	config      config.Config
-	logger      *slog.Logger
-	roomService *game.RoomService
-	mux         *http.ServeMux
+	config                 config.Config
+	logger                 *slog.Logger
+	roomService            *game.RoomService
+	mux                    *http.ServeMux
+	activeEventConnections atomic.Int64
 }
 
 type createRoomRequest struct {
@@ -76,6 +80,7 @@ type publicRoom struct {
 	CurrentGame *publicGame         `json:"currentGame,omitempty"`
 	CreatedAt   time.Time           `json:"createdAt"`
 	UpdatedAt   time.Time           `json:"updatedAt"`
+	Revision    int64               `json:"revision"`
 }
 
 type publicPlayer struct {
@@ -117,6 +122,18 @@ type errorResponse struct {
 }
 
 func NewServer(cfg config.Config, logger *slog.Logger, roomService *game.RoomService) *Server {
+	if cfg.EventPollInterval <= 0 {
+		cfg.EventPollInterval = 250 * time.Millisecond
+	}
+	if cfg.EventHeartbeat <= 0 {
+		cfg.EventHeartbeat = 15 * time.Second
+	}
+	if cfg.EventMaxConnections <= 0 {
+		cfg.EventMaxConnections = 100
+	}
+	if cfg.EventWriteTimeout <= 0 {
+		cfg.EventWriteTimeout = 5 * time.Second
+	}
 	server := &Server{
 		config:      cfg,
 		logger:      logger,
@@ -177,6 +194,8 @@ func (server *Server) handleRoomRoutes(writer http.ResponseWriter, request *http
 		server.handleGetRoom(writer, request, code)
 	case request.Method == http.MethodGet && len(parts) == 2 && parts[1] == "state":
 		server.handleGetRoom(writer, request, code)
+	case request.Method == http.MethodGet && len(parts) == 2 && parts[1] == "events":
+		server.handleRoomEvents(writer, request, code)
 	case request.Method == http.MethodGet && len(parts) == 2 && parts[1] == "provider-audits":
 		server.handleProviderAudits(writer, request, code)
 	case request.Method == http.MethodGet && len(parts) == 4 && parts[1] == "rounds" && parts[3] == "judge-suggestions":
@@ -197,6 +216,87 @@ func (server *Server) handleRoomRoutes(writer http.ResponseWriter, request *http
 		server.handleRevealRound(writer, request, code, parts[2])
 	default:
 		writeError(writer, http.StatusNotFound, "room route not found")
+	}
+}
+
+func (server *Server) handleRoomEvents(writer http.ResponseWriter, request *http.Request, code string) {
+	if request.URL.Query().Has("token") || request.URL.Query().Has("playerToken") {
+		writeError(writer, http.StatusBadRequest, "event credentials must not be sent in the URL")
+		return
+	}
+	if !server.isAllowedOrigin(request.Header.Get("Origin")) {
+		writeError(writer, http.StatusForbidden, "origin is not allowed")
+		return
+	}
+	if server.activeEventConnections.Add(1) > int64(server.config.EventMaxConnections) {
+		server.activeEventConnections.Add(-1)
+		writer.Header().Set("Retry-After", "5")
+		writeError(writer, http.StatusServiceUnavailable, "event connection limit reached")
+		return
+	}
+	defer server.activeEventConnections.Add(-1)
+
+	if err := server.roomService.AuthenticateEventSubscription(request.Context(), code, request.Header.Get("X-Player-Token")); err != nil {
+		server.writeDomainError(writer, err)
+		return
+	}
+	flusher, ok := writer.(http.Flusher)
+	if !ok {
+		writeError(writer, http.StatusInternalServerError, "streaming is unavailable")
+		return
+	}
+	afterRevision := int64(0)
+	if value := strings.TrimSpace(request.Header.Get("Last-Event-ID")); value != "" {
+		parsed, err := strconv.ParseInt(value, 10, 64)
+		if err != nil || parsed < 0 {
+			writeError(writer, http.StatusBadRequest, "Last-Event-ID must be a non-negative room revision")
+			return
+		}
+		afterRevision = parsed
+	}
+
+	writer.Header().Set("Content-Type", "text/event-stream")
+	writer.Header().Set("Cache-Control", "no-cache, no-store")
+	writer.Header().Set("Connection", "keep-alive")
+	writer.Header().Set("X-Accel-Buffering", "no")
+	writer.WriteHeader(http.StatusOK)
+	_, _ = io.WriteString(writer, ": connected\n\n")
+	flusher.Flush()
+
+	pollTicker := time.NewTicker(server.config.EventPollInterval)
+	heartbeatTicker := time.NewTicker(server.config.EventHeartbeat)
+	defer pollTicker.Stop()
+	defer heartbeatTicker.Stop()
+	for {
+		select {
+		case <-request.Context().Done():
+			return
+		case <-heartbeatTicker.C:
+			_ = http.NewResponseController(writer).SetWriteDeadline(time.Now().Add(server.config.EventWriteTimeout))
+			if _, err := io.WriteString(writer, ": heartbeat\n\n"); err != nil {
+				return
+			}
+			flusher.Flush()
+		case <-pollTicker.C:
+			events, err := server.roomService.ListRoomEvents(request.Context(), code, afterRevision, 100)
+			if err != nil {
+				return
+			}
+			for _, event := range events {
+				payload, err := json.Marshal(event)
+				if err != nil {
+					return
+				}
+				_ = http.NewResponseController(writer).SetWriteDeadline(time.Now().Add(server.config.EventWriteTimeout))
+				if _, err := fmt.Fprintf(writer, "id: %d\nevent: room_invalidation\ndata: %s\n\n", event.RoomRevision, payload); err != nil {
+					return
+				}
+				afterRevision = event.RoomRevision
+			}
+			if len(events) > 0 {
+				flusher.Flush()
+			}
+		}
 	}
 }
 
@@ -434,6 +534,18 @@ func (server *Server) withCORS(next http.Handler) http.Handler {
 	})
 }
 
+func (server *Server) isAllowedOrigin(origin string) bool {
+	if origin == "" {
+		return true
+	}
+	for _, allowed := range server.config.CORSAllowedOrigins {
+		if origin == allowed {
+			return true
+		}
+	}
+	return false
+}
+
 func writeJSON(writer http.ResponseWriter, status int, payload any) {
 	writer.Header().Set("Content-Type", "application/json")
 	writer.WriteHeader(status)
@@ -453,6 +565,7 @@ func projectRoom(room models.Room) publicRoom {
 		Players:   make([]publicPlayer, 0, len(room.Players)),
 		CreatedAt: room.CreatedAt,
 		UpdatedAt: room.UpdatedAt,
+		Revision:  room.Revision,
 	}
 	for _, player := range room.Players {
 		projected.Players = append(projected.Players, publicPlayer{

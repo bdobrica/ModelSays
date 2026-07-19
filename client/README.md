@@ -6,7 +6,7 @@ This client is a React app for joining rooms, playing rounds, submitting answers
 
 The current creation form follows the backend MVP contract: simultaneous mode, 1–5 rounds, a 15–120 second timer, English locale, and the default `gpt-4.1-mini` prediction model. Room and display-name inputs are capped at the server's 48- and 24-character limits. Invite links stop accepting new players once the host starts the game.
 
-The playable client uses one request at a time with sequenced polling, refetches after every mutation, slows polling in a hidden tab, and stops it after completion. It validates a matching local token with the backend on refresh instead of trusting the stored host role. The answering view derives its countdown from the server deadline and disables local input at expiry; the server remains authoritative. Final scores are ranked with winners and ties identified. WebSockets, presence heartbeats, and cross-device session transfer are deferred.
+The playable client uses one request at a time with sequenced polling, refetches after every mutation, slows polling in a hidden tab, and stops it after completion. It validates a matching local token with the backend on refresh instead of trusting the stored host role. The answering view derives its countdown from the server deadline and disables local input at expiry; the server remains authoritative. Final scores are ranked with winners and ties identified. The backend offers authenticated SSE invalidations, but client consumption, presence, and cross-device session transfer are deferred.
 
 ## Supported MVP
 
@@ -18,7 +18,7 @@ The root `make baseline` command builds the production client and records its un
 
 ## Known Limitations
 
-Room updates use three-second polling, not WebSockets. Reveal and advancement require the host. Matching corrections happen only after reveal. Sessions do not transfer across devices, and presence is not tracked. Teams, sequential mode, animations, round deltas, play-again/share controls, and a dedicated browser end-to-end harness are deferred. Physical-device and external-player usability testing is still recommended before public release.
+Room updates still use three-second polling until the authenticated SSE client and fallback behavior are implemented. Reveal and advancement require the host. Matching corrections happen only after reveal. Sessions do not transfer across devices, and presence is not tracked. Teams, sequential mode, animations, round deltas, play-again/share controls, and a dedicated browser end-to-end harness are deferred. Physical-device and external-player usability testing is still recommended before public release.
 
 ## Core Experience
 
@@ -197,7 +197,7 @@ This can be part of the reveal screen in the MVP.
 - Vite
 - React Router
 - TanStack Query or simple fetch wrapper
-- WebSocket client
+- authenticated SSE invalidation client with polling fallback
 - CSS modules, Tailwind, or another simple styling choice
 - Optional state manager: Zustand
 
@@ -216,7 +216,7 @@ Do not compute authoritative scores on the client.
 
 ## API Integration
 
-The current MVP uses REST for actions and resilient polling for live game state. WebSockets are a post-MVP transport improvement.
+The current client uses REST for actions and resilient polling for live game state. The backend SSE invalidation contract is ready; client reconnect/refetch and polling fallback are the next transport step.
 
 ### REST
 
@@ -232,23 +232,19 @@ Expected calls:
 - advance round;
 - override match.
 
-### WebSocket
+### Server-Sent Events
 
 Expected incoming events:
 
-- room updated;
-- player joined;
-- player left;
-- game started;
-- round started;
-- timer updated;
-- guess submitted;
-- round revealed;
-- score updated;
-- game ended;
-- error.
+- `player_joined`;
+- `game_started`;
+- `submission_progress_changed`;
+- `round_revealed`;
+- `score_changed`;
+- `round_started`;
+- `game_completed`.
 
-The client should recover gracefully from WebSocket disconnects by refetching room state.
+Every type arrives in the versioned `room_invalidation` envelope and only signals a refetch; it carries no game content. The client should recover gracefully from SSE disconnects or revision gaps by refetching room state and retaining polling fallback. See [`docs/events.md`](../docs/events.md).
 
 ## Routing Sketch
 

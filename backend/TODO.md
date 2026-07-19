@@ -72,18 +72,13 @@ Status note:
 
 ## Phase 3 — Real-Time Gateway
 
-- [ ] Add WebSocket endpoint.
-- [ ] Add connection manager.
-- [ ] Track room subscriptions.
-- [ ] Broadcast room updates.
-- [ ] Broadcast player joined/left events.
-- [ ] Broadcast game started events.
-- [ ] Broadcast round started events.
-- [ ] Broadcast guess submitted events without revealing answer content.
-- [ ] Broadcast reveal events.
-- [ ] Broadcast score updates.
-- [ ] Add reconnect behavior.
-- [ ] Add ping/pong or heartbeat handling.
+- [x] Select SSE for one-way room invalidations and document the decision.
+- [x] Add an authenticated, origin-checked SSE endpoint.
+- [x] Persist ordered room revisions and a bounded replay log.
+- [x] Publish content-free join, start, submission-progress, reveal, score, round, and completion invalidations.
+- [x] Add heartbeat, process connection limits, slow-consumer write deadlines, and graceful shutdown.
+- [ ] Consume events in the browser with reconnect and polling fallback (FUTURE-02B).
+- [ ] Add player presence/heartbeat semantics separately from transport heartbeat.
 
 ## Phase 4 — Game Engine
 

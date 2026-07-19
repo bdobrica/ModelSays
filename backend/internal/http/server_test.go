@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -17,6 +18,220 @@ import (
 	"github.com/bogdandobrica/modelsays/backend/internal/game"
 	"github.com/bogdandobrica/modelsays/backend/internal/models"
 )
+
+type streamingResponseWriter struct {
+	header http.Header
+	status chan int
+	writes chan string
+}
+
+func newStreamingResponseWriter() *streamingResponseWriter {
+	return &streamingResponseWriter{header: make(http.Header), status: make(chan int, 1), writes: make(chan string, 32)}
+}
+
+func (writer *streamingResponseWriter) Header() http.Header { return writer.header }
+func (writer *streamingResponseWriter) WriteHeader(status int) {
+	select {
+	case writer.status <- status:
+	default:
+	}
+}
+func (writer *streamingResponseWriter) Write(payload []byte) (int, error) {
+	writer.writes <- string(append([]byte(nil), payload...))
+	return len(payload), nil
+}
+func (writer *streamingResponseWriter) Flush() {}
+
+type failingStreamingResponseWriter struct {
+	header http.Header
+	writes int
+}
+
+func (writer *failingStreamingResponseWriter) Header() http.Header { return writer.header }
+func (writer *failingStreamingResponseWriter) WriteHeader(int)     {}
+func (writer *failingStreamingResponseWriter) Flush()              {}
+func (writer *failingStreamingResponseWriter) Write(payload []byte) (int, error) {
+	writer.writes++
+	if writer.writes > 1 {
+		return 0, errors.New("slow consumer disconnected")
+	}
+	return len(payload), nil
+}
+
+func TestRoomEventsAuthenticateReplayAndRemainContentFree(t *testing.T) {
+	service := game.NewInMemoryRoomService()
+	room, host, err := service.CreateRoom(context.Background(), game.CreateRoomInput{RoomName: "Live room", HostDisplayName: "Host"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherRoom, otherHost, err := service.CreateRoom(context.Background(), game.CreateRoomInput{RoomName: "Other room", HostDisplayName: "Other Host"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Config{
+		CORSAllowedOrigins:  []string{"http://localhost:5173"},
+		EventPollInterval:   time.Millisecond,
+		EventHeartbeat:      10 * time.Millisecond,
+		EventMaxConnections: 4,
+	}
+	server := NewServer(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)), service)
+
+	for name, configure := range map[string]func(*http.Request){
+		"missing":    func(*http.Request) {},
+		"invalid":    func(r *http.Request) { r.Header.Set("X-Player-Token", "wrong") },
+		"wrong room": func(r *http.Request) { r.Header.Set("X-Player-Token", otherHost.Token) },
+		"query credential": func(r *http.Request) {
+			r.URL.RawQuery = "playerToken=" + host.Token
+			r.Header.Set("X-Player-Token", host.Token)
+		},
+		"wrong origin": func(r *http.Request) {
+			r.Header.Set("X-Player-Token", host.Token)
+			r.Header.Set("Origin", "https://evil.example")
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, "/api/rooms/"+room.Code+"/events", nil)
+			configure(request)
+			response := httptest.NewRecorder()
+			server.Handler().ServeHTTP(response, request)
+			if response.Code == http.StatusOK {
+				t.Fatalf("unauthorized stream returned 200")
+			}
+		})
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	request := httptest.NewRequest(http.MethodGet, "/api/rooms/"+room.Code+"/events", nil).WithContext(ctx)
+	request.Header.Set("X-Player-Token", host.Token)
+	stream := newStreamingResponseWriter()
+	done := make(chan struct{})
+	go func() {
+		server.Handler().ServeHTTP(stream, request)
+		close(done)
+	}()
+	if status := <-stream.status; status != http.StatusOK {
+		t.Fatalf("event status = %d", status)
+	}
+	if connected := <-stream.writes; connected != ": connected\n\n" {
+		t.Fatalf("initial stream payload = %q", connected)
+	}
+	joined, _, err := service.JoinRoom(context.Background(), game.JoinRoomInput{Code: room.Code, DisplayName: "Player"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if joined.Revision != 1 {
+		t.Fatalf("mutation response revision = %d, want 1", joined.Revision)
+	}
+	var data string
+	for data == "" {
+		select {
+		case chunk := <-stream.writes:
+			for _, line := range strings.Split(chunk, "\n") {
+				if strings.HasPrefix(line, "data: ") {
+					data = strings.TrimSpace(strings.TrimPrefix(line, "data: "))
+				}
+			}
+		case <-ctx.Done():
+			t.Fatal("timed out waiting for room event")
+		}
+	}
+	var event models.RoomEvent
+	if err := json.Unmarshal([]byte(data), &event); err != nil {
+		t.Fatal(err)
+	}
+	if event.Version != 1 || event.Type != models.RoomEventPlayerJoined || event.RoomRevision != 1 {
+		t.Fatalf("unexpected event: %+v", event)
+	}
+	for _, secret := range []string{host.Token, "Player", "board", "guess", "score"} {
+		if strings.Contains(data, secret) {
+			t.Fatalf("event leaked %q: %s", secret, data)
+		}
+	}
+
+	replayed, err := service.ListRoomEvents(context.Background(), room.Code, 0, 100)
+	if err != nil || len(replayed) != 1 || replayed[0].ID != event.ID {
+		t.Fatalf("durable replay = %+v, err=%v", replayed, err)
+	}
+	none, err := service.ListRoomEvents(context.Background(), room.Code, event.RoomRevision, 100)
+	if err != nil || len(none) != 0 {
+		t.Fatalf("resume returned %+v, err=%v", none, err)
+	}
+	isolated, err := service.ListRoomEvents(context.Background(), otherRoom.Code, 0, 100)
+	if err != nil || len(isolated) != 0 {
+		t.Fatalf("other room received %+v, err=%v", isolated, err)
+	}
+	cancel()
+	<-done
+}
+
+func TestRoomEventsHeartbeatAndConnectionLimit(t *testing.T) {
+	service := game.NewInMemoryRoomService()
+	room, host, err := service.CreateRoom(context.Background(), game.CreateRoomInput{RoomName: "Bounded streams", HostDisplayName: "Host"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Config{EventPollInterval: time.Millisecond, EventHeartbeat: time.Millisecond, EventMaxConnections: 1}
+	server := NewServer(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)), service)
+	ctx, cancel := context.WithCancel(context.Background())
+	request := httptest.NewRequest(http.MethodGet, "/api/rooms/"+room.Code+"/events", nil).WithContext(ctx)
+	request.Header.Set("X-Player-Token", host.Token)
+	stream := newStreamingResponseWriter()
+	done := make(chan struct{})
+	go func() {
+		server.Handler().ServeHTTP(stream, request)
+		close(done)
+	}()
+	<-stream.status
+	<-stream.writes
+	select {
+	case heartbeat := <-stream.writes:
+		if heartbeat != ": heartbeat\n\n" {
+			t.Fatalf("heartbeat = %q", heartbeat)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("heartbeat was not sent")
+	}
+
+	second := httptest.NewRequest(http.MethodGet, "/api/rooms/"+room.Code+"/events", nil)
+	second.Header.Set("X-Player-Token", host.Token)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, second)
+	if response.Code != http.StatusServiceUnavailable || response.Header().Get("Retry-After") == "" {
+		t.Fatalf("second connection = %d headers=%v", response.Code, response.Header())
+	}
+	cancel()
+	<-done
+}
+
+func TestRoomEventsCleanUpFailedConsumer(t *testing.T) {
+	service := game.NewInMemoryRoomService()
+	room, host, err := service.CreateRoom(context.Background(), game.CreateRoomInput{RoomName: "Failed stream", HostDisplayName: "Host"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(
+		config.Config{EventPollInterval: time.Millisecond, EventHeartbeat: time.Millisecond, EventMaxConnections: 1},
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		service,
+	)
+	request := httptest.NewRequest(http.MethodGet, "/api/rooms/"+room.Code+"/events", nil)
+	request.Header.Set("X-Player-Token", host.Token)
+	writer := &failingStreamingResponseWriter{header: make(http.Header)}
+	done := make(chan struct{})
+	go func() {
+		server.Handler().ServeHTTP(writer, request)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("failed consumer was not cleaned up")
+	}
+	if active := server.activeEventConnections.Load(); active != 0 {
+		t.Fatalf("active connections = %d, want 0", active)
+	}
+}
 
 func TestRoomResponsesHideRoundOutcomeUntilReveal(t *testing.T) {
 	t.Parallel()
