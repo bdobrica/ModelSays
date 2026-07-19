@@ -23,10 +23,10 @@ type OpenAIModelClient struct {
 }
 
 type openAIChatRequest struct {
-	Model          string            `json:"model"`
-	Messages       []openAIMessage   `json:"messages"`
-	ResponseFormat map[string]string `json:"response_format,omitempty"`
-	Temperature    float64           `json:"temperature,omitempty"`
+	Model          string          `json:"model"`
+	Messages       []openAIMessage `json:"messages"`
+	ResponseFormat any             `json:"response_format,omitempty"`
+	Temperature    float64         `json:"temperature,omitempty"`
 }
 
 type openAIMessage struct {
@@ -80,9 +80,9 @@ func (client *OpenAIModelClient) GenerateQuestions(ctx context.Context, req Gene
 		model = "gpt-4.1-mini"
 	}
 
-	prompt := fmt.Sprintf("Return JSON with shape {\"questions\":[{\"text\":string,\"locale\":string,\"category\":string}]}. Generate %d broad, party-safe questions for a game where players guess an AI answer board. Locale: %s. Category: %s. Team safe mode: %t. Vary by round index %d. Avoid hateful, sexual, medical, legal, financial, personal, or workplace-sensitive topics.", maxInt(req.Count, 1), req.Locale, defaultString(req.Category, "party"), req.TeamSafeMode, req.RoundIndex)
+	prompt := fmt.Sprintf("Generate %d unique broad, party-safe questions for a game where players guess an AI answer board. Locale: %s. Category: %s. Team safe mode: %t. Vary by round index %d. Do not repeat these prior questions: %q. Avoid hateful, sexual, medical, legal, financial, personal, or workplace-sensitive topics.", maxInt(req.Count, 1), req.Locale, defaultString(req.Category, "party"), req.TeamSafeMode, req.RoundIndex, req.ExcludedText)
 
-	body, err := client.completeJSON(ctx, model, prompt)
+	body, err := client.completeJSON(ctx, model, prompt, questionsJSONSchema())
 	if err != nil {
 		return nil, err
 	}
@@ -121,9 +121,9 @@ func (client *OpenAIModelClient) GenerateBoard(ctx context.Context, req Generate
 		model = "gpt-4.1-mini"
 	}
 
-	prompt := fmt.Sprintf("Return JSON with shape {\"provider\":string,\"modelName\":string,\"promptVersion\":string,\"answers\":[{\"canonicalAnswer\":string,\"aliases\":string[],\"rank\":number,\"score\":number}]}. Generate a Family Feud style answer board for the question %q. Provide exactly 5 ranked answers with descending scores. Scores should be positive integers. Aliases should contain close synonyms only. Team safe mode: %t. Prompt version: %s.", req.Question.Text, req.TeamSafeMode, defaultString(req.PromptVersion, "v1"))
+	prompt := fmt.Sprintf("Generate a Family Feud style answer board for the question %q. Provide exactly 5 ranked answers with descending positive integer scores. Aliases should contain close synonyms only. Team safe mode: %t. Prompt version: %s.", req.Question.Text, req.TeamSafeMode, defaultString(req.PromptVersion, "v1"))
 
-	body, err := client.completeJSON(ctx, model, prompt)
+	body, err := client.completeJSON(ctx, model, prompt, boardJSONSchema())
 	if err != nil {
 		return nil, err
 	}
@@ -134,57 +134,45 @@ func (client *OpenAIModelClient) GenerateBoard(ctx context.Context, req Generate
 	}
 
 	answers := make([]models.PredictionAnswer, 0, len(payload.Answers))
-	for index, generated := range payload.Answers {
-		canonical := strings.TrimSpace(generated.CanonicalAnswer)
-		if canonical == "" {
-			continue
-		}
-		rank := generated.Rank
-		if rank <= 0 {
-			rank = index + 1
-		}
-		score := generated.Score
-		if score <= 0 {
-			score = maxInt(10, (len(payload.Answers)-index)*10)
-		}
+	for _, generated := range payload.Answers {
 		aliases := make([]string, 0, len(generated.Aliases))
 		for _, alias := range generated.Aliases {
-			trimmed := strings.TrimSpace(alias)
-			if trimmed != "" && !strings.EqualFold(trimmed, canonical) {
-				aliases = append(aliases, trimmed)
-			}
+			aliases = append(aliases, strings.TrimSpace(alias))
 		}
 		answers = append(answers, models.PredictionAnswer{
-			CanonicalAnswer: canonical,
+			CanonicalAnswer: strings.TrimSpace(generated.CanonicalAnswer),
 			Aliases:         aliases,
-			Rank:            rank,
-			Score:           score,
+			Rank:            generated.Rank,
+			Score:           generated.Score,
 		})
 	}
 
-	if len(answers) == 0 {
-		return nil, fmt.Errorf("openai returned no usable board answers")
-	}
-
 	board := models.PredictionBoard{
-		Provider:      defaultString(strings.TrimSpace(payload.Provider), "openai"),
-		ModelName:     defaultString(strings.TrimSpace(payload.ModelName), model),
-		PromptVersion: defaultString(strings.TrimSpace(payload.PromptVersion), defaultString(req.PromptVersion, "v1")),
+		Provider:      "openai",
+		ModelName:     model,
+		PromptVersion: defaultString(req.PromptVersion, "v1"),
 		Answers:       answers,
 	}
 
 	return &GenerateBoardResponse{Board: board}, nil
 }
 
-func (client *OpenAIModelClient) completeJSON(ctx context.Context, model string, prompt string) ([]byte, error) {
+func (client *OpenAIModelClient) completeJSON(ctx context.Context, model string, prompt string, schema map[string]any) ([]byte, error) {
 	reqBody, err := json.Marshal(openAIChatRequest{
 		Model: model,
 		Messages: []openAIMessage{
 			{Role: "system", Content: "You are generating structured game data. Respond with valid JSON only and no markdown."},
 			{Role: "user", Content: prompt},
 		},
-		ResponseFormat: map[string]string{"type": "json_object"},
-		Temperature:    0.7,
+		ResponseFormat: map[string]any{
+			"type": "json_schema",
+			"json_schema": map[string]any{
+				"name":   "game_content",
+				"strict": true,
+				"schema": schema,
+			},
+		},
+		Temperature: 0.7,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("marshal openai request: %w", err)
@@ -224,6 +212,52 @@ func (client *OpenAIModelClient) completeJSON(ctx context.Context, model string,
 
 	content := strings.TrimSpace(response.Choices[0].Message.Content)
 	return []byte(content), nil
+}
+
+func questionsJSONSchema() map[string]any {
+	return map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"required":             []string{"questions"},
+		"properties": map[string]any{"questions": map[string]any{
+			"type": "array",
+			"items": map[string]any{
+				"type":                 "object",
+				"additionalProperties": false,
+				"required":             []string{"text", "locale", "category"},
+				"properties": map[string]any{
+					"text":     map[string]any{"type": "string"},
+					"locale":   map[string]any{"type": "string"},
+					"category": map[string]any{"type": "string"},
+				},
+			},
+		}},
+	}
+}
+
+func boardJSONSchema() map[string]any {
+	answer := map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"required":             []string{"canonicalAnswer", "aliases", "rank", "score"},
+		"properties": map[string]any{
+			"canonicalAnswer": map[string]any{"type": "string"},
+			"aliases":         map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"rank":            map[string]any{"type": "integer"},
+			"score":           map[string]any{"type": "integer"},
+		},
+	}
+	return map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"required":             []string{"provider", "modelName", "promptVersion", "answers"},
+		"properties": map[string]any{
+			"provider":      map[string]any{"type": "string"},
+			"modelName":     map[string]any{"type": "string"},
+			"promptVersion": map[string]any{"type": "string"},
+			"answers":       map[string]any{"type": "array", "minItems": 5, "maxItems": 5, "items": answer},
+		},
+	}
 }
 
 func stableID(value string) string {

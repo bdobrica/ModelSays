@@ -10,6 +10,7 @@ Status note:
   - the round state machine enforces the answer deadline during submission and covers reveal, next-round transition, and final completion, but expiry does not yet trigger automatic reveal or progression;
   - the public room projection hides boards, guesses, outcomes, awarded points, and current-round score changes until reveal while preserving submission progress.
   - MVP matching is deterministic Unicode-aware normalization plus exact canonical/alias equality; semantic judge-model matching is deferred.
+  - model content uses strict schemas, provider-independent validation, one retry, and a five-round curated fallback; raw response and cost auditing remain deferred.
 
 ## Phase 0 — Project Setup
 
@@ -100,23 +101,24 @@ Status note:
 - [x] Add category setting.
 - [ ] Add team-building safe mode.
 - [x] Store generated questions.
-- [ ] Avoid duplicate questions in one game.
+- [x] Avoid duplicate questions in a five-round curated MVP game.
 - [ ] Add prompt versioning.
 
 ## Phase 6 — Prediction Board Generation
 
 - [x] Define board-generation prompt.
 - [x] Require structured JSON output.
-- [ ] Validate generated board shape.
+- [x] Validate generated question and board shape.
 - [x] Normalize scores.
 - [x] Normalize answer ranks.
 - [x] Require canonical answers.
 - [x] Require aliases.
 - [ ] Store raw model response.
-- [ ] Store provider, model, temperature, prompt version.
+- [x] Store provider, model, and prompt version accurately.
+- [ ] Store temperature and token/cost audit metadata.
 - [x] Compute board hash.
 - [x] Freeze board before accepting guesses.
-- [ ] Add retry behavior for invalid model output.
+- [x] Add bounded retry behavior for invalid model output.
 - [x] Add fallback to static board if generation fails.
 
 ## Phase 7 — Guess Matching

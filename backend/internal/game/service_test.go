@@ -3,6 +3,7 @@ package game
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -20,6 +21,15 @@ type fixedBoardModelClient struct {
 	board models.PredictionBoard
 }
 
+type scriptedModelClient struct {
+	questionResponses []*llm.GenerateQuestionsResponse
+	questionErrors    []error
+	boardResponses    []*llm.GenerateBoardResponse
+	boardErrors       []error
+	questionCalls     int
+	boardCalls        int
+}
+
 func (client fixedBoardModelClient) GenerateQuestions(_ context.Context, _ llm.GenerateQuestionsRequest) (*llm.GenerateQuestionsResponse, error) {
 	return &llm.GenerateQuestionsResponse{Questions: []models.Question{{
 		ID: "question-1", Text: "Name something.", Locale: "en", Category: "party",
@@ -28,6 +38,30 @@ func (client fixedBoardModelClient) GenerateQuestions(_ context.Context, _ llm.G
 
 func (client fixedBoardModelClient) GenerateBoard(_ context.Context, _ llm.GenerateBoardRequest) (*llm.GenerateBoardResponse, error) {
 	return &llm.GenerateBoardResponse{Board: client.board}, nil
+}
+
+func (client *scriptedModelClient) GenerateQuestions(_ context.Context, _ llm.GenerateQuestionsRequest) (*llm.GenerateQuestionsResponse, error) {
+	index := client.questionCalls
+	client.questionCalls++
+	if index < len(client.questionErrors) && client.questionErrors[index] != nil {
+		return nil, client.questionErrors[index]
+	}
+	if index < len(client.questionResponses) {
+		return client.questionResponses[index], nil
+	}
+	return nil, errors.New("no scripted question response")
+}
+
+func (client *scriptedModelClient) GenerateBoard(_ context.Context, _ llm.GenerateBoardRequest) (*llm.GenerateBoardResponse, error) {
+	index := client.boardCalls
+	client.boardCalls++
+	if index < len(client.boardErrors) && client.boardErrors[index] != nil {
+		return nil, client.boardErrors[index]
+	}
+	if index < len(client.boardResponses) {
+		return client.boardResponses[index], nil
+	}
+	return nil, errors.New("no scripted board response")
 }
 
 func (clock *fakeClock) Now() time.Time {
@@ -360,7 +394,7 @@ func TestValidateMatchingAliasesRejectsAmbiguousOwnership(t *testing.T) {
 	}
 }
 
-func TestStartGameRejectsBoardWithAmbiguousAliasOwnership(t *testing.T) {
+func TestStartGameFallsBackFromAmbiguousAliasOwnership(t *testing.T) {
 	t.Parallel()
 
 	modelClient := fixedBoardModelClient{board: models.PredictionBoard{
@@ -378,9 +412,197 @@ func TestStartGameRejectsBoardWithAmbiguousAliasOwnership(t *testing.T) {
 		t.Fatalf("CreateRoom returned error: %v", err)
 	}
 
-	_, err = service.StartGame(context.Background(), StartGameInput{Code: room.Code, PlayerToken: host.Token})
-	if !errors.Is(err, ErrAmbiguousBoardAnswer) {
-		t.Fatalf("expected ErrAmbiguousBoardAnswer, got %v", err)
+	started, err := service.StartGame(context.Background(), StartGameInput{Code: room.Code, PlayerToken: host.Token})
+	if err != nil {
+		t.Fatalf("expected curated fallback, got %v", err)
+	}
+	if started.CurrentGame.CurrentRound.Board.Provider != "static" {
+		t.Fatalf("expected static fallback provider, got %q", started.CurrentGame.CurrentRound.Board.Provider)
+	}
+}
+
+func TestValidatePredictionBoard(t *testing.T) {
+	t.Parallel()
+
+	valid := validGeneratedBoard()
+	tests := []struct {
+		name   string
+		mutate func(*models.PredictionBoard)
+	}{
+		{name: "valid"},
+		{name: "too few answers", mutate: func(board *models.PredictionBoard) { board.Answers = board.Answers[:4] }},
+		{name: "too many answers", mutate: func(board *models.PredictionBoard) { board.Answers = append(board.Answers, board.Answers[4]) }},
+		{name: "duplicate canonicals", mutate: func(board *models.PredictionBoard) {
+			board.Answers[1].CanonicalAnswer = board.Answers[0].CanonicalAnswer
+		}},
+		{name: "ambiguous aliases", mutate: func(board *models.PredictionBoard) { board.Answers[1].Aliases = []string{board.Answers[0].Aliases[0]} }},
+		{name: "duplicate ranks", mutate: func(board *models.PredictionBoard) { board.Answers[1].Rank = 1 }},
+		{name: "unordered ranks", mutate: func(board *models.PredictionBoard) {
+			board.Answers[0].Rank, board.Answers[1].Rank = 2, 1
+		}},
+		{name: "non descending scores", mutate: func(board *models.PredictionBoard) { board.Answers[1].Score = board.Answers[0].Score }},
+		{name: "zero score", mutate: func(board *models.PredictionBoard) { board.Answers[4].Score = 0 }},
+		{name: "empty canonical", mutate: func(board *models.PredictionBoard) { board.Answers[0].CanonicalAnswer = " " }},
+		{name: "oversized canonical", mutate: func(board *models.PredictionBoard) {
+			board.Answers[0].CanonicalAnswer = strings.Repeat("x", maxAnswerTextRunes+1)
+		}},
+		{name: "empty alias", mutate: func(board *models.PredictionBoard) { board.Answers[0].Aliases = []string{""} }},
+		{name: "missing provider", mutate: func(board *models.PredictionBoard) { board.Provider = "" }},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			board := valid
+			board.Answers = append([]models.PredictionAnswer(nil), valid.Answers...)
+			if test.mutate != nil {
+				test.mutate(&board)
+			}
+			err := validatePredictionBoard(board)
+			if test.mutate == nil && err != nil {
+				t.Fatalf("valid board rejected: %v", err)
+			}
+			if test.mutate != nil && !errors.Is(err, ErrGeneratedContentInvalid) {
+				t.Fatalf("expected ErrGeneratedContentInvalid, got %v", err)
+			}
+		})
+	}
+}
+
+func TestValidateQuestion(t *testing.T) {
+	t.Parallel()
+
+	valid := generatedQuestion("question-1", "Name something useful.")
+	tests := []struct {
+		name     string
+		question models.Question
+		excluded []string
+		wantErr  bool
+	}{
+		{name: "valid", question: valid},
+		{name: "empty text", question: generatedQuestion("question-1", " "), wantErr: true},
+		{name: "oversized text", question: generatedQuestion("question-1", strings.Repeat("x", maxQuestionTextRunes+1)), wantErr: true},
+		{name: "missing id", question: generatedQuestion("", "Name something."), wantErr: true},
+		{name: "wrong locale", question: models.Question{ID: "question-1", Text: "Ceva.", Locale: "ro", Category: "party"}, wantErr: true},
+		{name: "repeated question", question: valid, excluded: []string{"NAME... SOMETHING USEFUL!"}, wantErr: true},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			err := validateQuestion(test.question, "en", test.excluded)
+			if test.wantErr && !errors.Is(err, ErrGeneratedContentInvalid) {
+				t.Fatalf("expected ErrGeneratedContentInvalid, got %v", err)
+			}
+			if !test.wantErr && err != nil {
+				t.Fatalf("valid question rejected: %v", err)
+			}
+		})
+	}
+}
+
+func TestGenerateRoundRetriesInvalidModelOutput(t *testing.T) {
+	t.Parallel()
+
+	validQuestion := generatedQuestion("question-model", "Name something useful.")
+	invalid := validGeneratedBoard()
+	invalid.Answers = invalid.Answers[:4]
+	client := &scriptedModelClient{
+		questionResponses: []*llm.GenerateQuestionsResponse{
+			{Questions: []models.Question{validQuestion}},
+			{Questions: []models.Question{validQuestion}},
+		},
+		boardResponses: []*llm.GenerateBoardResponse{
+			{Board: invalid},
+			{Board: validGeneratedBoard()},
+		},
+	}
+	service := NewRoomService(NewInMemoryRoomRepository(), client)
+	round, err := service.generateRound(context.Background(), models.RoomSettings{Locale: "en"}, 1, nil, time.Now())
+	if err != nil {
+		t.Fatalf("generateRound returned error: %v", err)
+	}
+	if client.boardCalls != 2 || round.Board.Provider != "test" {
+		t.Fatalf("expected second model board after retry, calls=%d provider=%q", client.boardCalls, round.Board.Provider)
+	}
+}
+
+func TestGenerateRoundFallsBackAfterProviderErrors(t *testing.T) {
+	t.Parallel()
+
+	client := &scriptedModelClient{questionErrors: []error{errors.New("temporary failure"), errors.New("temporary failure")}}
+	service := NewRoomService(NewInMemoryRoomRepository(), client)
+	round, err := service.generateRound(context.Background(), models.RoomSettings{Locale: "en"}, 1, nil, time.Now())
+	if err != nil {
+		t.Fatalf("generateRound returned error: %v", err)
+	}
+	if client.questionCalls != generationAttempts || round.Board.Provider != "static" {
+		t.Fatalf("expected bounded retries then static fallback, calls=%d provider=%q", client.questionCalls, round.Board.Provider)
+	}
+}
+
+func TestGenerateRoundReturnsErrorWhenModelAndFallbackFail(t *testing.T) {
+	t.Parallel()
+
+	primary := &scriptedModelClient{questionErrors: []error{errors.New("primary failed"), errors.New("primary failed")}}
+	fallback := &scriptedModelClient{questionErrors: []error{errors.New("fallback failed")}}
+	service := NewRoomService(NewInMemoryRoomRepository(), primary)
+	service.fallbackClient = fallback
+	_, err := service.generateRound(context.Background(), models.RoomSettings{Locale: "en"}, 1, nil, time.Now())
+	if !errors.Is(err, ErrContentUnavailable) {
+		t.Fatalf("expected combined terminal generation error, got %v", err)
+	}
+}
+
+func TestStaticGameUsesFiveUniqueQuestions(t *testing.T) {
+	t.Parallel()
+
+	service := NewInMemoryRoomService()
+	room, host, err := service.CreateRoom(context.Background(), CreateRoomInput{
+		RoomName: "Five rounds", HostDisplayName: "Host",
+		Settings: models.RoomSettings{TotalRounds: 5, Locale: "en"},
+	})
+	if err != nil {
+		t.Fatalf("CreateRoom returned error: %v", err)
+	}
+	room, err = service.StartGame(context.Background(), StartGameInput{Code: room.Code, PlayerToken: host.Token})
+	if err != nil {
+		t.Fatalf("StartGame returned error: %v", err)
+	}
+	seen := map[string]struct{}{}
+	for roundIndex := 1; roundIndex <= 5; roundIndex++ {
+		text := room.CurrentGame.CurrentRound.Question.Text
+		if _, exists := seen[text]; exists {
+			t.Fatalf("question repeated in round %d: %q", roundIndex, text)
+		}
+		seen[text] = struct{}{}
+		room, err = service.RevealRound(context.Background(), RevealRoundInput{
+			Code: room.Code, RoundID: room.CurrentGame.CurrentRound.ID, PlayerToken: host.Token,
+		})
+		if err != nil {
+			t.Fatalf("RevealRound %d returned error: %v", roundIndex, err)
+		}
+		if roundIndex < 5 {
+			room, err = service.NextRound(context.Background(), NextRoundInput{Code: room.Code, PlayerToken: host.Token})
+			if err != nil {
+				t.Fatalf("NextRound %d returned error: %v", roundIndex, err)
+			}
+		}
+	}
+}
+
+func generatedQuestion(id string, text string) models.Question {
+	return models.Question{ID: id, Text: text, Locale: "en", Category: "party"}
+}
+
+func validGeneratedBoard() models.PredictionBoard {
+	return models.PredictionBoard{
+		Provider: "test", ModelName: "test-model", PromptVersion: "v1",
+		Answers: []models.PredictionAnswer{
+			{CanonicalAnswer: "answer one", Aliases: []string{"first"}, Rank: 1, Score: 50},
+			{CanonicalAnswer: "answer two", Aliases: []string{"second"}, Rank: 2, Score: 40},
+			{CanonicalAnswer: "answer three", Aliases: []string{"third"}, Rank: 3, Score: 30},
+			{CanonicalAnswer: "answer four", Aliases: []string{"fourth"}, Rank: 4, Score: 20},
+			{CanonicalAnswer: "answer five", Aliases: []string{"fifth"}, Rank: 5, Score: 10},
+		},
 	}
 }
 

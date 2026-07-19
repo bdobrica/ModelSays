@@ -330,6 +330,8 @@ func (server *Server) writeDomainError(writer http.ResponseWriter, err error) {
 		writeError(writer, http.StatusConflict, err.Error())
 	case errors.Is(err, game.ErrRoundNotAcceptingGuesses), errors.Is(err, game.ErrAnswerPhaseExpired), errors.Is(err, game.ErrRoundAlreadyRevealed), errors.Is(err, game.ErrRoundNotRevealed), errors.Is(err, game.ErrGuessAlreadySubmitted):
 		writeError(writer, http.StatusConflict, err.Error())
+	case errors.Is(err, game.ErrContentUnavailable):
+		writeError(writer, http.StatusServiceUnavailable, game.ErrContentUnavailable.Error())
 	case errors.Is(err, game.ErrDisplayNameInvalid), errors.Is(err, game.ErrRoomNameInvalid), errors.Is(err, game.ErrDuplicatePlayer), errors.Is(err, game.ErrAnswerInvalid), errors.Is(err, game.ErrPredictionAnswerNotFound), errors.Is(err, game.ErrGuessNotFound):
 		writeError(writer, http.StatusBadRequest, err.Error())
 	default:

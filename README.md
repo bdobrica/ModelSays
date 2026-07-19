@@ -156,6 +156,8 @@ make verify
 
 `make verify` checks Go formatting, runs backend and client tests, and type-checks/builds the client. Narrower targets such as `make test-backend`, `make test-client`, `make build-client`, and `make check-format` are also available.
 
+Without `OPENAI_API_KEY`, games use a five-question English curated bank and support the full 1–5 round MVP flow. With OpenAI enabled, question and board responses use strict JSON schemas and are validated independently of the provider. Invalid or failed generation is retried once, then the server selects the unused curated entry for that round. Only failure of both paths returns a temporary content-unavailable response.
+
 ## Suggested Tech Stack
 
 ### Backend

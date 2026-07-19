@@ -77,6 +77,36 @@ var curatedRoundDataByLocale = map[string][]curatedRoundData{
 				},
 			},
 		},
+		{
+			question: models.Question{
+				ID: "question-en-004", Text: "Name something people check twice before leaving home.", Locale: "en", Category: "party",
+			},
+			board: models.PredictionBoard{
+				Provider: "static", ModelName: "curated-bank", PromptVersion: "v1",
+				Answers: []models.PredictionAnswer{
+					{CanonicalAnswer: "their keys", Aliases: []string{"keys", "house keys"}, Rank: 1, Score: 50},
+					{CanonicalAnswer: "their phone", Aliases: []string{"phone", "mobile phone"}, Rank: 2, Score: 40},
+					{CanonicalAnswer: "the door lock", Aliases: []string{"locked door", "front door"}, Rank: 3, Score: 30},
+					{CanonicalAnswer: "their wallet", Aliases: []string{"wallet", "purse"}, Rank: 4, Score: 20},
+					{CanonicalAnswer: "the stove", Aliases: []string{"oven", "cooker"}, Rank: 5, Score: 10},
+				},
+			},
+		},
+		{
+			question: models.Question{
+				ID: "question-en-005", Text: "Name something that makes a meeting feel longer.", Locale: "en", Category: "party",
+			},
+			board: models.PredictionBoard{
+				Provider: "static", ModelName: "curated-bank", PromptVersion: "v1",
+				Answers: []models.PredictionAnswer{
+					{CanonicalAnswer: "no clear agenda", Aliases: []string{"no agenda", "unclear agenda"}, Rank: 1, Score: 50},
+					{CanonicalAnswer: "a long presentation", Aliases: []string{"presentation", "too many slides"}, Rank: 2, Score: 40},
+					{CanonicalAnswer: "repeated discussion", Aliases: []string{"repeating points", "going in circles"}, Rank: 3, Score: 30},
+					{CanonicalAnswer: "technical problems", Aliases: []string{"tech issues", "connection problems"}, Rank: 4, Score: 20},
+					{CanonicalAnswer: "being hungry", Aliases: []string{"hunger", "missing lunch"}, Rank: 5, Score: 10},
+				},
+			},
+		},
 	},
 }
 
@@ -103,10 +133,22 @@ func (client *StaticModelClient) GenerateQuestions(_ context.Context, req Genera
 	questions := make([]models.Question, 0, count)
 	for index := 0; index < count; index++ {
 		selected := questionSet[(offset+index)%len(questionSet)].question
+		if containsFold(req.ExcludedText, selected.Text) {
+			continue
+		}
 		questions = append(questions, selected)
 	}
 
 	return &GenerateQuestionsResponse{Questions: questions}, nil
+}
+
+func containsFold(values []string, candidate string) bool {
+	for _, value := range values {
+		if strings.EqualFold(strings.TrimSpace(value), strings.TrimSpace(candidate)) {
+			return true
+		}
+	}
+	return false
 }
 
 func (client *StaticModelClient) GenerateBoard(_ context.Context, req GenerateBoardRequest) (*GenerateBoardResponse, error) {

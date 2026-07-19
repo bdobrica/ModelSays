@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/bogdandobrica/modelsays/backend/internal/llm"
 	"github.com/bogdandobrica/modelsays/backend/internal/models"
@@ -38,10 +39,21 @@ var (
 	ErrGuessNotFound            = errors.New("guess not found")
 	ErrPredictionAnswerNotFound = errors.New("prediction answer not found")
 	ErrAmbiguousBoardAnswer     = errors.New("board contains a canonical answer or alias owned by multiple answers")
+	ErrGeneratedContentInvalid  = errors.New("generated game content is invalid")
+	ErrContentUnavailable       = errors.New("game content is temporarily unavailable; please try again")
 	ErrAnswerInvalid            = errors.New("answer must be between 1 and 120 characters")
 )
 
-const roomAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+const (
+	roomAlphabet             = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+	generationAttempts       = 2
+	predictionAnswerCount    = 5
+	maxQuestionTextRunes     = 240
+	maxAnswerTextRunes       = 80
+	maxAliasCount            = 8
+	maxBoardMetadataRunes    = 80
+	maxPredictionAnswerScore = 100
+)
 
 type CreateRoomInput struct {
 	RoomName        string
@@ -86,9 +98,10 @@ type OverrideMatchInput struct {
 }
 
 type RoomService struct {
-	repository  RoomRepository
-	modelClient llm.ModelClient
-	clock       Clock
+	repository     RoomRepository
+	modelClient    llm.ModelClient
+	fallbackClient llm.ModelClient
+	clock          Clock
 }
 
 type Clock interface {
@@ -141,9 +154,10 @@ func NewRoomServiceWithClock(repository RoomRepository, modelClient llm.ModelCli
 	}
 
 	return &RoomService{
-		repository:  repository,
-		modelClient: modelClient,
-		clock:       clock,
+		repository:     repository,
+		modelClient:    modelClient,
+		fallbackClient: llm.NewStaticModelClient(),
+		clock:          clock,
 	}
 }
 
@@ -241,7 +255,7 @@ func (service *RoomService) StartGame(ctx context.Context, input StartGameInput)
 	}
 
 	now := service.clock.Now()
-	roundSeed, err := service.generateRound(ctx, room.Settings, 1, now)
+	roundSeed, err := service.generateRound(ctx, room.Settings, 1, nil, now)
 	if err != nil {
 		return models.Room{}, err
 	}
@@ -372,7 +386,7 @@ func (service *RoomService) NextRound(ctx context.Context, input NextRoundInput)
 	}
 
 	nextRoundIndex := room.CurrentGame.CurrentRoundIndex + 1
-	roundSeed, err := service.generateRound(ctx, room.Settings, nextRoundIndex, now)
+	roundSeed, err := service.generateRound(ctx, room.Settings, nextRoundIndex, []string{room.CurrentGame.CurrentRound.Question.Text}, now)
 	if err != nil {
 		return models.Room{}, err
 	}
@@ -731,13 +745,32 @@ type generatedRound struct {
 	Board      models.PredictionBoard
 }
 
-func (service *RoomService) generateRound(ctx context.Context, settings models.RoomSettings, roundIndex int, now time.Time) (generatedRound, error) {
-	questionResponse, err := service.modelClient.GenerateQuestions(ctx, llm.GenerateQuestionsRequest{
+func (service *RoomService) generateRound(ctx context.Context, settings models.RoomSettings, roundIndex int, excludedQuestions []string, now time.Time) (generatedRound, error) {
+	var generationErr error
+	for attempt := 0; attempt < generationAttempts; attempt++ {
+		round, err := service.generateRoundWithClient(ctx, service.modelClient, settings, roundIndex, excludedQuestions, now)
+		if err == nil {
+			return round, nil
+		}
+		generationErr = errors.Join(generationErr, err)
+	}
+
+	round, fallbackErr := service.generateRoundWithClient(ctx, service.fallbackClient, settings, roundIndex, excludedQuestions, now)
+	if fallbackErr == nil {
+		return round, nil
+	}
+
+	return generatedRound{}, fmt.Errorf("%w: %v", ErrContentUnavailable, errors.Join(generationErr, fallbackErr))
+}
+
+func (service *RoomService) generateRoundWithClient(ctx context.Context, client llm.ModelClient, settings models.RoomSettings, roundIndex int, excludedQuestions []string, now time.Time) (generatedRound, error) {
+	questionResponse, err := client.GenerateQuestions(ctx, llm.GenerateQuestionsRequest{
 		Locale:       settings.Locale,
 		Category:     "party",
 		Count:        1,
 		RoundIndex:   roundIndex,
 		TeamSafeMode: settings.TeamSafeMode,
+		ExcludedText: excludedQuestions,
 	})
 	if err != nil {
 		return generatedRound{}, err
@@ -745,13 +778,19 @@ func (service *RoomService) generateRound(ctx context.Context, settings models.R
 	if questionResponse == nil || len(questionResponse.Questions) == 0 {
 		return generatedRound{}, ErrNoQuestionsAvailable
 	}
+	if len(questionResponse.Questions) != 1 {
+		return generatedRound{}, fmt.Errorf("%w: question generator must return exactly one question", ErrGeneratedContentInvalid)
+	}
 
 	question := questionResponse.Questions[0]
+	if err := validateQuestion(question, settings.Locale, excludedQuestions); err != nil {
+		return generatedRound{}, err
+	}
 	if question.CreatedAt.IsZero() {
 		question.CreatedAt = now
 	}
 
-	boardResponse, err := service.modelClient.GenerateBoard(ctx, llm.GenerateBoardRequest{
+	boardResponse, err := client.GenerateBoard(ctx, llm.GenerateBoardRequest{
 		Question:        question,
 		PredictionModel: settings.PredictionModel,
 		TeamSafeMode:    settings.TeamSafeMode,
@@ -763,12 +802,88 @@ func (service *RoomService) generateRound(ctx context.Context, settings models.R
 	if boardResponse == nil {
 		return generatedRound{}, fmt.Errorf("board generator returned no response")
 	}
-	if err := validateMatchingAliases(boardResponse.Board.Answers); err != nil {
+	if err := validatePredictionBoard(boardResponse.Board); err != nil {
 		return generatedRound{}, err
 	}
 
 	board := prepareBoard(boardResponse.Board, question, now)
 	return generatedRound{RoundIndex: roundIndex, Question: question, Board: board}, nil
+}
+
+func validateQuestion(question models.Question, locale string, excluded []string) error {
+	text := strings.TrimSpace(question.Text)
+	if text == "" || utf8.RuneCountInString(text) > maxQuestionTextRunes {
+		return fmt.Errorf("%w: question text must contain 1-%d characters", ErrGeneratedContentInvalid, maxQuestionTextRunes)
+	}
+	if strings.TrimSpace(question.ID) == "" || strings.TrimSpace(question.Locale) == "" || strings.TrimSpace(question.Category) == "" {
+		return fmt.Errorf("%w: question id, locale, and category are required", ErrGeneratedContentInvalid)
+	}
+	if locale != "" && !strings.EqualFold(strings.TrimSpace(question.Locale), strings.TrimSpace(locale)) {
+		return fmt.Errorf("%w: question locale %q does not match %q", ErrGeneratedContentInvalid, question.Locale, locale)
+	}
+	for _, previous := range excluded {
+		if normalizeAnswer(previous) == normalizeAnswer(text) {
+			return fmt.Errorf("%w: question was already used", ErrGeneratedContentInvalid)
+		}
+	}
+	return nil
+}
+
+func validatePredictionBoard(board models.PredictionBoard) error {
+	for label, value := range map[string]string{
+		"provider": board.Provider, "model name": board.ModelName, "prompt version": board.PromptVersion,
+	} {
+		length := utf8.RuneCountInString(strings.TrimSpace(value))
+		if length == 0 || length > maxBoardMetadataRunes {
+			return fmt.Errorf("%w: %s must contain 1-%d characters", ErrGeneratedContentInvalid, label, maxBoardMetadataRunes)
+		}
+	}
+	if len(board.Answers) != predictionAnswerCount {
+		return fmt.Errorf("%w: board must contain exactly %d answers", ErrGeneratedContentInvalid, predictionAnswerCount)
+	}
+
+	canonicals := make(map[string]struct{}, len(board.Answers))
+	ranks := make(map[int]struct{}, len(board.Answers))
+	previousScore := maxPredictionAnswerScore + 1
+	for index, answer := range board.Answers {
+		canonical := strings.TrimSpace(answer.CanonicalAnswer)
+		canonicalLength := utf8.RuneCountInString(canonical)
+		if canonicalLength == 0 || canonicalLength > maxAnswerTextRunes {
+			return fmt.Errorf("%w: answer %d canonical text must contain 1-%d characters", ErrGeneratedContentInvalid, index+1, maxAnswerTextRunes)
+		}
+		normalizedCanonical := normalizeAnswer(canonical)
+		if _, exists := canonicals[normalizedCanonical]; exists {
+			return fmt.Errorf("%w: duplicate canonical answer %q", ErrGeneratedContentInvalid, normalizedCanonical)
+		}
+		canonicals[normalizedCanonical] = struct{}{}
+		if answer.Rank < 1 || answer.Rank > predictionAnswerCount {
+			return fmt.Errorf("%w: answer rank must be between 1 and %d", ErrGeneratedContentInvalid, predictionAnswerCount)
+		}
+		if _, exists := ranks[answer.Rank]; exists {
+			return fmt.Errorf("%w: duplicate answer rank %d", ErrGeneratedContentInvalid, answer.Rank)
+		}
+		ranks[answer.Rank] = struct{}{}
+		if answer.Rank != index+1 {
+			return fmt.Errorf("%w: answers must be ordered by rank", ErrGeneratedContentInvalid)
+		}
+		if answer.Score <= 0 || answer.Score > maxPredictionAnswerScore || answer.Score >= previousScore {
+			return fmt.Errorf("%w: scores must be positive, at most %d, and strictly descending", ErrGeneratedContentInvalid, maxPredictionAnswerScore)
+		}
+		previousScore = answer.Score
+		if len(answer.Aliases) > maxAliasCount {
+			return fmt.Errorf("%w: answer %d has more than %d aliases", ErrGeneratedContentInvalid, index+1, maxAliasCount)
+		}
+		for _, alias := range answer.Aliases {
+			length := utf8.RuneCountInString(strings.TrimSpace(alias))
+			if length == 0 || length > maxAnswerTextRunes {
+				return fmt.Errorf("%w: aliases must contain 1-%d characters", ErrGeneratedContentInvalid, maxAnswerTextRunes)
+			}
+		}
+	}
+	if err := validateMatchingAliases(board.Answers); err != nil {
+		return fmt.Errorf("%w: %w", ErrGeneratedContentInvalid, err)
+	}
+	return nil
 }
 
 func resetSubmissionFlags(scoreboard []models.ScoreboardEntry) {

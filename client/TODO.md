@@ -187,7 +187,7 @@ Status note:
 - [x] Handle game already started.
 - [ ] Handle player disconnected.
 - [x] Handle answer submission failure.
-- [ ] Handle model generation failure state.
+- [x] Surface the backend error when model generation and curated fallback both fail.
 - [x] Handle unauthorized host actions.
 - [x] Add fallback route.
 - [ ] Add user-friendly empty states.

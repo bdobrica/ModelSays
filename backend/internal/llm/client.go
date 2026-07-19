@@ -12,6 +12,7 @@ type GenerateQuestionsRequest struct {
 	Count        int
 	RoundIndex   int
 	TeamSafeMode bool
+	ExcludedText []string
 }
 
 type GenerateQuestionsResponse struct {

@@ -420,6 +420,10 @@ type ModelClient interface {
 
 Do not scatter provider-specific logic throughout handlers.
 
+The MVP requests strict JSON-schema responses from OpenAI, then applies the same provider-independent validation used for curated content. A playable board requires one bounded question with ID/locale/category metadata and exactly five ordered answers with unique normalized canonicals, ranks 1–5, strictly descending scores from 1–100, bounded canonical/alias text, bounded aliases, and non-empty provider/model/prompt metadata. Canonical and alias ownership must also be unambiguous after normalization.
+
+Generation gets two attempts. If either attempt fails or returns invalid content, the server falls back to the curated bank entry for that round. The English bank contains five unique validated rounds, matching the maximum MVP round count. Provider failures do not block a static game; if the model and curated paths both fail, start/advance returns HTTP 503 with a retryable content-unavailable message. Persisted board metadata records the actual provider, requested model, and prompt version rather than trusting model-authored metadata. Raw responses, token use, and cost auditing remain post-MVP work.
+
 ## Safety and Content Rules
 
 Generated questions should avoid:
