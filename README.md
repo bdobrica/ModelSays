@@ -126,16 +126,17 @@ Quick start:
 
 ```bash
 cp .env.example .env
-make bootstrap
-make start
+make install
 ```
 
-That target will:
+`make install` downloads the locked Go and npm dependencies, then:
 
 * start PostgreSQL in Docker;
 * apply backend SQL migrations;
 * run the Go backend;
 * run the Vite client.
+
+See [`INSTALL.md`](INSTALL.md) for the complete installation, gameplay, shutdown, and troubleshooting guide. After the first installation, use `make start` to launch without reinstalling dependencies.
 
 When a root `.env` file is present, the Makefile loads it automatically and passes those overrides into the backend, migration commands, and client dev server.
 

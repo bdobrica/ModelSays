@@ -16,12 +16,13 @@ CORS_ALLOWED_ORIGINS ?= http://localhost:5173
 GOOSE_VERSION := v3.27.2
 GOOSE := go run github.com/pressly/goose/v3/cmd/goose@$(GOOSE_VERSION)
 
-.PHONY: help bootstrap start dev postgres-up postgres-down postgres-logs postgres-reset migrate-up migrate-down backend client format check-format vet-backend test-backend test-client build-client check verify
+.PHONY: help install bootstrap start dev postgres-up postgres-down postgres-logs postgres-reset migrate-up migrate-down backend client format check-format vet-backend test-backend test-client build-client check verify
 
 help:
 	@printf '%s\n' \
 		'Model Says development targets:' \
 		'  .env support       Root .env values are loaded automatically when present' \
+		'  make install       Install dependencies and start the complete local game' \
 		'  make bootstrap     Download locked Go and npm dependencies' \
 		'  make start         Start Postgres, apply migrations, then run backend and client together' \
 		'  make dev           Alias for start' \
@@ -41,6 +42,9 @@ help:
 		'  make build-client  Type-check and build the client' \
 		'  make check         Check formatting, tests, and client build' \
 		'  make verify        Alias for check'
+
+install: bootstrap
+	$(MAKE) start
 
 bootstrap:
 	cd $(BACKEND_DIR) && go mod download
