@@ -54,13 +54,13 @@ The frontend should not be trusted for game-state decisions.
 
 ## Supported MVP
 
-The backend supports simultaneous English games with 1–5 rounds, 15–120 second answer windows, curated offline content or validated and audited OpenAI generation, PostgreSQL persistence, deterministic canonical/alias scoring, optional advisory semantic judging for misses, first-claim duplicate scoring, phase-aware response secrecy, durable automatic reveal, host early-reveal/review/override/advance controls, room-scoped same-browser session recovery, and layered public API/provider abuse controls. Provider operations are documented in [`docs/provider-operations.md`](../docs/provider-operations.md); deadline-worker behavior is documented in [`docs/deadline-transitions.md`](../docs/deadline-transitions.md); the threat model, proxy trust, limiter policies, moderation, and `429` contract are in [`docs/security.md`](../docs/security.md).
+The backend supports individual and team-based simultaneous English games with 1–5 rounds, 15–120 second answer windows, curated offline content or validated and audited OpenAI generation, PostgreSQL persistence, deterministic canonical/alias scoring, optional advisory semantic judging for misses, first-claim duplicate scoring, phase-aware response secrecy, durable automatic reveal, host early-reveal/review/override/advance controls, room-scoped same-browser session recovery, and layered public API/provider abuse controls. Provider operations are documented in [`docs/provider-operations.md`](../docs/provider-operations.md); deadline-worker behavior is documented in [`docs/deadline-transitions.md`](../docs/deadline-transitions.md); the threat model, proxy trust, limiter policies, moderation, and `429` contract are in [`docs/security.md`](../docs/security.md).
 
 The PostgreSQL lifecycle gate runs a host plus two players through two curated rounds and covers shared board identity, session recovery during answering and reveal, equivalent guesses, deadline rejection, override, completion, and score reload after the repository/service/server are rebuilt.
 
 ## Known Limitations
 
-Clients use authenticated SSE invalidations with polling recovery. Automatic reveal requires PostgreSQL, while advancement remains host-controlled. Presence, cross-device session transfer, teams, non-English locales, and non-simultaneous modes are not supported. Abuse limits are process-local, so public deployments must use one API replica. Privacy-safe JSON logs, authenticated bounded metrics, dependency-aware readiness, graceful drain, and opt-in recovery/retention tooling are implemented; environment-specific staging evidence remains an operator responsibility. See [`docs/operations.md`](../docs/operations.md).
+Clients use authenticated SSE invalidations with polling recovery. Automatic reveal requires PostgreSQL, while advancement remains host-controlled. Presence, cross-device session transfer, non-English locales, and non-simultaneous modes are not supported. Abuse limits are process-local, so public deployments must use one API replica. Privacy-safe JSON logs, authenticated bounded metrics, dependency-aware readiness, graceful drain, and opt-in recovery/retention tooling are implemented; environment-specific staging evidence remains an operator responsibility. See [`docs/operations.md`](../docs/operations.md).
 
 Completed games receive a random 128-bit replay identifier. `GET /api/replays/{replayID}` returns rankings, ties, revealed question/board answers, guesses, answer matches, and per-round score deltas. It deliberately omits tokens, normalized guesses, aliases, provider/model/prompt metadata, audits, judge records, and raw provider content. `POST /api/rooms/{code}/play-again` is host-token protected and creates a distinct lobby with copied settings and a new host identity; no gameplay rows or credentials are reused.
 
@@ -116,7 +116,7 @@ Flow:
 2. Scores accumulate by team.
 3. Players may answer individually, but points count toward the team.
 
-This can reuse simultaneous mode initially.
+Team creation and assignment are host-only and lobby-only. A game requires 2–4 non-empty teams and no unassigned players. Assignments are immutable after start. Players submit individually, first-committed answer claims remain global across the round, and team totals are derived from member `score_events` rather than stored as a mutable second score.
 
 ## Data Model Sketch
 

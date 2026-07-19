@@ -853,3 +853,20 @@ type fixedClock struct {
 func (clock *fixedClock) Now() time.Time {
 	return clock.now
 }
+
+func TestTeamProjectionDoesNotLeakCurrentRoundScore(t *testing.T) {
+	team := models.Team{ID: "team-1", Name: "Blue"}
+	player := models.Player{ID: "player-1", DisplayName: "Ana", TeamID: team.ID}
+	room := models.Room{
+		Code: "ABC234", Teams: []models.Team{team}, Players: []models.Player{player},
+		CurrentGame: &models.Game{
+			Scoreboard:     []models.ScoreboardEntry{{PlayerID: player.ID, DisplayName: player.DisplayName, Score: 50}},
+			TeamScoreboard: []models.TeamScoreboardEntry{{TeamID: team.ID, Name: team.Name, Score: 50}},
+			CurrentRound:   &models.Round{Status: models.RoundStatusAnswering, Guesses: []models.Guess{{PlayerID: player.ID, ScoreAwarded: 50}}},
+		},
+	}
+	projected := projectRoom(room)
+	if projected.CurrentGame.Scoreboard[0].Score != 0 || projected.CurrentGame.TeamScoreboard[0].Score != 0 {
+		t.Fatalf("answering projection leaked score: %#v", projected.CurrentGame)
+	}
+}

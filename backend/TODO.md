@@ -40,7 +40,7 @@ Status note:
 
 - [x] Create migration for rooms.
 - [x] Create migration for players.
-- [ ] Create migration for teams.
+- [x] Create migration for teams and player assignments.
 - [x] Create migration for games.
 - [x] Create migration for questions.
 - [x] Create migration for prediction_boards.
@@ -145,7 +145,7 @@ Status note:
 - [x] Implement score-per-answer from board.
 - [x] Implement duplicate handling policy.
 - [x] Implement per-player score.
-- [ ] Implement per-team score.
+- [x] Derive per-team score from player score events.
 - [x] Implement miss behavior.
 - [x] Implement score events.
 - [ ] Add scoreboard endpoint.
@@ -174,8 +174,8 @@ Status note:
 - [x] Host can override a match.
 - [ ] Host can kick a player.
 - [ ] Host can change room settings before game start.
-- [ ] Host can enable team mode.
-- [ ] Host can assign teams.
+- [x] Host can enable team mode at room creation.
+- [x] Host can create and assign teams in the lobby.
 
 ## Phase 11 — Safety
 

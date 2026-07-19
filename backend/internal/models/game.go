@@ -55,6 +55,12 @@ type ScoreboardEntry struct {
 	SubmissionMade bool   `json:"submissionMade"`
 }
 
+type TeamScoreboardEntry struct {
+	TeamID string `json:"teamId"`
+	Name   string `json:"name"`
+	Score  int    `json:"score"`
+}
+
 type ScoreEvent struct {
 	ID        string    `json:"id"`
 	GameID    string    `json:"gameId"`
@@ -149,17 +155,18 @@ type JudgeSuggestion struct {
 }
 
 type Game struct {
-	ID                string            `json:"id"`
-	ReplayID          string            `json:"replayId,omitempty"`
-	Status            GameStatus        `json:"status"`
-	Mode              GameMode          `json:"mode"`
-	TotalRounds       int               `json:"totalRounds"`
-	CurrentRoundIndex int               `json:"currentRoundIndex"`
-	CurrentRound      *Round            `json:"currentRound,omitempty"`
-	Scoreboard        []ScoreboardEntry `json:"scoreboard,omitempty"`
-	CreatedAt         time.Time         `json:"createdAt"`
-	StartedAt         time.Time         `json:"startedAt"`
-	EndedAt           *time.Time        `json:"endedAt,omitempty"`
+	ID                string                `json:"id"`
+	ReplayID          string                `json:"replayId,omitempty"`
+	Status            GameStatus            `json:"status"`
+	Mode              GameMode              `json:"mode"`
+	TotalRounds       int                   `json:"totalRounds"`
+	CurrentRoundIndex int                   `json:"currentRoundIndex"`
+	CurrentRound      *Round                `json:"currentRound,omitempty"`
+	Scoreboard        []ScoreboardEntry     `json:"scoreboard,omitempty"`
+	TeamScoreboard    []TeamScoreboardEntry `json:"teamScoreboard,omitempty"`
+	CreatedAt         time.Time             `json:"createdAt"`
+	StartedAt         time.Time             `json:"startedAt"`
+	EndedAt           *time.Time            `json:"endedAt,omitempty"`
 }
 
 type ReplayRound struct {
@@ -186,11 +193,13 @@ type ReplayGuess struct {
 }
 
 type ReplaySummary struct {
-	ID        string            `json:"id"`
-	RoomName  string            `json:"roomName"`
-	Mode      GameMode          `json:"mode"`
-	StartedAt time.Time         `json:"startedAt"`
-	EndedAt   time.Time         `json:"endedAt"`
-	Rankings  []ScoreboardEntry `json:"rankings"`
-	Rounds    []ReplayRound     `json:"rounds"`
+	ID           string                `json:"id"`
+	RoomName     string                `json:"roomName"`
+	Mode         GameMode              `json:"mode"`
+	StartedAt    time.Time             `json:"startedAt"`
+	EndedAt      time.Time             `json:"endedAt"`
+	Rankings     []ScoreboardEntry     `json:"rankings"`
+	TeamRankings []TeamScoreboardEntry `json:"teamRankings,omitempty"`
+	Teams        []Team                `json:"teams,omitempty"`
+	Rounds       []ReplayRound         `json:"rounds"`
 }

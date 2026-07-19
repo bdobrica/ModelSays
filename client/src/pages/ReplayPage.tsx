@@ -72,6 +72,16 @@ export function ReplayPage() {
         <Link className="button button-primary" to="/">Back to home</Link>
       </article>
       <aside className="panel player-panel">
+        {replay.teamRankings?.length ? (
+          <div className="score-list">
+            <h2>Final team rankings</h2>
+            {replay.teamRankings.map((entry, index) => (
+              <div className={entry.score === replay.teamRankings?.[0]?.score ? 'score-row score-row-winner' : 'score-row'} key={entry.teamId}>
+                <strong>#{index + 1}</strong><span>{entry.name}</span><em>{entry.score} pts</em>
+              </div>
+            ))}
+          </div>
+        ) : null}
         <h2>Final rankings</h2>
         {replay.rankings.map((entry, index) => (
           <div className={entry.score === topScore ? 'score-row score-row-winner' : 'score-row'} key={entry.playerId}>

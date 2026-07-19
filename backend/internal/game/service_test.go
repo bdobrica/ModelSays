@@ -1655,3 +1655,51 @@ func TestCompletedReplayAndPlayAgainArePublicSafeAndIsolated(t *testing.T) {
 		t.Fatalf("original game changed: room=%#v err=%v", originalReloaded, err)
 	}
 }
+
+func TestTeamModeRequiresAssignmentsAndDerivesScores(t *testing.T) {
+	service := NewInMemoryRoomService()
+	ctx := context.Background()
+	room, host, err := service.CreateRoom(ctx, CreateRoomInput{RoomName: "Team night", HostDisplayName: "Host",
+		Settings: models.RoomSettings{Mode: models.GameModeTeams, TotalRounds: 1, AnswerTimerSeconds: 30}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	room, guest, err := service.JoinRoom(ctx, JoinRoomInput{Code: room.Code, DisplayName: "Guest"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.StartGame(ctx, StartGameInput{Code: room.Code, PlayerToken: host.Token}); !errors.Is(err, ErrTeamConfigurationInvalid) {
+		t.Fatalf("start without teams error = %v", err)
+	}
+	room, err = service.CreateTeam(ctx, CreateTeamInput{Code: room.Code, PlayerToken: host.Token, Name: "Blue"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	room, err = service.CreateTeam(ctx, CreateTeamInput{Code: room.Code, PlayerToken: host.Token, Name: "Gold"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	room, err = service.AssignTeam(ctx, AssignTeamInput{Code: room.Code, PlayerToken: host.Token, PlayerID: host.ID, TeamID: room.Teams[0].ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	room, err = service.AssignTeam(ctx, AssignTeamInput{Code: room.Code, PlayerToken: host.Token, PlayerID: guest.ID, TeamID: room.Teams[1].ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	room, err = service.StartGame(ctx, StartGameInput{Code: room.Code, PlayerToken: host.Token})
+	if err != nil {
+		t.Fatal(err)
+	}
+	answer := room.CurrentGame.CurrentRound.Board.Answers[0].CanonicalAnswer
+	room, err = service.SubmitGuess(ctx, SubmitGuessInput{Code: room.Code, RoundID: room.CurrentGame.CurrentRound.ID, PlayerToken: host.Token, Answer: answer})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(room.CurrentGame.TeamScoreboard) != 2 || room.CurrentGame.TeamScoreboard[0].Score != room.CurrentGame.Scoreboard[0].Score {
+		t.Fatalf("team scores are not derived from player scores: %#v / %#v", room.CurrentGame.TeamScoreboard, room.CurrentGame.Scoreboard)
+	}
+	if _, err := service.AssignTeam(ctx, AssignTeamInput{Code: room.Code, PlayerToken: host.Token, PlayerID: guest.ID, TeamID: room.Teams[0].ID}); !errors.Is(err, ErrGameAlreadyStarted) {
+		t.Fatalf("post-start assignment error = %v", err)
+	}
+}

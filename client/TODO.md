@@ -11,7 +11,7 @@ Status note:
 	- expiry copy reflects the PostgreSQL backend's durable automatic reveal; early reveal and next-round advancement remain host controls;
 	- same-browser refresh validates the stored token with the server; presence and cross-device transfer remain deferred;
 	- loading and error handling still exist as inline page states, not shared reusable components;
-	- the create-room flow currently fixes game mode to simultaneous instead of exposing a mode selector.
+	- the create-room flow exposes individual and team-based simultaneous modes.
 	- the creation form and backend now share the MVP bounds of 1–5 rounds, a 15–120 second timer, and bounded names.
 	- CI runs the locked client test suite and production build alongside backend and PostgreSQL lifecycle gates.
 	- the root baseline command records production bundle size and representative polling volume; browser rendering and physical-device performance remain playtest work.
@@ -154,7 +154,7 @@ Status note:
 - [x] Build live scoreboard.
 - [x] Build final scoreboard.
 - [x] Show player rankings.
-- [ ] Show team rankings if enabled.
+- [x] Show team rankings if enabled.
 - [ ] Show round-by-round point changes.
 - [x] Highlight winner and ties.
 - [x] Add host play-again button that enters a clean new lobby.
@@ -163,13 +163,13 @@ Status note:
 
 ## Phase 10 — Team Mode
 
-- [ ] Add team display in lobby.
-- [ ] Let host create teams.
-- [ ] Let host assign players to teams.
-- [ ] Show team scores.
-- [ ] Show individual scores within teams.
-- [ ] Adjust scoreboard views.
-- [ ] Add team-building copy.
+- [x] Add team display in lobby.
+- [x] Let host create teams.
+- [x] Let host assign players to teams.
+- [x] Show team scores.
+- [x] Show individual scores alongside team scores.
+- [x] Adjust scoreboard views.
+- [x] Add team-building copy.
 
 ## Phase 11 — Mobile and Zoom Polish (post-MVP)
 

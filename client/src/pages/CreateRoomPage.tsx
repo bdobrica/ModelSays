@@ -13,6 +13,7 @@ export function CreateRoomPage() {
     const [locale, setLocale] = useState('en')
     const [predictionModel, setPredictionModel] = useState('gpt-4.1-mini')
     const [teamSafeMode, setTeamSafeMode] = useState(false)
+    const [mode, setMode] = useState<'simultaneous' | 'teams'>('simultaneous')
     const [isSubmitting, setIsSubmitting] = useState(false)
     const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
@@ -26,7 +27,7 @@ export function CreateRoomPage() {
                 roomName,
                 hostDisplayName,
                 settings: {
-                    mode: 'simultaneous',
+                    mode,
                     totalRounds,
                     answerTimerSeconds,
                     locale,
@@ -52,10 +53,17 @@ export function CreateRoomPage() {
             <div className="section-heading">
                 <p className="eyebrow">Host setup</p>
                 <h1>Create a room</h1>
-                <p>Start with simultaneous mode and the first backend room APIs that already exist.</p>
+                <p>Choose individual competition or auditable team competition with individual guesses.</p>
             </div>
 
             <form className="form-grid" onSubmit={handleSubmit}>
+                <label>
+                    Game mode
+                    <select value={mode} onChange={(event) => setMode(event.target.value as 'simultaneous' | 'teams')}>
+                        <option value="simultaneous">Individual</option>
+                        <option value="teams">Teams</option>
+                    </select>
+                </label>
                 <label>
                     Room name
                     <input maxLength={48} value={roomName} onChange={(event) => setRoomName(event.target.value)} required />

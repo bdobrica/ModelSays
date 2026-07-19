@@ -25,6 +25,8 @@ For each round:
 
 The generated board is stored persistently so every player competes against the same frozen set of answers.
 
+Rooms may use individual simultaneous mode or team mode. In team mode the host creates 2–4 teams and assigns every player before starting. Players still submit individually, first claims remain global across all teams, and each team total is derived from its members' auditable player scores.
+
 ## Example
 
 Question:
@@ -56,7 +58,6 @@ Possible game variants include:
 * known model mode;
 * blind model mode;
 * random model per round;
-* team mode;
 * Zoom/team-building mode;
 * simultaneous answers;
 * sequential turn-based answers.

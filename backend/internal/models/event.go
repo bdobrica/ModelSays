@@ -8,6 +8,7 @@ type RoomEventType string
 
 const (
 	RoomEventPlayerJoined       RoomEventType = "player_joined"
+	RoomEventTeamsChanged       RoomEventType = "teams_changed"
 	RoomEventGameStarted        RoomEventType = "game_started"
 	RoomEventSubmissionProgress RoomEventType = "submission_progress_changed"
 	RoomEventRoundRevealed      RoomEventType = "round_revealed"

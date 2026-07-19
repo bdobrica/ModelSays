@@ -1,6 +1,6 @@
 import { env } from './env'
 
-export type GameMode = 'simultaneous'
+export type GameMode = 'simultaneous' | 'teams'
 
 export interface RoomSettings {
   mode: GameMode
@@ -17,7 +17,10 @@ export interface Player {
   isHost: boolean
   joinedAt: string
   token?: string
+  teamId?: string
 }
+
+export interface Team { id: string; name: string }
 
 export type GameStatus = 'in_progress' | 'completed'
 export type RoundStatus = 'answering' | 'revealed'
@@ -61,6 +64,8 @@ export interface ScoreboardEntry {
   submissionMade: boolean
 }
 
+export interface TeamScoreboardEntry { teamId: string; name: string; score: number }
+
 export interface Question {
   id: string
   text: string
@@ -92,6 +97,7 @@ export interface Game {
   currentRoundIndex: number
   currentRound?: Round
   scoreboard: ScoreboardEntry[]
+  teamScoreboard?: TeamScoreboardEntry[]
   createdAt: string
   startedAt: string
   endedAt?: string
@@ -127,6 +133,8 @@ export interface ReplaySummary {
   startedAt: string
   endedAt: string
   rankings: ScoreboardEntry[]
+  teamRankings?: TeamScoreboardEntry[]
+  teams?: Team[]
   rounds: ReplayRound[]
 }
 
@@ -137,6 +145,7 @@ export interface Room {
   status: string
   settings: RoomSettings
   players: Player[]
+  teams?: Team[]
   currentGame?: Game
   createdAt: string
   updatedAt: string
@@ -249,6 +258,14 @@ export async function playAgain(code: string, payload: PlayerTokenPayload): Prom
     method: 'POST',
     body: JSON.stringify(payload),
   })
+}
+
+export async function createTeam(code: string, payload: PlayerTokenPayload & { name: string }): Promise<RoomResponse> {
+  return request<RoomResponse>(`/api/rooms/${code}/teams`, { method: 'POST', body: JSON.stringify(payload) })
+}
+
+export async function assignTeam(code: string, playerId: string, payload: PlayerTokenPayload & { teamId: string }): Promise<RoomResponse> {
+  return request<RoomResponse>(`/api/rooms/${code}/players/${playerId}/team`, { method: 'POST', body: JSON.stringify(payload) })
 }
 
 export async function getReplay(replayId: string, signal?: AbortSignal): Promise<{ replay: ReplaySummary }> {

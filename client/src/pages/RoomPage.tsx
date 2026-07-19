@@ -2,6 +2,8 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 're
 import { useNavigate, useParams } from 'react-router-dom'
 
 import {
+  assignTeam,
+  createTeam,
   getRoom,
   getJudgeSuggestions,
   nextRound,
@@ -38,6 +40,7 @@ export function RoomPage() {
   const [judgeSuggestions, setJudgeSuggestions] = useState<JudgeSuggestion[]>([])
   const [connectionState, setConnectionState] = useState<RoomConnectionState>('connecting')
   const [shareStatus, setShareStatus] = useState('')
+  const [teamName, setTeamName] = useState('')
   const [now, setNow] = useState(() => Date.now())
   const requestSequence = useRef(0)
   const activeRequest = useRef<AbortController | null>(null)
@@ -248,6 +251,18 @@ export function RoomPage() {
     await mutateRoom(() => startGame(code, { playerToken: activePlayerToken }))
   }
 
+  async function handleCreateTeam(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!activePlayerToken) return setErrorMessage('Missing player session token')
+    await mutateRoom(() => createTeam(code, { playerToken: activePlayerToken, name: teamName }))
+    setTeamName('')
+  }
+
+  async function handleAssignTeam(playerId: string, teamId: string) {
+    if (!activePlayerToken) return setErrorMessage('Missing player session token')
+    await mutateRoom(() => assignTeam(code, playerId, { playerToken: activePlayerToken, teamId }))
+  }
+
   async function handleSubmitGuess(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!activePlayerToken || !currentRound) return setErrorMessage('Missing player session or round state')
@@ -363,6 +378,28 @@ export function RoomPage() {
           <section className="phase-card">
             <h2>Lobby</h2>
             <p className="info-note">Start when everyone has joined. New players cannot join after the game begins.</p>
+            {room?.settings.mode === 'teams' ? (
+              <div className="team-setup">
+                <p className="info-note">Create 2–4 teams and assign every player. Assignments lock at start; answer claims stay global.</p>
+                {isHost ? (
+                  <>
+                    <form className="answer-form" onSubmit={handleCreateTeam}>
+                      <input aria-label="New team name" maxLength={24} onChange={(event) => setTeamName(event.target.value)} placeholder="Team name" value={teamName} />
+                      <button className="button button-secondary" disabled={isMutating || !teamName.trim() || (room.teams?.length ?? 0) >= 4} type="submit">Create team</button>
+                    </form>
+                    {room.players.map((player) => (
+                      <label key={player.id}>
+                        {player.displayName}
+                        <select aria-label={`Team for ${player.displayName}`} disabled={isMutating} onChange={(event) => void handleAssignTeam(player.id, event.target.value)} value={player.teamId ?? ''}>
+                          <option value="" disabled>Assign a team</option>
+                          {room.teams?.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}
+                        </select>
+                      </label>
+                    ))}
+                  </>
+                ) : <p className="status-note">The host is assigning teams.</p>}
+              </div>
+            ) : null}
             {isHost ? (
               <button className="button button-primary" disabled={isMutating} onClick={() => void handleStartGame()} type="button">
                 {isMutating ? 'Starting…' : 'Start game'}
@@ -499,6 +536,15 @@ export function RoomPage() {
                   <em>{entry.score} pts</em>
                 </div>
               )
+            })}
+          </div>
+        ) : null}
+        {currentGame?.teamScoreboard?.length ? (
+          <div className="score-list">
+            <div className="section-heading compact-heading"><p className="eyebrow">Teams</p><h2>{isGameCompleted ? 'Final team ranking' : 'Team scores'}</h2></div>
+            {[...currentGame.teamScoreboard].sort((a, b) => b.score - a.score || a.name.localeCompare(b.name)).map((team, index, ranked) => {
+              const winner = isGameCompleted && team.score === ranked[0]?.score
+              return <div className={winner ? 'score-row score-row-winner' : 'score-row'} key={team.teamId}><strong>#{index + 1}</strong><span>{team.name}{winner ? ' — team winner' : ''}</span><em>{team.score} pts</em></div>
             })}
           </div>
         ) : null}

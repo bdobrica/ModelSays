@@ -70,6 +70,16 @@ type playAgainRequest struct {
 	PlayerToken string `json:"playerToken"`
 }
 
+type createTeamRequest struct {
+	PlayerToken string `json:"playerToken"`
+	Name        string `json:"name"`
+}
+
+type assignTeamRequest struct {
+	PlayerToken string `json:"playerToken"`
+	TeamID      string `json:"teamId"`
+}
+
 type overrideMatchRequest struct {
 	PlayerToken               string  `json:"playerToken"`
 	RoundID                   string  `json:"roundId"`
@@ -89,6 +99,7 @@ type publicRoom struct {
 	Status      models.RoomStatus   `json:"status"`
 	Settings    models.RoomSettings `json:"settings"`
 	Players     []publicPlayer      `json:"players"`
+	Teams       []models.Team       `json:"teams,omitempty"`
 	CurrentGame *publicGame         `json:"currentGame,omitempty"`
 	CreatedAt   time.Time           `json:"createdAt"`
 	UpdatedAt   time.Time           `json:"updatedAt"`
@@ -100,20 +111,22 @@ type publicPlayer struct {
 	DisplayName string    `json:"displayName"`
 	IsHost      bool      `json:"isHost"`
 	JoinedAt    time.Time `json:"joinedAt"`
+	TeamID      string    `json:"teamId,omitempty"`
 }
 
 type publicGame struct {
-	ID                string                   `json:"id"`
-	ReplayID          string                   `json:"replayId,omitempty"`
-	Status            models.GameStatus        `json:"status"`
-	Mode              models.GameMode          `json:"mode"`
-	TotalRounds       int                      `json:"totalRounds"`
-	CurrentRoundIndex int                      `json:"currentRoundIndex"`
-	CurrentRound      *publicRound             `json:"currentRound,omitempty"`
-	Scoreboard        []models.ScoreboardEntry `json:"scoreboard,omitempty"`
-	CreatedAt         time.Time                `json:"createdAt"`
-	StartedAt         time.Time                `json:"startedAt"`
-	EndedAt           *time.Time               `json:"endedAt,omitempty"`
+	ID                string                       `json:"id"`
+	ReplayID          string                       `json:"replayId,omitempty"`
+	Status            models.GameStatus            `json:"status"`
+	Mode              models.GameMode              `json:"mode"`
+	TotalRounds       int                          `json:"totalRounds"`
+	CurrentRoundIndex int                          `json:"currentRoundIndex"`
+	CurrentRound      *publicRound                 `json:"currentRound,omitempty"`
+	Scoreboard        []models.ScoreboardEntry     `json:"scoreboard,omitempty"`
+	TeamScoreboard    []models.TeamScoreboardEntry `json:"teamScoreboard,omitempty"`
+	CreatedAt         time.Time                    `json:"createdAt"`
+	StartedAt         time.Time                    `json:"startedAt"`
+	EndedAt           *time.Time                   `json:"endedAt,omitempty"`
 }
 
 type publicRound struct {
@@ -267,6 +280,10 @@ func (server *Server) handleRoomRoutes(writer http.ResponseWriter, request *http
 		server.handleNextRound(writer, request, code)
 	case request.Method == http.MethodPost && len(parts) == 2 && parts[1] == "play-again":
 		server.handlePlayAgain(writer, request, code)
+	case request.Method == http.MethodPost && len(parts) == 2 && parts[1] == "teams":
+		server.handleCreateTeam(writer, request, code)
+	case request.Method == http.MethodPost && len(parts) == 4 && parts[1] == "players" && parts[3] == "team":
+		server.handleAssignTeam(writer, request, code, parts[2])
 	case request.Method == http.MethodPost && len(parts) == 2 && parts[1] == "override-match":
 		server.handleOverrideMatch(writer, request, code)
 	case request.Method == http.MethodPost && len(parts) == 4 && parts[1] == "rounds" && parts[3] == "guesses":
@@ -276,6 +293,34 @@ func (server *Server) handleRoomRoutes(writer http.ResponseWriter, request *http
 	default:
 		writeError(writer, http.StatusNotFound, "room route not found")
 	}
+}
+
+func (server *Server) handleCreateTeam(writer http.ResponseWriter, request *http.Request, code string) {
+	var payload createTeamRequest
+	if err := decodeJSONBody(writer, request, &payload); err != nil {
+		writeError(writer, http.StatusBadRequest, "invalid JSON payload")
+		return
+	}
+	room, err := server.roomService.CreateTeam(request.Context(), game.CreateTeamInput{Code: code, PlayerToken: payload.PlayerToken, Name: payload.Name})
+	if err != nil {
+		server.writeDomainError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusCreated, roomResponse{Room: projectRoom(room)})
+}
+
+func (server *Server) handleAssignTeam(writer http.ResponseWriter, request *http.Request, code, playerID string) {
+	var payload assignTeamRequest
+	if err := decodeJSONBody(writer, request, &payload); err != nil {
+		writeError(writer, http.StatusBadRequest, "invalid JSON payload")
+		return
+	}
+	room, err := server.roomService.AssignTeam(request.Context(), game.AssignTeamInput{Code: code, PlayerToken: payload.PlayerToken, PlayerID: playerID, TeamID: payload.TeamID})
+	if err != nil {
+		server.writeDomainError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, roomResponse{Room: projectRoom(room)})
 }
 
 func (server *Server) handleReplay(writer http.ResponseWriter, request *http.Request) {
@@ -763,15 +808,17 @@ func (server *Server) writeDomainError(writer http.ResponseWriter, err error) {
 		writeError(writer, http.StatusNotFound, err.Error())
 	case errors.Is(err, game.ErrUnauthorizedStart):
 		writeError(writer, http.StatusForbidden, err.Error())
-	case errors.Is(err, game.ErrUnauthorizedReveal), errors.Is(err, game.ErrUnauthorizedAdvance), errors.Is(err, game.ErrUnauthorizedOverride), errors.Is(err, game.ErrUnauthorizedAudit), errors.Is(err, game.ErrUnauthorizedJudgeReview), errors.Is(err, game.ErrUnauthorizedPlayAgain), errors.Is(err, game.ErrPlayerNotFound):
+	case errors.Is(err, game.ErrUnauthorizedReveal), errors.Is(err, game.ErrUnauthorizedAdvance), errors.Is(err, game.ErrUnauthorizedOverride), errors.Is(err, game.ErrUnauthorizedAudit), errors.Is(err, game.ErrUnauthorizedJudgeReview), errors.Is(err, game.ErrUnauthorizedPlayAgain), errors.Is(err, game.ErrUnauthorizedTeams), errors.Is(err, game.ErrPlayerNotFound):
 		writeError(writer, http.StatusForbidden, err.Error())
+	case errors.Is(err, game.ErrTeamNotFound):
+		writeError(writer, http.StatusNotFound, err.Error())
 	case errors.Is(err, game.ErrGameAlreadyStarted), errors.Is(err, game.ErrGameAlreadyCompleted), errors.Is(err, game.ErrRoomJoinClosed):
 		writeError(writer, http.StatusConflict, err.Error())
 	case errors.Is(err, game.ErrRoundNotAcceptingGuesses), errors.Is(err, game.ErrAnswerPhaseExpired), errors.Is(err, game.ErrRoundAlreadyRevealed), errors.Is(err, game.ErrRoundNotRevealed), errors.Is(err, game.ErrGuessAlreadySubmitted), errors.Is(err, game.ErrReplayNotReady):
 		writeError(writer, http.StatusConflict, err.Error())
 	case errors.Is(err, game.ErrContentUnavailable):
 		writeError(writer, http.StatusServiceUnavailable, game.ErrContentUnavailable.Error())
-	case errors.Is(err, game.ErrDisplayNameInvalid), errors.Is(err, game.ErrRoomNameInvalid), errors.Is(err, game.ErrRoomCodeInvalid), errors.Is(err, game.ErrRoomSettingsInvalid), errors.Is(err, game.ErrDuplicatePlayer), errors.Is(err, game.ErrAnswerInvalid), errors.Is(err, game.ErrPredictionAnswerNotFound), errors.Is(err, game.ErrGuessNotFound):
+	case errors.Is(err, game.ErrDisplayNameInvalid), errors.Is(err, game.ErrRoomNameInvalid), errors.Is(err, game.ErrRoomCodeInvalid), errors.Is(err, game.ErrRoomSettingsInvalid), errors.Is(err, game.ErrDuplicatePlayer), errors.Is(err, game.ErrAnswerInvalid), errors.Is(err, game.ErrPredictionAnswerNotFound), errors.Is(err, game.ErrGuessNotFound), errors.Is(err, game.ErrTeamNameInvalid), errors.Is(err, game.ErrTeamConfigurationInvalid):
 		writeError(writer, http.StatusBadRequest, err.Error())
 	default:
 		server.logger.Error("unexpected request failure", "error", err)
@@ -862,6 +909,7 @@ func projectRoom(room models.Room) publicRoom {
 		Status:    room.Status,
 		Settings:  room.Settings,
 		Players:   make([]publicPlayer, 0, len(room.Players)),
+		Teams:     append([]models.Team(nil), room.Teams...),
 		CreatedAt: room.CreatedAt,
 		UpdatedAt: room.UpdatedAt,
 		Revision:  room.Revision,
@@ -872,6 +920,7 @@ func projectRoom(room models.Room) publicRoom {
 			DisplayName: player.DisplayName,
 			IsHost:      player.IsHost,
 			JoinedAt:    player.JoinedAt,
+			TeamID:      player.TeamID,
 		})
 	}
 
@@ -887,6 +936,7 @@ func projectRoom(room models.Room) publicRoom {
 		TotalRounds:       gameState.TotalRounds,
 		CurrentRoundIndex: gameState.CurrentRoundIndex,
 		Scoreboard:        append([]models.ScoreboardEntry(nil), gameState.Scoreboard...),
+		TeamScoreboard:    append([]models.TeamScoreboardEntry(nil), gameState.TeamScoreboard...),
 		CreatedAt:         gameState.CreatedAt,
 		StartedAt:         gameState.StartedAt,
 		EndedAt:           gameState.EndedAt,
@@ -924,6 +974,23 @@ func projectRoom(room models.Room) publicRoom {
 	for index := range projectedGame.Scoreboard {
 		projectedGame.Scoreboard[index].Score -= currentRoundScores[projectedGame.Scoreboard[index].PlayerID]
 	}
+	projectedGame.TeamScoreboard = projectTeamScores(room.Teams, room.Players, projectedGame.Scoreboard)
 
 	return projected
+}
+
+func projectTeamScores(teams []models.Team, players []models.Player, scores []models.ScoreboardEntry) []models.TeamScoreboardEntry {
+	playerTeams := make(map[string]string, len(players))
+	for _, player := range players {
+		playerTeams[player.ID] = player.TeamID
+	}
+	totals := make(map[string]int, len(teams))
+	for _, score := range scores {
+		totals[playerTeams[score.PlayerID]] += score.Score
+	}
+	result := make([]models.TeamScoreboardEntry, 0, len(teams))
+	for _, team := range teams {
+		result = append(result, models.TeamScoreboardEntry{TeamID: team.ID, Name: team.Name, Score: totals[team.ID]})
+	}
+	return result
 }

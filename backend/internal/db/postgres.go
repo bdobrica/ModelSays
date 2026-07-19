@@ -123,8 +123,8 @@ func (repository *PostgresRoomRepository) Ready(ctx context.Context) error {
 	if err := repository.pool.QueryRow(checkCtx, `SELECT version_id, is_applied = false FROM goose_db_version ORDER BY id DESC LIMIT 1`).Scan(&version, &dirty); err != nil {
 		return fmt.Errorf("migration compatibility: %w", err)
 	}
-	if dirty || version != 10 {
-		return fmt.Errorf("migration compatibility: database version %d dirty=%t, want 10 clean", version, dirty)
+	if dirty || version != 11 {
+		return fmt.Errorf("migration compatibility: database version %d dirty=%t, want 11 clean", version, dirty)
 	}
 	return nil
 }
@@ -450,6 +450,80 @@ func (repository *PostgresRoomRepository) AddPlayer(ctx context.Context, code st
 		return models.Room{}, fmt.Errorf("commit add player tx: %w", err)
 	}
 
+	return room, nil
+}
+
+func (repository *PostgresRoomRepository) CreateTeam(ctx context.Context, code string, team models.Team) (models.Room, error) {
+	tx, err := repository.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return models.Room{}, fmt.Errorf("begin create team tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	var status models.RoomStatus
+	if err := tx.QueryRow(ctx, `SELECT status FROM rooms WHERE code=$1 FOR UPDATE`, code).Scan(&status); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return models.Room{}, game.ErrRoomNotFound
+		}
+		return models.Room{}, fmt.Errorf("lock room for team creation: %w", err)
+	}
+	if status != models.RoomStatusLobby {
+		return models.Room{}, game.ErrGameAlreadyStarted
+	}
+	var count int
+	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM teams WHERE room_code=$1`, code).Scan(&count); err != nil {
+		return models.Room{}, err
+	}
+	if count >= 4 {
+		return models.Room{}, game.ErrTeamConfigurationInvalid
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO teams (id,room_code,name,name_normalized,created_at) VALUES ($1,$2,$3,$4,$5)`,
+		team.ID, code, team.Name, strings.ToLower(strings.TrimSpace(team.Name)), time.Now().UTC())
+	if err != nil {
+		if isUniqueViolation(err) {
+			return models.Room{}, game.ErrTeamConfigurationInvalid
+		}
+		return models.Room{}, fmt.Errorf("insert team: %w", err)
+	}
+	room, err := repository.loadRoom(ctx, tx, code)
+	if err != nil {
+		return models.Room{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return models.Room{}, fmt.Errorf("commit create team: %w", err)
+	}
+	return room, nil
+}
+
+func (repository *PostgresRoomRepository) AssignPlayerTeam(ctx context.Context, code, playerID, teamID string) (models.Room, error) {
+	tx, err := repository.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return models.Room{}, fmt.Errorf("begin assign team tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	var status models.RoomStatus
+	if err := tx.QueryRow(ctx, `SELECT status FROM rooms WHERE code=$1 FOR UPDATE`, code).Scan(&status); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return models.Room{}, game.ErrRoomNotFound
+		}
+		return models.Room{}, err
+	}
+	if status != models.RoomStatusLobby {
+		return models.Room{}, game.ErrGameAlreadyStarted
+	}
+	tag, err := tx.Exec(ctx, `UPDATE players SET team_id=$3 WHERE room_code=$1 AND id=$2 AND EXISTS (SELECT 1 FROM teams WHERE id=$3 AND room_code=$1)`, code, playerID, teamID)
+	if err != nil {
+		return models.Room{}, fmt.Errorf("assign player team: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return models.Room{}, game.ErrTeamNotFound
+	}
+	room, err := repository.loadRoom(ctx, tx, code)
+	if err != nil {
+		return models.Room{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return models.Room{}, fmt.Errorf("commit assign team: %w", err)
+	}
 	return room, nil
 }
 
@@ -902,7 +976,7 @@ func (repository *PostgresRoomRepository) loadRoom(ctx context.Context, querier 
 	}
 
 	rows, err := querier.Query(ctx, `
-		SELECT id, display_name, is_host, token, joined_at
+		SELECT id, display_name, is_host, token, joined_at, COALESCE(team_id, '')
 		FROM players
 		WHERE room_code = $1
 		ORDER BY joined_at ASC, id ASC
@@ -915,7 +989,7 @@ func (repository *PostgresRoomRepository) loadRoom(ctx context.Context, querier 
 	players := make([]models.Player, 0)
 	for rows.Next() {
 		var player models.Player
-		if err := rows.Scan(&player.ID, &player.DisplayName, &player.IsHost, &player.Token, &player.JoinedAt); err != nil {
+		if err := rows.Scan(&player.ID, &player.DisplayName, &player.IsHost, &player.Token, &player.JoinedAt, &player.TeamID); err != nil {
 			return models.Room{}, fmt.Errorf("scan player: %w", err)
 		}
 		players = append(players, player)
@@ -926,6 +1000,23 @@ func (repository *PostgresRoomRepository) loadRoom(ctx context.Context, querier 
 	}
 
 	room.Players = players
+	teamRows, err := querier.Query(ctx, `SELECT id,name FROM teams WHERE room_code=$1 ORDER BY created_at,id`, code)
+	if err != nil {
+		return models.Room{}, fmt.Errorf("query room teams: %w", err)
+	}
+	for teamRows.Next() {
+		var team models.Team
+		if err := teamRows.Scan(&team.ID, &team.Name); err != nil {
+			teamRows.Close()
+			return models.Room{}, err
+		}
+		room.Teams = append(room.Teams, team)
+	}
+	if err := teamRows.Err(); err != nil {
+		teamRows.Close()
+		return models.Room{}, err
+	}
+	teamRows.Close()
 	room.CurrentGame, err = repository.loadCurrentGame(ctx, querier, code)
 	if err != nil {
 		return models.Room{}, err
@@ -938,9 +1029,26 @@ func (repository *PostgresRoomRepository) loadRoom(ctx context.Context, querier 
 		if room.CurrentGame.CurrentRound != nil {
 			markSubmittedPlayers(room.CurrentGame.Scoreboard, room.CurrentGame.CurrentRound.Guesses)
 		}
+		room.CurrentGame.TeamScoreboard = deriveTeamScoreboard(room.Teams, room.Players, room.CurrentGame.Scoreboard)
 	}
 
 	return room, nil
+}
+
+func deriveTeamScoreboard(teams []models.Team, players []models.Player, scores []models.ScoreboardEntry) []models.TeamScoreboardEntry {
+	playerTeams := make(map[string]string, len(players))
+	for _, player := range players {
+		playerTeams[player.ID] = player.TeamID
+	}
+	totals := make(map[string]int, len(teams))
+	for _, score := range scores {
+		totals[playerTeams[score.PlayerID]] += score.Score
+	}
+	result := make([]models.TeamScoreboardEntry, 0, len(teams))
+	for _, team := range teams {
+		result = append(result, models.TeamScoreboardEntry{TeamID: team.ID, Name: team.Name, Score: totals[team.ID]})
+	}
+	return result
 }
 
 func (repository *PostgresRoomRepository) loadCurrentGame(ctx context.Context, querier queryRower, code string) (*models.Game, error) {

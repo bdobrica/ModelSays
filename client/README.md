@@ -4,13 +4,13 @@ Model Says is a live-updating party game where players try to guess what an AI m
 
 This client is a React app for joining rooms, playing rounds, submitting answers, watching reveals, and viewing scores. It should be optimized for parties, Zoom/team-building sessions, and casual play.
 
-The current creation form follows the backend MVP contract: simultaneous mode, 1–5 rounds, a 15–120 second timer, English locale, and the default `gpt-4.1-mini` prediction model. Room and display-name inputs are capped at the server's 48- and 24-character limits. Invite links stop accepting new players once the host starts the game.
+The current creation form supports individual or team-based simultaneous play, 1–5 rounds, a 15–120 second timer, English locale, and the default `gpt-4.1-mini` prediction model. Room and display-name inputs are capped at the server's 48- and 24-character limits. Invite links stop accepting new players once the host starts the game.
 
 The playable client authenticates an SSE stream with a request header and treats every event as an invalidation: authoritative state still comes from a sequenced room refetch. It coalesces bursts, resumes from the last applied room revision, detects gaps, reconnects with bounded exponential backoff, and automatically retains slower polling as recovery. Polling and reconnect work are reduced in hidden tabs and stop at game completion or when the room route is left. A polite status indicator reports live, reconnecting, offline, and complete states without blocking play.
 
 ## Supported MVP
 
-The client supports the complete simultaneous game path: create/join, live lobby, host start, a server-deadline countdown, one locked answer, automatic expiry reveal, host early reveal and override, private post-reveal semantic suggestions for the host, next round, final ranked winners/ties, share/copy results, a round-by-round replay route, host play-again into a clean lobby, and server-validated same-browser refresh recovery. The layout collapses to one column below 900 px for phone-sized player views.
+The client supports the complete simultaneous game path in individual and team modes: create/join, team setup, live lobby, host start, a server-deadline countdown, one locked answer per player, automatic expiry reveal, host early reveal and override, private post-reveal semantic suggestions for the host, individual and team rankings/ties, share/copy results, a round-by-round replay route, host play-again into a clean lobby, and server-validated same-browser refresh recovery. The layout collapses to one column below 900 px for phone-sized player views.
 
 The client suite covers the event contract and every event type, header authentication, burst coalescing, duplicate/out-of-order/gapped revisions, malformed/secret-bearing payload rejection, reconnect/resume, offline/online and stop behavior, plus room-flow stale-response protection. The PostgreSQL lifecycle gate separately exercises one host and two player identities across the persisted API flow.
 
@@ -22,7 +22,7 @@ The client opens `GET /api/rooms/{code}/events` with `X-Player-Token`; credentia
 
 ## Known Limitations
 
-Next-round advancement remains a host action, and automatic reveal requires the backend's PostgreSQL worker. Matching corrections happen only after reveal. Sessions do not transfer across devices, and presence is not tracked. Teams, sequential mode, animations, and a dedicated browser end-to-end harness are deferred. Physical-device and lossy mobile-network playtesting is still recommended before public release.
+Next-round advancement remains a host action, and automatic reveal requires the backend's PostgreSQL worker. Matching corrections happen only after reveal. Sessions do not transfer across devices, and presence is not tracked. Sequential mode, animations, and a dedicated browser end-to-end harness are deferred. Physical-device and lossy mobile-network playtesting is still recommended before public release.
 
 ## Core Experience
 

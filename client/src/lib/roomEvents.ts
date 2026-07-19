@@ -2,6 +2,7 @@ import { env } from './env'
 
 export const roomEventTypes = [
   'player_joined',
+  'teams_changed',
   'game_started',
   'submission_progress_changed',
   'round_revealed',

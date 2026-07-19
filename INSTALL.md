@@ -57,16 +57,18 @@ After the first installation, `make start` starts the stack without reinstalling
 
 Use separate browser profiles, private windows, or devices so each participant has separate browser storage.
 
-1. The host opens `http://localhost:5173`, selects **Create room**, enters a name, chooses 1–5 rounds and a 15–120 second timer, and creates the room.
+1. The host opens `http://localhost:5173`, selects **Create room**, enters a name, chooses individual or team mode, 1–5 rounds, and a 15–120 second timer, then creates the room.
 2. Share the six-character room code or the room URL before starting.
 3. Each player opens **Join room**, enters the code and a display name, and joins the lobby.
-4. The host waits for everyone to appear, then selects **Start game**.
+4. The host waits for everyone to appear. In team mode, create 2–4 teams and assign every player; every team must have a player. Then select **Start game**. Team assignments cannot change afterward.
 5. Each participant submits one answer before the countdown expires. The answer board and round scoring stay hidden during this phase.
 6. At expiry the server reveals automatically; the host can reveal early if desired.
 7. Everyone reviews the frozen board, matches, duplicate claims, and scores. For deterministic misses, the host may see a private semantic suggestion and can accept it, choose another answer, or retain the miss.
 8. The host selects **Next round**. After the final reveal, advancing once more opens the ranked final scoreboard.
 
 Only the earliest accepted guess matching a board answer earns its points. A later canonical or alias match for the same answer is shown as a zero-point duplicate. Automatic matching ignores capitalization, punctuation, and repeated whitespace. Optional judge suggestions are advisory, hidden until reveal, and never score without a host override.
+
+In team mode, guesses and answer claims remain individual and global: a player on one team can claim an answer before every other team. Team totals are the sum of member score events, so host overrides update individual and team results together.
 
 Refreshing the same browser restores its player session. Do not clear browser storage during a game. Cross-device session transfer is not currently supported.
 

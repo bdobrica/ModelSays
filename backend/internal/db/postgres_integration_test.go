@@ -117,6 +117,75 @@ func TestPostgresAtomicAnswerClaimsAndReload(t *testing.T) {
 	}
 }
 
+func TestPostgresTeamTotalsEqualScoreEventsAfterConcurrentPlayAndReload(t *testing.T) {
+	pool := integrationPool(t)
+	service := game.NewRoomService(db.NewPostgresRoomRepository(pool), nil)
+	ctx := context.Background()
+	room, host, err := service.CreateRoom(ctx, game.CreateRoomInput{RoomName: "Team audit", HostDisplayName: "Host",
+		Settings: models.RoomSettings{Mode: models.GameModeTeams, TotalRounds: 1, AnswerTimerSeconds: 30}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	room, guest, err := service.JoinRoom(ctx, game.JoinRoomInput{Code: room.Code, DisplayName: "Guest"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	room, err = service.CreateTeam(ctx, game.CreateTeamInput{Code: room.Code, PlayerToken: host.Token, Name: "Blue"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	room, err = service.CreateTeam(ctx, game.CreateTeamInput{Code: room.Code, PlayerToken: host.Token, Name: "Gold"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if room, err = service.AssignTeam(ctx, game.AssignTeamInput{Code: room.Code, PlayerToken: host.Token, PlayerID: host.ID, TeamID: room.Teams[0].ID}); err != nil {
+		t.Fatal(err)
+	}
+	if room, err = service.AssignTeam(ctx, game.AssignTeamInput{Code: room.Code, PlayerToken: host.Token, PlayerID: guest.ID, TeamID: room.Teams[1].ID}); err != nil {
+		t.Fatal(err)
+	}
+	room, err = service.StartGame(ctx, game.StartGameInput{Code: room.Code, PlayerToken: host.Token})
+	if err != nil {
+		t.Fatal(err)
+	}
+	round := room.CurrentGame.CurrentRound
+	answers := round.Board.Answers[:2]
+	var group sync.WaitGroup
+	group.Add(2)
+	for index, player := range []models.Player{host, guest} {
+		go func(player models.Player, answer string) {
+			defer group.Done()
+			if _, submitErr := service.SubmitGuess(ctx, game.SubmitGuessInput{Code: room.Code, RoundID: round.ID, PlayerToken: player.Token, Answer: answer}); submitErr != nil {
+				t.Errorf("submit guess: %v", submitErr)
+			}
+		}(player, answers[index].CanonicalAnswer)
+	}
+	group.Wait()
+	reloaded, err := db.NewPostgresRoomRepository(pool).GetRoom(ctx, room.Code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eventTotals := make(map[string]int)
+	rows, err := pool.Query(ctx, `SELECT p.team_id, SUM(s.delta) FROM score_events s JOIN players p ON p.id=s.player_id WHERE s.game_id=$1 GROUP BY p.team_id`, room.CurrentGame.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var teamID string
+		var total int
+		if err := rows.Scan(&teamID, &total); err != nil {
+			t.Fatal(err)
+		}
+		eventTotals[teamID] = total
+	}
+	for _, team := range reloaded.CurrentGame.TeamScoreboard {
+		if team.Score != eventTotals[team.TeamID] {
+			t.Fatalf("team %s score=%d event sum=%d", team.Name, team.Score, eventTotals[team.TeamID])
+		}
+	}
+}
+
 func TestReplayMigrationDownAndUp(t *testing.T) {
 	pool := integrationPool(t)
 	path := migrationPath(t, "000010_game_replays.sql")
@@ -128,6 +197,13 @@ func TestReplayMigrationDownAndUp(t *testing.T) {
 	if !indexExists(t, pool, "games_replay_id_idx") {
 		t.Fatal("replay index missing after migration up")
 	}
+}
+
+func TestTeamModeMigrationDownAndUp(t *testing.T) {
+	pool := integrationPool(t)
+	path := migrationPath(t, "000011_team_mode.sql")
+	executeMigrationSection(t, pool, path, false)
+	executeMigrationSection(t, pool, path, true)
 }
 
 func TestPostgresReplayAndPlayAgainIsolation(t *testing.T) {

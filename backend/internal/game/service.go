@@ -51,6 +51,10 @@ var (
 	ErrReplayNotFound           = errors.New("replay is unavailable or has expired")
 	ErrReplayNotReady           = errors.New("replay is available only after the game is complete")
 	ErrUnauthorizedPlayAgain    = errors.New("only the host can play again")
+	ErrUnauthorizedTeams        = errors.New("only the host can configure teams")
+	ErrTeamNameInvalid          = errors.New("team name must be between 2 and 24 characters")
+	ErrTeamNotFound             = errors.New("team not found")
+	ErrTeamConfigurationInvalid = errors.New("team games require 2 to 4 non-empty teams and every player assigned")
 )
 
 const (
@@ -111,6 +115,14 @@ type NextRoundInput struct {
 type PlayAgainInput struct {
 	Code        string
 	PlayerToken string
+}
+
+type CreateTeamInput struct {
+	Code, PlayerToken, Name string
+}
+
+type AssignTeamInput struct {
+	Code, PlayerToken, PlayerID, TeamID string
 }
 
 type OverrideMatchInput struct {
@@ -182,6 +194,8 @@ type RoomRepository interface {
 	ListRoomEvents(ctx context.Context, code string, afterRevision int64, limit int) ([]models.RoomEvent, error)
 	GetRoomByReplayID(ctx context.Context, replayID string) (models.Room, error)
 	ListGameRounds(ctx context.Context, gameID string) ([]models.Round, error)
+	CreateTeam(ctx context.Context, code string, team models.Team) (models.Room, error)
+	AssignPlayerTeam(ctx context.Context, code, playerID, teamID string) (models.Room, error)
 }
 
 func NewRoomService(repository RoomRepository, modelClient llm.ModelClient) *RoomService {
@@ -428,6 +442,11 @@ func (service *RoomService) StartGame(ctx context.Context, input StartGameInput)
 	if !isHostToken(room.Players, playerToken) {
 		return models.Room{}, ErrUnauthorizedStart
 	}
+	if room.Settings.Mode == models.GameModeTeams {
+		if err := validateTeamConfiguration(room); err != nil {
+			return models.Room{}, err
+		}
+	}
 
 	now := service.clock.Now()
 	gameID := newID()
@@ -445,6 +464,7 @@ func (service *RoomService) StartGame(ctx context.Context, input StartGameInput)
 		TotalRounds:       room.Settings.TotalRounds,
 		CurrentRoundIndex: 1,
 		Scoreboard:        initialScoreboard(room.Players),
+		TeamScoreboard:    deriveTeamScoreboard(room.Teams, room.Players, initialScoreboard(room.Players)),
 		CreatedAt:         now,
 		StartedAt:         now,
 		CurrentRound: &models.Round{
@@ -669,14 +689,22 @@ func (service *RoomService) GetReplay(ctx context.Context, replayID string) (mod
 	summary := models.ReplaySummary{
 		ID: replayID, RoomName: room.Name, Mode: room.CurrentGame.Mode,
 		StartedAt: room.CurrentGame.StartedAt, EndedAt: *room.CurrentGame.EndedAt,
-		Rankings: append([]models.ScoreboardEntry(nil), room.CurrentGame.Scoreboard...),
-		Rounds:   make([]models.ReplayRound, 0, len(rounds)),
+		Rankings:     append([]models.ScoreboardEntry(nil), room.CurrentGame.Scoreboard...),
+		TeamRankings: deriveTeamScoreboard(room.Teams, room.Players, room.CurrentGame.Scoreboard),
+		Teams:        append([]models.Team(nil), room.Teams...),
+		Rounds:       make([]models.ReplayRound, 0, len(rounds)),
 	}
 	sort.Slice(summary.Rankings, func(i, j int) bool {
 		if summary.Rankings[i].Score == summary.Rankings[j].Score {
 			return summary.Rankings[i].DisplayName < summary.Rankings[j].DisplayName
 		}
 		return summary.Rankings[i].Score > summary.Rankings[j].Score
+	})
+	sort.Slice(summary.TeamRankings, func(i, j int) bool {
+		if summary.TeamRankings[i].Score == summary.TeamRankings[j].Score {
+			return summary.TeamRankings[i].Name < summary.TeamRankings[j].Name
+		}
+		return summary.TeamRankings[i].Score > summary.TeamRankings[j].Score
 	})
 	for _, round := range rounds {
 		if round.Status != models.RoundStatusRevealed || round.Board == nil {
@@ -712,6 +740,75 @@ func (service *RoomService) GetReplay(ctx context.Context, replayID string) (mod
 		summary.Rounds = append(summary.Rounds, replayRound)
 	}
 	return summary, nil
+}
+
+func (service *RoomService) CreateTeam(ctx context.Context, input CreateTeamInput) (models.Room, error) {
+	code, err := normalizeRoomCode(input.Code)
+	if err != nil {
+		return models.Room{}, err
+	}
+	name := strings.TrimSpace(input.Name)
+	if validateBoundedText(name, 2, 24) != nil {
+		return models.Room{}, ErrTeamNameInvalid
+	}
+	room, err := service.repository.GetRoom(ctx, code)
+	if err != nil {
+		return models.Room{}, err
+	}
+	if room.Status != models.RoomStatusLobby || room.CurrentGame != nil {
+		return models.Room{}, ErrGameAlreadyStarted
+	}
+	if !isHostToken(room.Players, strings.TrimSpace(input.PlayerToken)) {
+		return models.Room{}, ErrUnauthorizedTeams
+	}
+	if room.Settings.Mode != models.GameModeTeams || len(room.Teams) >= 4 {
+		return models.Room{}, ErrTeamConfigurationInvalid
+	}
+	for _, team := range room.Teams {
+		if strings.EqualFold(team.Name, name) {
+			return models.Room{}, ErrTeamConfigurationInvalid
+		}
+	}
+	updated, err := service.repository.CreateTeam(ctx, code, models.Team{ID: newID(), Name: name})
+	if err == nil {
+		updated = service.publishRoomEvent(ctx, updated, models.RoomEventTeamsChanged)
+	}
+	return updated, err
+}
+
+func (service *RoomService) AssignTeam(ctx context.Context, input AssignTeamInput) (models.Room, error) {
+	code, err := normalizeRoomCode(input.Code)
+	if err != nil {
+		return models.Room{}, err
+	}
+	room, err := service.repository.GetRoom(ctx, code)
+	if err != nil {
+		return models.Room{}, err
+	}
+	if room.Status != models.RoomStatusLobby || room.CurrentGame != nil {
+		return models.Room{}, ErrGameAlreadyStarted
+	}
+	if !isHostToken(room.Players, strings.TrimSpace(input.PlayerToken)) {
+		return models.Room{}, ErrUnauthorizedTeams
+	}
+	foundPlayer, foundTeam := false, false
+	for _, player := range room.Players {
+		foundPlayer = foundPlayer || player.ID == input.PlayerID
+	}
+	for _, team := range room.Teams {
+		foundTeam = foundTeam || team.ID == input.TeamID
+	}
+	if !foundPlayer {
+		return models.Room{}, ErrPlayerNotFound
+	}
+	if !foundTeam {
+		return models.Room{}, ErrTeamNotFound
+	}
+	updated, err := service.repository.AssignPlayerTeam(ctx, code, input.PlayerID, input.TeamID)
+	if err == nil {
+		updated = service.publishRoomEvent(ctx, updated, models.RoomEventTeamsChanged)
+	}
+	return updated, err
 }
 
 func (service *RoomService) PlayAgain(ctx context.Context, input PlayAgainInput) (models.Room, models.Player, error) {
@@ -985,8 +1082,8 @@ func validateDisplayName(displayName string) error {
 }
 
 func (service *RoomService) validateSettings(settings models.RoomSettings) error {
-	if settings.Mode != models.GameModeSimultaneous {
-		return fmt.Errorf("%w: mode must be simultaneous", ErrRoomSettingsInvalid)
+	if settings.Mode != models.GameModeSimultaneous && settings.Mode != models.GameModeTeams {
+		return fmt.Errorf("%w: mode must be simultaneous or teams", ErrRoomSettingsInvalid)
 	}
 	if settings.TotalRounds < minTotalRounds || settings.TotalRounds > maxTotalRounds {
 		return fmt.Errorf("%w: total rounds must be between %d and %d", ErrRoomSettingsInvalid, minTotalRounds, maxTotalRounds)
@@ -1001,6 +1098,44 @@ func (service *RoomService) validateSettings(settings models.RoomSettings) error
 		return fmt.Errorf("%w: prediction model must be %s", ErrRoomSettingsInvalid, service.predictionModel)
 	}
 	return nil
+}
+
+func validateTeamConfiguration(room models.Room) error {
+	if len(room.Teams) < 2 || len(room.Teams) > 4 {
+		return ErrTeamConfigurationInvalid
+	}
+	counts := make(map[string]int, len(room.Teams))
+	for _, team := range room.Teams {
+		counts[team.ID] = 0
+	}
+	for _, player := range room.Players {
+		if _, ok := counts[player.TeamID]; !ok {
+			return ErrTeamConfigurationInvalid
+		}
+		counts[player.TeamID]++
+	}
+	for _, count := range counts {
+		if count == 0 {
+			return ErrTeamConfigurationInvalid
+		}
+	}
+	return nil
+}
+
+func deriveTeamScoreboard(teams []models.Team, players []models.Player, scores []models.ScoreboardEntry) []models.TeamScoreboardEntry {
+	playerTeams := make(map[string]string, len(players))
+	for _, player := range players {
+		playerTeams[player.ID] = player.TeamID
+	}
+	totals := make(map[string]int, len(teams))
+	for _, score := range scores {
+		totals[playerTeams[score.PlayerID]] += score.Score
+	}
+	result := make([]models.TeamScoreboardEntry, 0, len(teams))
+	for _, team := range teams {
+		result = append(result, models.TeamScoreboardEntry{TeamID: team.ID, Name: team.Name, Score: totals[team.ID]})
+	}
+	return result
 }
 
 func validateBoundedText(value string, minimum int, maximum int) error {
@@ -1032,6 +1167,7 @@ func normalizeRoomCode(code string) (string, error) {
 func cloneRoom(room models.Room) models.Room {
 	clonedPlayers := append([]models.Player(nil), room.Players...)
 	room.Players = clonedPlayers
+	room.Teams = append([]models.Team(nil), room.Teams...)
 	room.CurrentGame = cloneGame(room.CurrentGame)
 	return room
 }
@@ -1047,6 +1183,7 @@ func cloneGame(gameState *models.Game) *models.Game {
 		clonedGame.EndedAt = &endedAt
 	}
 	clonedGame.Scoreboard = append([]models.ScoreboardEntry(nil), gameState.Scoreboard...)
+	clonedGame.TeamScoreboard = append([]models.TeamScoreboardEntry(nil), gameState.TeamScoreboard...)
 	if gameState.CurrentRound != nil {
 		clonedRound := *gameState.CurrentRound
 		clonedRound.Guesses = append([]models.Guess(nil), gameState.CurrentRound.Guesses...)

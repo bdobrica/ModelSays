@@ -13,6 +13,7 @@ type GameMode string
 
 const (
 	GameModeSimultaneous GameMode = "simultaneous"
+	GameModeTeams        GameMode = "teams"
 )
 
 type RoomSettings struct {
@@ -30,6 +31,12 @@ type Player struct {
 	IsHost      bool      `json:"isHost"`
 	JoinedAt    time.Time `json:"joinedAt"`
 	Token       string    `json:"token,omitempty"`
+	TeamID      string    `json:"teamId,omitempty"`
+}
+
+type Team struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 type Room struct {
@@ -38,6 +45,7 @@ type Room struct {
 	Status      RoomStatus   `json:"status"`
 	Settings    RoomSettings `json:"settings"`
 	Players     []Player     `json:"players"`
+	Teams       []Team       `json:"teams,omitempty"`
 	CurrentGame *Game        `json:"currentGame,omitempty"`
 	CreatedAt   time.Time    `json:"createdAt"`
 	UpdatedAt   time.Time    `json:"updatedAt"`

@@ -17,6 +17,8 @@ vi.mock('../lib/api', async () => {
     revealRound: vi.fn(),
     nextRound: vi.fn(),
     playAgain: vi.fn(),
+    createTeam: vi.fn(),
+    assignTeam: vi.fn(),
     overrideMatch: vi.fn(),
     getJudgeSuggestions: vi.fn(),
   }
@@ -256,5 +258,26 @@ describe('RoomPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Play again' }))
     await waitFor(() => expect(api.playAgain).toHaveBeenCalledWith('ABC234', { playerToken: host.token }))
+  })
+
+  it('lets the host create and assign teams in the lobby', async () => {
+    saveSession('ABC234', host)
+    const teamRoom: api.Room = {
+      ...roomState('lobby'),
+      settings: { ...settings, mode: 'teams' },
+      teams: [{ id: 'blue', name: 'Blue' }, { id: 'gold', name: 'Gold' }],
+    }
+    vi.mocked(api.recoverSession).mockResolvedValue({ room: teamRoom, player: host })
+    vi.mocked(api.getRoom).mockResolvedValue({ room: teamRoom })
+    vi.mocked(api.createTeam).mockResolvedValue({ room: teamRoom })
+    vi.mocked(api.assignTeam).mockResolvedValue({ room: teamRoom })
+    renderRoom()
+
+    fireEvent.change(await screen.findByLabelText('New team name'), { target: { value: 'Green' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create team' }))
+    await waitFor(() => expect(api.createTeam).toHaveBeenCalledWith('ABC234', { playerToken: host.token, name: 'Green' }))
+
+    fireEvent.change(screen.getByLabelText('Team for Player'), { target: { value: 'gold' } })
+    await waitFor(() => expect(api.assignTeam).toHaveBeenCalledWith('ABC234', player.id, { playerToken: host.token, teamId: 'gold' }))
   })
 })

@@ -146,6 +146,46 @@ func (repository *InMemoryRoomRepository) AddPlayer(_ context.Context, code stri
 	return cloneRoom(*room), nil
 }
 
+func (repository *InMemoryRoomRepository) CreateTeam(_ context.Context, code string, team models.Team) (models.Room, error) {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	room, ok := repository.rooms[code]
+	if !ok {
+		return models.Room{}, ErrRoomNotFound
+	}
+	if room.Status != models.RoomStatusLobby || room.CurrentGame != nil {
+		return models.Room{}, ErrGameAlreadyStarted
+	}
+	for _, existing := range room.Teams {
+		if strings.EqualFold(existing.Name, team.Name) {
+			return models.Room{}, ErrTeamConfigurationInvalid
+		}
+	}
+	room.Teams = append(room.Teams, team)
+	room.UpdatedAt = time.Now().UTC()
+	return cloneRoom(*room), nil
+}
+
+func (repository *InMemoryRoomRepository) AssignPlayerTeam(_ context.Context, code, playerID, teamID string) (models.Room, error) {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	room, ok := repository.rooms[code]
+	if !ok {
+		return models.Room{}, ErrRoomNotFound
+	}
+	if room.Status != models.RoomStatusLobby || room.CurrentGame != nil {
+		return models.Room{}, ErrGameAlreadyStarted
+	}
+	for index := range room.Players {
+		if room.Players[index].ID == playerID {
+			room.Players[index].TeamID = teamID
+			room.UpdatedAt = time.Now().UTC()
+			return cloneRoom(*room), nil
+		}
+	}
+	return models.Room{}, ErrPlayerNotFound
+}
+
 func (repository *InMemoryRoomRepository) StartGame(_ context.Context, code string, gameState models.Game) (models.Room, error) {
 	repository.mu.Lock()
 	defer repository.mu.Unlock()
@@ -198,6 +238,7 @@ func (repository *InMemoryRoomRepository) SubmitGuess(_ context.Context, code st
 	guess := ResolveGuess(submission, round.Board.Answers, round.Guesses)
 	round.Guesses = append(round.Guesses, guess)
 	applyGuessToScoreboard(room.CurrentGame, guess)
+	room.CurrentGame.TeamScoreboard = deriveTeamScoreboard(room.Teams, room.Players, room.CurrentGame.Scoreboard)
 	room.UpdatedAt = time.Now().UTC()
 
 	return cloneRoom(*room), nil
@@ -327,6 +368,7 @@ func (repository *InMemoryRoomRepository) OverrideGuess(_ context.Context, code 
 			}
 		}
 	}
+	room.CurrentGame.TeamScoreboard = deriveTeamScoreboard(room.Teams, room.Players, room.CurrentGame.Scoreboard)
 	if override.JudgeSuggestionID != "" {
 		for index := range repository.suggestions[code] {
 			suggestion := &repository.suggestions[code][index]
