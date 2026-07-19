@@ -115,7 +115,7 @@ func TestAbuseLimitsReturnDeterministicMetadataAndExcludeHealth(t *testing.T) {
 	cfg := config.Config{Abuse: security.DefaultConfig()}
 	cfg.Abuse.Create = security.Policy{Limit: 1, Window: time.Minute}
 	server := NewServer(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)), game.NewInMemoryRoomService())
-	payload := `{"roomName":"Party","hostDisplayName":"Host","settings":{"mode":"simultaneous","totalRounds":1,"answerTimerSeconds":30,"locale":"en","predictionModel":"gpt-4.1-mini","teamSafeMode":true}}`
+	payload := `{"roomName":"Party","hostDisplayName":"Host","settings":{"mode":"simultaneous","totalRounds":1,"answerTimerSeconds":30,"locale":"en","predictionModel":"gpt-5.6-luna","teamSafeMode":true}}`
 
 	first := httptest.NewRequest(http.MethodPost, "/api/rooms", strings.NewReader(payload))
 	first.RemoteAddr = "203.0.113.5:1234"
@@ -153,7 +153,7 @@ func TestModerationRejectsBeforeMutation(t *testing.T) {
 	service := game.NewInMemoryRoomService()
 	server := NewServer(config.Config{}, slog.New(slog.NewTextHandler(io.Discard, nil)), service)
 	request := httptest.NewRequest(http.MethodPost, "/api/rooms", strings.NewReader(
-		`{"roomName":"Party","hostDisplayName":"nigger","settings":{"mode":"simultaneous","totalRounds":1,"answerTimerSeconds":30,"locale":"en","predictionModel":"gpt-4.1-mini","teamSafeMode":true}}`,
+		`{"roomName":"Party","hostDisplayName":"nigger","settings":{"mode":"simultaneous","totalRounds":1,"answerTimerSeconds":30,"locale":"en","predictionModel":"gpt-5.6-luna","teamSafeMode":true}}`,
 	))
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)
@@ -690,7 +690,7 @@ func TestCreateRoomRejectsInvalidSettingsAndMalformedBodies(t *testing.T) {
 	t.Parallel()
 
 	server := NewServer(config.Config{}, slog.New(slog.NewTextHandler(io.Discard, nil)), game.NewInMemoryRoomService())
-	valid := `{"roomName":"Friday Night","hostDisplayName":"Host","settings":{"mode":"simultaneous","totalRounds":1,"answerTimerSeconds":15,"locale":"en","predictionModel":"gpt-4.1-mini","teamSafeMode":false}}`
+	valid := `{"roomName":"Friday Night","hostDisplayName":"Host","settings":{"mode":"simultaneous","totalRounds":1,"answerTimerSeconds":15,"locale":"en","predictionModel":"gpt-5.6-luna","teamSafeMode":false}}`
 	tests := []struct {
 		name string
 		body string
@@ -700,7 +700,7 @@ func TestCreateRoomRejectsInvalidSettingsAndMalformedBodies(t *testing.T) {
 		{name: "timer above upper bound", body: strings.Replace(valid, `"answerTimerSeconds":15`, `"answerTimerSeconds":121`, 1)},
 		{name: "unsupported mode", body: strings.Replace(valid, `"simultaneous"`, `"cooperative"`, 1)},
 		{name: "unsupported locale", body: strings.Replace(valid, `"locale":"en"`, `"locale":"ro"`, 1)},
-		{name: "unsupported model", body: strings.Replace(valid, `"gpt-4.1-mini"`, `"other-model"`, 1)},
+		{name: "unsupported model", body: strings.Replace(valid, `"gpt-5.6-luna"`, `"other-model"`, 1)},
 		{name: "unknown field", body: strings.Replace(valid, `"roomName"`, `"unexpected":true,"roomName"`, 1)},
 		{name: "trailing JSON", body: valid + `{}`},
 		{name: "oversized body", body: valid + strings.Repeat(" ", maxRequestBodyBytes)},
@@ -740,7 +740,7 @@ func TestCreateJoinStartHTTPFlowAndJoinClosure(t *testing.T) {
 	server := NewServer(config.Config{}, slog.New(slog.NewTextHandler(io.Discard, nil)), game.NewInMemoryRoomService())
 	created := performRoomRequest(t, server, http.MethodPost, "/api/rooms", `{
 		"roomName":"Friday Night","hostDisplayName":"Host",
-		"settings":{"mode":"simultaneous","totalRounds":5,"answerTimerSeconds":120,"locale":"en","predictionModel":"gpt-4.1-mini","teamSafeMode":true}
+		"settings":{"mode":"simultaneous","totalRounds":5,"answerTimerSeconds":120,"locale":"en","predictionModel":"gpt-5.6-luna","teamSafeMode":true}
 	}`)
 	code := nestedString(t, created, "room", "code")
 	hostToken := nestedString(t, created, "player", "token")

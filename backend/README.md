@@ -369,10 +369,10 @@ OPENAI_API_KEY=...
 HTTP_ADDR=:8080
 APP_ENV=development
 CORS_ALLOWED_ORIGINS=http://localhost:5173
-DEFAULT_PREDICTION_MODEL=gpt-4.1-mini
-DEFAULT_QUESTION_MODEL=gpt-4.1-mini
-ALLOWED_PREDICTION_MODELS=gpt-4.1-mini
-ALLOWED_QUESTION_MODELS=gpt-4.1-mini
+DEFAULT_PREDICTION_MODEL=gpt-5.6-luna
+DEFAULT_QUESTION_MODEL=gpt-5.6-luna
+ALLOWED_PREDICTION_MODELS=gpt-5.6-luna
+ALLOWED_QUESTION_MODELS=gpt-5.6-luna
 MODEL_TIMEOUT_SECONDS=10
 MODEL_MAX_ATTEMPTS=2
 MODEL_MAX_CALLS_PER_GAME=20
@@ -449,7 +449,7 @@ The MVP requests strict JSON-schema responses from OpenAI, then applies the same
 
 ## Supported MVP API input
 
-Room creation accepts individual simultaneous, team, or sequential mode, 1–5 rounds, a 15–120 second answer timer, locale `en`, and the prediction model configured by `DEFAULT_PREDICTION_MODEL` (default `gpt-4.1-mini`). Omitted settings retain the defaults of five rounds and 45 seconds. Room names must contain 3–48 Unicode characters and display names 2–24; control characters are rejected. Route room codes must be six characters from the invite-code alphabet.
+Room creation accepts individual simultaneous, team, or sequential mode, 1–5 rounds, a 15–120 second answer timer, locale `en`, and the prediction model configured by `DEFAULT_PREDICTION_MODEL` (default `gpt-5.6-luna`). Omitted settings retain the defaults of five rounds and 45 seconds. Room names must contain 3–48 Unicode characters and display names 2–24; control characters are rejected. Route room codes must be six characters from the invite-code alphabet.
 
 Joining creates a new player only while the room is in the lobby. Once start wins the room lock, later joins return HTTP `409` with `game has started; new players cannot join`. Player-token mutations resolve the token only within the requested room and operate only on that room's current requested round.
 

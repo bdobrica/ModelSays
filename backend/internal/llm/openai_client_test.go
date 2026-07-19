@@ -69,7 +69,7 @@ func TestJudgeGuessUsesFrozenAnswerIDsAndStrictOutput(t *testing.T) {
 			)),
 		}, nil
 	})
-	client := NewOpenAIModelClient("test-key", ClientDefaults{JudgeModel: "gpt-4.1-mini"})
+	client := NewOpenAIModelClient("test-key", ClientDefaults{JudgeModel: "gpt-5.6-luna"})
 	client.http = &http.Client{Transport: transport}
 	answerID := "answer-1"
 	response, err := client.JudgeGuess(context.Background(), JudgeGuessRequest{

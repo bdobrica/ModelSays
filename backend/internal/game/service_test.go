@@ -78,7 +78,7 @@ func (timeoutModelClient) GenerateBoard(_ context.Context, _ llm.GenerateBoardRe
 func (client *costlyQuestionClient) GenerateQuestions(_ context.Context, _ llm.GenerateQuestionsRequest) (*llm.GenerateQuestionsResponse, error) {
 	return &llm.GenerateQuestionsResponse{
 		Questions: []models.Question{generatedQuestion("costly", "Name something costly.")},
-		Metadata:  llm.CallMetadata{Provider: "paid", Model: "gpt-4.1-mini", PromptVersion: "v1", EstimatedCostUSD: 0.11},
+		Metadata:  llm.CallMetadata{Provider: "paid", Model: "gpt-5.6-luna", PromptVersion: "v1", EstimatedCostUSD: 0.11},
 	}, nil
 }
 
@@ -182,7 +182,7 @@ func TestSemanticJudgeRunsOnlyForDeterministicMissesAndStaysAdvisory(t *testing.
 		fixedBoardModelClient: fixedBoardModelClient{board: board},
 		responses: []*llm.JudgeGuessResponse{{
 			Confidence: 0.91, RationaleCategory: "paraphrase",
-			Metadata: llm.CallMetadata{Provider: "paid", Model: "gpt-4.1-mini", PromptVersion: "judge-v1"},
+			Metadata: llm.CallMetadata{Provider: "paid", Model: "gpt-5.6-luna", PromptVersion: "judge-v1"},
 		}},
 	}
 	repository := NewInMemoryRoomRepository()
@@ -244,8 +244,8 @@ func TestSemanticJudgeInvalidOutputRetriesAndLeavesMiss(t *testing.T) {
 	client := &judgeModelClient{
 		fixedBoardModelClient: fixedBoardModelClient{board: board},
 		responses: []*llm.JudgeGuessResponse{
-			{SuggestedPredictionAnswerID: &unknown, Confidence: 0.7, RationaleCategory: "synonym", Metadata: llm.CallMetadata{Provider: "paid", Model: "gpt-4.1-mini"}},
-			{Confidence: 0.2, RationaleCategory: "ambiguous", Metadata: llm.CallMetadata{Provider: "paid", Model: "gpt-4.1-mini"}},
+			{SuggestedPredictionAnswerID: &unknown, Confidence: 0.7, RationaleCategory: "synonym", Metadata: llm.CallMetadata{Provider: "paid", Model: "gpt-5.6-luna"}},
+			{Confidence: 0.2, RationaleCategory: "ambiguous", Metadata: llm.CallMetadata{Provider: "paid", Model: "gpt-5.6-luna"}},
 		},
 	}
 	repository := NewInMemoryRoomRepository()
@@ -287,8 +287,8 @@ func TestSemanticJudgeBudgetExhaustionSkipsProviderAndKeepsMiss(t *testing.T) {
 	repository := NewInMemoryRoomRepository()
 	service := NewRoomService(repository, client)
 	service.SetModelPolicy(llm.Policy{
-		AllowedQuestionModels: []string{"gpt-4.1-mini"}, AllowedPredictionModels: []string{"gpt-4.1-mini"},
-		AllowedJudgeModels: []string{"gpt-4.1-mini"}, MaxCallsPerGame: 1, MaxEstimatedCostUSD: 0.10, MaxAttempts: 1,
+		AllowedQuestionModels: []string{"gpt-5.6-luna"}, AllowedPredictionModels: []string{"gpt-5.6-luna"},
+		AllowedJudgeModels: []string{"gpt-5.6-luna"}, MaxCallsPerGame: 1, MaxEstimatedCostUSD: 0.10, MaxAttempts: 1,
 	})
 	room, host, _ := service.CreateRoom(context.Background(), CreateRoomInput{RoomName: "Budget judge", HostDisplayName: "Host"})
 	_, player, _ := service.JoinRoom(context.Background(), JoinRoomInput{Code: room.Code, DisplayName: "Player"})
@@ -870,7 +870,7 @@ func TestProviderBudgetExhaustionMakesNoFurtherPaidCall(t *testing.T) {
 	primary := &costlyQuestionClient{}
 	service := NewRoomService(NewInMemoryRoomRepository(), primary)
 	service.SetModelPolicy(llm.Policy{
-		AllowedPredictionModels: []string{"gpt-4.1-mini"},
+		AllowedPredictionModels: []string{"gpt-5.6-luna"},
 		MaxAttempts:             2, MaxCallsPerGame: 20, MaxEstimatedCostUSD: 0.10,
 	})
 	room, host, err := service.CreateRoom(context.Background(), CreateRoomInput{RoomName: "Budget fallback", HostDisplayName: "Host"})
@@ -922,7 +922,7 @@ func TestProviderCircuitMakesNoPaidCallAndFallsBackToCurated(t *testing.T) {
 func TestProviderTimeoutIsAuditedBeforeCuratedFallback(t *testing.T) {
 	service := NewRoomService(NewInMemoryRoomRepository(), timeoutModelClient{})
 	service.SetModelPolicy(llm.Policy{
-		AllowedPredictionModels: []string{"gpt-4.1-mini"},
+		AllowedPredictionModels: []string{"gpt-5.6-luna"},
 		Timeout:                 time.Millisecond, MaxAttempts: 1, MaxCallsPerGame: 20, MaxEstimatedCostUSD: 0.10,
 	})
 	room, host, err := service.CreateRoom(context.Background(), CreateRoomInput{RoomName: "Timeout fallback", HostDisplayName: "Host"})

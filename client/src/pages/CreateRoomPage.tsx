@@ -11,7 +11,7 @@ export function CreateRoomPage() {
     const [totalRounds, setTotalRounds] = useState(5)
     const [answerTimerSeconds, setAnswerTimerSeconds] = useState(45)
     const [locale, setLocale] = useState('en')
-    const [predictionModel, setPredictionModel] = useState('gpt-4.1-mini')
+    const [predictionModel, setPredictionModel] = useState('gpt-5.6-luna')
     const [teamSafeMode, setTeamSafeMode] = useState(false)
     const [mode, setMode] = useState<'simultaneous' | 'teams' | 'sequential'>('simultaneous')
     const [isSubmitting, setIsSubmitting] = useState(false)

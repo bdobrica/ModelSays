@@ -87,7 +87,7 @@ func NewOpenAIModelClient(apiKey string, defaults ClientDefaults) *OpenAIModelCl
 func (client *OpenAIModelClient) GenerateQuestions(ctx context.Context, req GenerateQuestionsRequest) (*GenerateQuestionsResponse, error) {
 	model := client.defaults.QuestionModel
 	if model == "" {
-		model = "gpt-4.1-mini"
+		model = "gpt-5.6-luna"
 	}
 
 	prompt := fmt.Sprintf("Generate %d unique broad, party-safe questions for a game where players guess an AI answer board. Locale: %s. Category: %s. Team safe mode: %t. Vary by round index %d. Do not repeat these prior questions: %q. Avoid hateful, sexual, medical, legal, financial, personal, or workplace-sensitive topics.", maxInt(req.Count, 1), req.Locale, defaultString(req.Category, "party"), req.TeamSafeMode, req.RoundIndex, req.ExcludedText)
@@ -128,7 +128,7 @@ func (client *OpenAIModelClient) GenerateQuestions(ctx context.Context, req Gene
 func (client *OpenAIModelClient) GenerateBoard(ctx context.Context, req GenerateBoardRequest) (*GenerateBoardResponse, error) {
 	model := defaultString(strings.TrimSpace(req.PredictionModel), client.defaults.PredictionModel)
 	if model == "" {
-		model = "gpt-4.1-mini"
+		model = "gpt-5.6-luna"
 	}
 
 	prompt := fmt.Sprintf("Generate a Family Feud style answer board for the question %q. Provide exactly 5 ranked answers with descending positive integer scores. Aliases should contain close synonyms only. Team safe mode: %t. Prompt version: %s.", req.Question.Text, req.TeamSafeMode, defaultString(req.PromptVersion, "v1"))
@@ -171,7 +171,7 @@ func (client *OpenAIModelClient) GenerateBoard(ctx context.Context, req Generate
 func (client *OpenAIModelClient) JudgeGuess(ctx context.Context, req JudgeGuessRequest) (*JudgeGuessResponse, error) {
 	model := defaultString(strings.TrimSpace(req.JudgeModel), client.defaults.JudgeModel)
 	if model == "" {
-		model = "gpt-4.1-mini"
+		model = "gpt-5.6-luna"
 	}
 	type answerInput struct {
 		ID      string   `json:"id"`
@@ -273,8 +273,8 @@ func (client *OpenAIModelClient) completeJSON(ctx context.Context, model string,
 
 func estimateOpenAICost(model string, inputTokens int, outputTokens int) float64 {
 	// Server-owned estimates; update alongside the allowlist when pricing changes.
-	if model == "gpt-4.1-mini" {
-		return float64(inputTokens)*0.40/1_000_000 + float64(outputTokens)*1.60/1_000_000
+	if model == "gpt-5.6-luna" {
+		return float64(inputTokens)*1.00/1_000_000 + float64(outputTokens)*6.00/1_000_000
 	}
 	return 0
 }

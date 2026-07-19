@@ -44,7 +44,7 @@ const settings = {
   totalRounds: 2,
   answerTimerSeconds: 30,
   locale: 'en',
-  predictionModel: 'gpt-4.1-mini',
+  predictionModel: 'gpt-5.6-luna',
   teamSafeMode: false,
 }
 const question = {
@@ -162,7 +162,7 @@ describe('RoomPage', () => {
       confidence: 0.91,
       confidenceBand: 'high',
       rationaleCategory: 'paraphrase',
-      model: 'gpt-4.1-mini',
+      model: 'gpt-5.6-luna',
       promptVersion: 'judge-v1',
       outcome: 'suggestion',
     }] })

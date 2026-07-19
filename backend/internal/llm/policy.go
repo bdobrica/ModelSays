@@ -25,9 +25,9 @@ type Policy struct {
 
 func DefaultPolicy() Policy {
 	return Policy{
-		AllowedQuestionModels:   []string{"gpt-4.1-mini"},
-		AllowedPredictionModels: []string{"gpt-4.1-mini"},
-		AllowedJudgeModels:      []string{"gpt-4.1-mini"},
+		AllowedQuestionModels:   []string{"gpt-5.6-luna"},
+		AllowedPredictionModels: []string{"gpt-5.6-luna"},
+		AllowedJudgeModels:      []string{"gpt-5.6-luna"},
 		Timeout:                 10 * time.Second,
 		MaxAttempts:             2,
 		MaxCallsPerGame:         20,

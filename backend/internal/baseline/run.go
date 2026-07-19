@@ -194,7 +194,7 @@ func runWorkload(ctx context.Context, databaseURL string, playerCount int) (resu
 		"hostDisplayName": "Player 1",
 		"settings": map[string]any{
 			"mode": "simultaneous", "totalRounds": 1, "answerTimerSeconds": 15,
-			"locale": "en", "predictionModel": "gpt-4.1-mini", "teamSafeMode": false,
+			"locale": "en", "predictionModel": "gpt-5.6-luna", "teamSafeMode": false,
 		},
 	})
 	if err != nil {

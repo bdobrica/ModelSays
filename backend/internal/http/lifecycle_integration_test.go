@@ -32,7 +32,7 @@ func TestPostgresAPIFullLifecycleSurvivesReload(t *testing.T) {
 
 	created := performRoomRequest(t, server, http.MethodPost, "/api/rooms", `{
 		"roomName":"Lifecycle smoke","hostDisplayName":"Host",
-		"settings":{"mode":"simultaneous","totalRounds":2,"answerTimerSeconds":15,"locale":"en","predictionModel":"gpt-4.1-mini","teamSafeMode":false}
+		"settings":{"mode":"simultaneous","totalRounds":2,"answerTimerSeconds":15,"locale":"en","predictionModel":"gpt-5.6-luna","teamSafeMode":false}
 	}`)
 	code := nestedString(t, created, "room", "code")
 	hostToken := nestedString(t, created, "player", "token")

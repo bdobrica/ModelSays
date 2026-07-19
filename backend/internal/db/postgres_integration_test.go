@@ -28,7 +28,7 @@ func (client semanticJudgeClient) JudgeGuess(_ context.Context, request llm.Judg
 	return &llm.JudgeGuessResponse{
 		SuggestedPredictionAnswerID: &answerID,
 		Confidence:                  0.93, RationaleCategory: "paraphrase",
-		Metadata: llm.CallMetadata{Provider: "mock", Model: "gpt-4.1-mini", PromptVersion: "judge-v1"},
+		Metadata: llm.CallMetadata{Provider: "mock", Model: "gpt-5.6-luna", PromptVersion: "judge-v1"},
 	}, nil
 }
 
@@ -401,7 +401,7 @@ func TestPostgresDueRevealIsExactlyOnceAcrossWorkersAndRestart(t *testing.T) {
 	room, host, err := service.CreateRoom(ctx, game.CreateRoomInput{
 		RoomName: "Durable reveal", HostDisplayName: "Host",
 		Settings: models.RoomSettings{Mode: models.GameModeSimultaneous, TotalRounds: 1,
-			AnswerTimerSeconds: 15, Locale: "en", PredictionModel: "gpt-4.1-mini"},
+			AnswerTimerSeconds: 15, Locale: "en", PredictionModel: "gpt-5.6-luna"},
 	})
 	if err != nil {
 		t.Fatalf("CreateRoom: %v", err)
@@ -487,7 +487,7 @@ func TestPostgresDueRevealRepresentativeBatchMeetsLagBudget(t *testing.T) {
 		room, host, err := service.CreateRoom(ctx, game.CreateRoomInput{
 			RoomName: fmt.Sprintf("Transition load %d", index), HostDisplayName: "Host",
 			Settings: models.RoomSettings{Mode: models.GameModeSimultaneous, TotalRounds: 1,
-				AnswerTimerSeconds: 15, Locale: "en", PredictionModel: "gpt-4.1-mini"},
+				AnswerTimerSeconds: 15, Locale: "en", PredictionModel: "gpt-5.6-luna"},
 		})
 		if err != nil {
 			t.Fatalf("CreateRoom %d: %v", index, err)
@@ -524,7 +524,7 @@ func TestPostgresManualAndAutomaticRevealRaceHasOneWinner(t *testing.T) {
 	room, host, err := service.CreateRoom(ctx, game.CreateRoomInput{
 		RoomName: "Reveal race", HostDisplayName: "Host",
 		Settings: models.RoomSettings{Mode: models.GameModeSimultaneous, TotalRounds: 1,
-			AnswerTimerSeconds: 15, Locale: "en", PredictionModel: "gpt-4.1-mini"},
+			AnswerTimerSeconds: 15, Locale: "en", PredictionModel: "gpt-5.6-luna"},
 	})
 	if err != nil {
 		t.Fatalf("CreateRoom: %v", err)

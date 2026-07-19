@@ -71,7 +71,7 @@ const (
 	maxTotalRounds           = 5
 	minAnswerTimerSeconds    = 15
 	maxAnswerTimerSeconds    = 120
-	defaultPredictionModel   = "gpt-4.1-mini"
+	defaultPredictionModel   = "gpt-5.6-luna"
 )
 
 type CreateRoomInput struct {

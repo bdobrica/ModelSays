@@ -4,7 +4,7 @@ Model Says is a live-updating party game where players try to guess what an AI m
 
 This client is a React app for joining rooms, playing rounds, submitting answers, watching reveals, and viewing scores. It should be optimized for parties, Zoom/team-building sessions, and casual play.
 
-The current creation form supports individual simultaneous, team, or sequential play, 1–5 rounds, a 15–120 second timer, English locale, and the default `gpt-4.1-mini` prediction model. Room and display-name inputs are capped at the server's 48- and 24-character limits. Invite links stop accepting new players once the host starts the game.
+The current creation form supports individual simultaneous, team, or sequential play, 1–5 rounds, a 15–120 second timer, English locale, and the default `gpt-5.6-luna` prediction model. Room and display-name inputs are capped at the server's 48- and 24-character limits. Invite links stop accepting new players once the host starts the game.
 
 The playable client authenticates an SSE stream with a request header and treats every event as an invalidation: authoritative state still comes from a sequenced room refetch. It coalesces bursts, resumes from the last applied room revision, detects gaps, reconnects with bounded exponential backoff, and automatically retains slower polling as recovery. Polling and reconnect work are reduced in hidden tabs and stop at game completion or when the room route is left. A polite status indicator reports live, reconnecting, offline, and complete states without blocking play.
 
