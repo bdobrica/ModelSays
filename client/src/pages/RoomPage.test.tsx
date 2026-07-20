@@ -232,7 +232,104 @@ describe('RoomPage', () => {
     await act(async () => vi.advanceTimersByTime(30_000))
     expect(screen.getByText('Time expired', { selector: '[role="timer"]' })).toBeInTheDocument()
     expect(screen.getByLabelText('Your guess')).toBeDisabled()
-    expect(screen.getByText('Answering has expired. The server will reveal the round automatically.')).toBeInTheDocument()
+    expect(screen.getByText('Answering has expired. Waiting for the round result.')).toBeInTheDocument()
+  })
+
+  it.each([
+    ['lobby', 'Waiting for the host'],
+    ['answering', 'Name a fruit'],
+    ['revealed', 'Result is on the host display'],
+  ] as const)('keeps the participant %s surface focused on the current action', async (phase, heading) => {
+    saveSession('ABC234', player)
+    const current = roomState(phase)
+    vi.mocked(api.recoverSession).mockResolvedValue({ room: current, player })
+    vi.mocked(api.getRoom).mockResolvedValue({ room: current })
+
+    const { container } = renderRoom()
+    const phaseHeading = await screen.findByRole('heading', { name: heading })
+    await waitFor(() => expect(phaseHeading).toHaveFocus())
+    expect(container.querySelector('.participant-room')).toBeInTheDocument()
+    expect(container.querySelector('.room-grid')).not.toBeInTheDocument()
+    expect(container.querySelector('aside')).not.toBeInTheDocument()
+    expect(screen.queryByText('Room state')).not.toBeInTheDocument()
+    expect(screen.queryByText('Players')).not.toBeInTheDocument()
+    expect(screen.queryByText('Live scoreboard')).not.toBeInTheDocument()
+    expect(screen.queryByText('Settings')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Copy invite' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Presentation mode' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Refresh room state' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Reveal round' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Next round' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Guesses')).not.toBeInTheDocument()
+    expect(screen.queryByText('Apple')).not.toBeInTheDocument()
+  })
+
+  it('shows a submitted participant only the locked answering action', async () => {
+    saveSession('ABC234', player)
+    const current = roomState('answering')
+    current.currentGame!.scoreboard[1].submissionMade = true
+    vi.mocked(api.recoverSession).mockResolvedValue({ room: current, player })
+    vi.mocked(api.getRoom).mockResolvedValue({ room: current })
+
+    renderRoom()
+    expect(await screen.findByText('Submitted. Your guess is locked while you wait for the host.')).toBeInTheDocument()
+    expect(screen.getByLabelText('Your guess')).toBeDisabled()
+    expect(screen.queryByText('Live scoreboard')).not.toBeInTheDocument()
+  })
+
+  it('shows participants only individual and team final rankings with safe actions', async () => {
+    saveSession('ABC234', player)
+    const completed = roomState('completed', true)
+    completed.settings = { ...settings, mode: 'teams' }
+    completed.currentGame!.mode = 'teams'
+    completed.currentGame!.teamScoreboard = [
+      { teamId: 'blue', name: 'A very long blue team name', score: 50 },
+      { teamId: 'gold', name: 'Gold', score: 50 },
+    ]
+    vi.mocked(api.recoverSession).mockResolvedValue({ room: completed, player })
+    vi.mocked(api.getRoom).mockResolvedValue({ room: completed })
+
+    renderRoom()
+    expect(await screen.findByRole('heading', { name: 'Final scoreboard' })).toBeInTheDocument()
+    expect(screen.getByText('Player — tied winner')).toBeInTheDocument()
+    expect(screen.getByText('Final team ranking')).toBeInTheDocument()
+    expect(screen.getByText('A very long blue team name — tied team winner')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Share results' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'View replay' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Back to home' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Play again' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Answers and awarded scores are now revealed.')).not.toBeInTheDocument()
+    expect(screen.queryByText('Players')).not.toBeInTheDocument()
+    expect(screen.queryByText('Room code')).not.toBeInTheDocument()
+  })
+
+  it.each(['lobby', 'answering', 'revealed', 'completed'] as const)(
+    'has no serious or critical accessibility violations in the participant %s state',
+    async (phase) => {
+      saveSession('ABC234', player)
+      const current = roomState(phase, phase === 'completed')
+      vi.mocked(api.recoverSession).mockResolvedValue({ room: current, player })
+      vi.mocked(api.getRoom).mockResolvedValue({ room: current })
+
+      const { container } = renderRoom()
+      await waitFor(() => expect(screen.queryByText('Loading your game…')).not.toBeInTheDocument())
+      const result = await axe.run(container, { rules: { 'color-contrast': { enabled: false } } })
+      expect(result.violations.filter((violation) => ['serious', 'critical'].includes(violation.impact ?? ''))).toEqual([])
+    },
+  )
+
+  it('keeps participant errors assertive without exposing host controls', async () => {
+    saveSession('ABC234', player)
+    const current = roomState('answering')
+    vi.mocked(api.recoverSession).mockResolvedValue({ room: current, player })
+    vi.mocked(api.getRoom).mockResolvedValue({ room: current })
+    vi.mocked(api.submitGuess).mockRejectedValue(new Error('Connection interrupted'))
+
+    renderRoom()
+    fireEvent.change(await screen.findByLabelText('Your guess'), { target: { value: 'Apple' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Submit guess' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Connection interrupted')
+    expect(screen.queryByRole('button', { name: 'Refresh room state' })).not.toBeInTheDocument()
   })
 
   it('does not let a slower earlier poll overwrite a newer room response', async () => {

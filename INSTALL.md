@@ -59,12 +59,12 @@ Use separate browser profiles, private windows, or devices so each participant h
 
 1. The host opens `http://localhost:5173`, selects **Create room**, enters a name, chooses individual, team, or sequential mode, 1–5 rounds, and a 15–120 second timer, then creates the room.
 2. Select **Copy invite** and share the join link, or share the six-character room code before starting. Invite links pre-fill the code.
-3. Each player opens **Join room**, enters the code and a display name, and joins the lobby.
+3. Each player opens **Join room**, enters the code and a display name, and joins a focused lobby that confirms their name and waits for the host.
 4. The host waits for everyone to appear. In team mode, create 2–4 teams and assign every player; every team must have a player. Then select **Start game**. Team assignments cannot change afterward.
 5. Each participant submits one answer before the countdown expires. The answer board and round scoring stay hidden during this phase.
 6. At expiry the server reveals automatically; the host can reveal early if desired.
-7. Everyone reviews the frozen board, matches, duplicate claims, and scores. For deterministic misses, the host may see a private semantic suggestion and can accept it, choose another answer, or retain the miss.
-8. The host selects **Next round**. After the final reveal, advancing once more opens the ranked final scoreboard.
+7. The host reviews the frozen board, matches, duplicate claims, and live scores while joined players see a short waiting state. For deterministic misses, the host may see a private semantic suggestion and can accept it, choose another answer, or retain the miss.
+8. The host selects **Next round**. After the final reveal, advancing once more opens the ranked final individual and, when applicable, team scoreboard on every device.
 
 Only the earliest accepted guess matching a board answer earns its points. A later canonical or alias match for the same answer is shown as a zero-point duplicate. Automatic matching ignores capitalization, punctuation, and repeated whitespace. Optional judge suggestions are advisory, hidden until reveal, and never score without a host override.
 
@@ -73,6 +73,8 @@ In team mode, guesses and answer claims remain individual and global: a player o
 In sequential mode, players act in lobby join order. The timer resets for each player; submit or choose **Pass turn** to advance immediately. Prior raw claims are visible, but their match and score outcomes stay hidden. An expired or disconnected player's turn is passed automatically, and the last turn reveals the round. Sequential and team modes cannot be combined.
 
 Refreshing the same browser restores its player session. Do not clear browser storage during a game. Cross-device session transfer is not currently supported.
+
+Joined-player screens intentionally omit room settings, roster, management controls, the revealed answer board, host review, and live scores. During play they show only the current question/timer/action, mode-required sequential prior claims, and clear submitted, expired, reconnecting, or waiting feedback. The host keeps the complete operational view.
 
 When the final round is complete, use **Share results** to share or copy the unguessable replay link. The replay shows winners/ties and every revealed round without exposing session credentials or private provider records. The host can select **Play again** to create a fresh lobby with the same room name and settings; other players join the new code, and no prior guesses, claims, boards, deadlines, scores, or credentials carry over.
 

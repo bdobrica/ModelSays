@@ -4,7 +4,7 @@ FUTURE-05D was accepted on 2026-07-19 after the repository owner ran the actual 
 
 The playtest produced two concrete follow-ups rather than a rejection of the completed polish:
 
-1. A joined participant should have a focused play surface instead of seeing host-oriented room configuration and management detail.
+1. A joined participant should have a focused play surface instead of seeing host-oriented room configuration and management detail. Implemented by FUTURE-06.
 2. A living-room mode should use a non-playing TV host, QR joining, a shared timer, early reveal when every participant answers, a readable reveal pause, and automatic advancement.
 
 Those observations are scheduled separately in `PLAN.md`. The reusable physical phone, keyboard/screen-reader, reduced-motion, and screen-share checklist remains in [`../accessibility.md`](../accessibility.md) for future release evidence.

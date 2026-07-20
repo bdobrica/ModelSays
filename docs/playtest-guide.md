@@ -13,6 +13,7 @@ Use this guide for facilitated tests of the existing simultaneous mode. Record r
 
 - Record time from question visibility to the first and last submission.
 - Ask whether the countdown, submitted state, expiry, reveal ownership, and duplicate rule are clear.
+- Confirm joined-player phones never show host settings, roster, management/review controls, the answer board, or live rankings; during reveal they should show only the host-display waiting state.
 - Record every disputed deterministic match, the raw guess, expected answer, and whether the host override was discoverable and sufficient.
 - Count host interventions and estimate host effort per round.
 - Observe the live-update indicator during normal play, a backend restart, and a short offline/online cycle. Record mutation-to-visible delay, reconnect delay, stale state, and whether fallback polling is understandable.

@@ -375,6 +375,139 @@ export function RoomPage() {
   const showLobbyState = room != null && !currentGame
   const showAnswerState = currentRound?.status === 'answering'
   const showRevealState = currentRound?.status === 'revealed'
+  const connectionMessage = connectionState === 'live'
+    ? 'Live updates connected'
+    : connectionState === 'offline'
+      ? 'Offline — updates will resume when your network returns'
+      : connectionState === 'stopped'
+        ? 'Live updates complete'
+        : connectionState === 'fallback'
+          ? 'Reconnecting — polling for updates'
+          : 'Connecting live updates…'
+
+  if (matchingSession && !matchingSession.player.isHost && !activePlayer) {
+    return (
+      <section className="participant-room">
+        <article aria-busy="true" className="panel participant-surface">
+          <p aria-live="polite" className="status-note" role="status">Loading your game…</p>
+          {errorMessage ? <p className="form-error" role="alert">{errorMessage}</p> : null}
+        </article>
+      </section>
+    )
+  }
+
+  if (activePlayer && !isHost) {
+    return (
+      <section className="participant-room" aria-busy={isLoading || isMutating}>
+        <article className="panel participant-surface">
+          {!isGameCompleted ? (
+            <p aria-live="polite" className={`connection-indicator connection-${connectionState}`} role="status">
+              {connectionMessage}
+            </p>
+          ) : null}
+
+          {showLobbyState ? (
+            <section className="participant-phase">
+              <p className="eyebrow">You joined</p>
+              <h1>{room.name}</h1>
+              <div className="room-code-row"><span>Room code</span><strong>{code}</strong></div>
+              <h2 ref={phaseHeading} tabIndex={-1}>Waiting for the host</h2>
+              <p className="status-note">You’re in as {activePlayer.displayName}. The game will appear here when the host starts it.</p>
+            </section>
+          ) : null}
+
+          {showAnswerState && currentRound ? (
+            <section className="participant-phase">
+              <div className="round-meta">
+                <span className="eyebrow">Round {currentRound.roundIndex}</span>
+                <strong>{currentRound.roundIndex}/{currentGame?.totalRounds}</strong>
+              </div>
+              <h1 ref={phaseHeading} tabIndex={-1}>{currentRound.question.text}</h1>
+              <p className="countdown" role="timer">{hasLocallyExpired ? 'Time expired' : `${secondsRemaining}s remaining`}</p>
+              <p aria-atomic="true" aria-live="polite" className="status-note" role="status">
+                {isSequential && !isActiveTurn
+                  ? `Waiting for ${currentTurnPlayer?.displayName ?? 'the current player'} to answer.`
+                  : hasSubmitted
+                    ? 'Submitted. Your guess is locked while you wait for the host.'
+                    : hasLocallyExpired
+                      ? 'Answering has expired. Waiting for the round result.'
+                      : 'Enter one answer before time runs out.'}
+              </p>
+              <form className="answer-form" onSubmit={handleSubmitGuess}>
+                <input
+                  aria-label="Your guess"
+                  disabled={!isActiveTurn || hasSubmitted || hasLocallyExpired || isMutating || !activePlayerToken}
+                  maxLength={120}
+                  onChange={(event) => setGuessAnswer(event.target.value)}
+                  placeholder="Type your guess"
+                  value={guessAnswer}
+                />
+                <button className="button button-primary" disabled={!isActiveTurn || hasSubmitted || hasLocallyExpired || isMutating || !guessAnswer.trim()} type="submit">
+                  {hasSubmitted ? 'Submitted' : hasLocallyExpired ? 'Time expired' : isMutating ? 'Submitting…' : 'Submit guess'}
+                </button>
+              </form>
+              {isSequential && isActiveTurn && !hasSubmitted && !hasLocallyExpired ? (
+                <button className="button button-secondary" disabled={isMutating} onClick={() => void handlePassTurn()} type="button">Pass turn</button>
+              ) : null}
+              {isSequential && currentRound.guesses?.length ? (
+                <div className="guess-list">
+                  <h2>Prior claims</h2>
+                  {currentRound.guesses.map((guess) => <div className="guess-row" key={guess.id}><strong>{guess.playerDisplayName}</strong><span>{guess.rawAnswer}</span></div>)}
+                </div>
+              ) : null}
+            </section>
+          ) : null}
+
+          {showRevealState && currentRound && !isGameCompleted ? (
+            <section className="participant-phase participant-waiting">
+              <p className="eyebrow">Round {currentRound.roundIndex} complete</p>
+              <h1 ref={phaseHeading} tabIndex={-1}>Result is on the host display</h1>
+              <p aria-live="polite" className="status-note" role="status">Waiting for the host to start the next round.</p>
+            </section>
+          ) : null}
+
+          {isGameCompleted && currentGame ? (
+            <section className="participant-phase">
+              <p className="eyebrow">Game complete</p>
+              <h1 ref={phaseHeading} tabIndex={-1}>Final scoreboard</h1>
+              <div className="score-list participant-score-list">
+                {rankedScoreboard.map((entry, index) => {
+                  const isWinner = entry.score === winningScore
+                  return (
+                    <div className={isWinner ? 'score-row score-row-winner' : 'score-row'} key={entry.playerId}>
+                      <strong className="score-rank">#{index + 1}</strong>
+                      <strong>{entry.displayName}{isWinner ? winnerCount > 1 ? ' — tied winner' : ' — winner' : ''}</strong>
+                      <em>{entry.score} pts</em>
+                    </div>
+                  )
+                })}
+              </div>
+              {currentGame.teamScoreboard?.length ? (
+                <div className="score-list participant-score-list">
+                  <h2>Final team ranking</h2>
+                  {[...currentGame.teamScoreboard].sort((a, b) => b.score - a.score || a.name.localeCompare(b.name)).map((team, index, ranked) => {
+                    const winner = team.score === ranked[0]?.score
+                    const tied = ranked.filter((entry) => entry.score === ranked[0]?.score).length > 1
+                    return <div className={winner ? 'score-row score-row-winner' : 'score-row'} key={team.teamId}><strong>#{index + 1}</strong><span>{team.name}{winner ? tied ? ' — tied team winner' : ' — team winner' : ''}</span><em>{team.score} pts</em></div>
+                  })}
+                </div>
+              ) : null}
+              <div className="action-row">
+                {currentGame.replayId ? <button className="button button-primary" onClick={() => void handleShareResults()} type="button">Share results</button> : null}
+                {currentGame.replayId ? <button className="button button-secondary" onClick={() => navigate(`/replay/${currentGame.replayId}`)} type="button">View replay</button> : null}
+                <button className="button button-secondary" onClick={() => navigate('/')} type="button">Back to home</button>
+              </div>
+              <p aria-atomic="true" aria-live="polite" className="status-note" role="status">{shareStatus}</p>
+            </section>
+          ) : null}
+
+          {isLoading ? <p aria-live="polite" className="status-note" role="status">Loading room…</p> : null}
+          {isMutating ? <p aria-live="polite" className="status-note" role="status">Updating room…</p> : null}
+          {errorMessage ? <p className="form-error" role="alert">{errorMessage}</p> : null}
+        </article>
+      </section>
+    )
+  }
 
   return (
     <section className="room-grid">
@@ -383,17 +516,7 @@ export function RoomPage() {
           <p className="eyebrow">Room state</p>
           <h1>{room?.name || code}</h1>
           <p>Live events trigger authoritative room refreshes, with polling recovery when the stream is unavailable.</p>
-          <p aria-live="polite" className={`connection-indicator connection-${connectionState}`} role="status">
-            {connectionState === 'live'
-              ? 'Live updates connected'
-              : connectionState === 'offline'
-                ? 'Offline — updates will resume when your network returns'
-                : connectionState === 'stopped'
-                  ? 'Live updates complete'
-                  : connectionState === 'fallback'
-                    ? 'Reconnecting — polling for updates'
-                    : 'Connecting live updates…'}
-          </p>
+          <p aria-live="polite" className={`connection-indicator connection-${connectionState}`} role="status">{connectionMessage}</p>
         </div>
 
         <div className="room-code-row"><span>Room code</span><strong>{code}</strong></div>

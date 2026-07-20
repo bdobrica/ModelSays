@@ -2,7 +2,7 @@
 
 Model Says is a live-updating party game where players try to guess what an AI model thinks the most common answers are.
 
-This client is a React app for joining rooms, playing rounds, submitting answers, watching reveals, and viewing scores. It should be optimized for parties, Zoom/team-building sessions, and casual play.
+This client is a React app for joining rooms, playing rounds, submitting answers, hosting reveals, and viewing final scores. It is optimized for parties, Zoom/team-building sessions, and casual play.
 
 The current creation form supports individual simultaneous, team, or sequential play, 1–5 rounds, a 15–120 second timer, English locale, and the default `gpt-5.6-luna` prediction model. Room and display-name inputs are capped at the server's 48- and 24-character limits. Invite links stop accepting new players once the host starts the game.
 
@@ -10,7 +10,7 @@ The playable client authenticates an SSE stream with a request header and treats
 
 ## Supported MVP
 
-The client supports individual simultaneous, team, and sequential game paths: create/join, team setup, live lobby, host start, server-authoritative countdowns, guesses and passes, automatic expiry transitions, host early reveal and override, private post-reveal semantic suggestions for the host, rankings/ties, replay, play-again, and same-browser refresh recovery. The layout collapses to one column below 900 px for phone-sized player views.
+The client supports individual simultaneous, team, and sequential game paths: create/join, team setup, live lobby, host start, server-authoritative countdowns, guesses and passes, automatic expiry transitions, host early reveal and override, private post-reveal semantic suggestions for the host, rankings/ties, replay, play-again, and same-browser refresh recovery. The host retains a two-panel operational view. A joined participant instead gets a centered, single-panel phase surface at every viewport, with no reserved space for hidden host panels.
 
 The client suite covers the event contract and every event type, header authentication, burst coalescing, duplicate/out-of-order/gapped revisions, malformed/secret-bearing payload rejection, reconnect/resume, offline/online and stop behavior, plus room-flow stale-response protection. It also runs serious/critical axe checks on primary entry routes and asserts phase focus, live feedback, copy/fullscreen controls, all modes, and the phone/tablet/laptop/shared-display policy. The PostgreSQL lifecycle gate separately exercises one host and two player identities across the persisted API flow. See [`docs/accessibility.md`](../docs/accessibility.md).
 
@@ -62,10 +62,11 @@ A player can:
 - choose a display name;
 - optionally choose a team;
 - submit answers;
-- see revealed results;
-- see their score.
+- wait while the host reviews each revealed result;
+- see final individual and team rankings;
+- share or open the completed replay.
 
-During answering, room API data intentionally exposes only scores from previously revealed rounds plus each player's submission status. Board contents, guess text, match/duplicate outcomes, awarded points, and current-round score changes become available only after reveal.
+During answering, room API data intentionally exposes only scores from previously revealed rounds plus each player's submission status. Board contents, guess text, match/duplicate outcomes, awarded points, and current-round score changes become available only after reveal. The participant UI applies a stricter presentation contract: it never renders room settings, roster/management actions, answer/review boards, presentation controls, or live rankings. Sequential prior claims remain visible because avoiding an already-claimed answer is part of that mode's active task.
 
 ## Primary Screens
 

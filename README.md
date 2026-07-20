@@ -250,7 +250,7 @@ The controlled MVP is playable with one host and at least two players:
 - deterministic canonical/alias matching with first committed claim wins;
 - server-enforced deadlines, hidden answering-state outcomes, durable automatic reveal, early host reveal, and post-reveal overrides;
 - authenticated ordered SSE invalidations, authoritative sequenced refetches, bounded reconnect/resume, polling recovery, and server-validated same-browser session recovery;
-- accessible responsive host/player layouts with skip/focus/live feedback, 48 px controls, phone/tablet breakpoints, reduced-motion reveal, invite copying, and fullscreen presentation;
+- role-aware accessible responsive layouts: the host retains operational controls while joined players receive a focused action/waiting/final-ranking surface, with skip/focus/live feedback, 48 px controls, phone/tablet breakpoints, reduced-motion reveal, invite copying, and fullscreen presentation;
 - automated backend, client, and PostgreSQL lifecycle gates through `make verify`.
 
 The repeatable MVP playtest gate uses a host and two player identities across two curated rounds. It verifies a shared board hash, refresh/session recovery during answering and reveal, equivalent-answer duplicate handling, expiry rejection, host override, final ranking, and score recovery after backend reconstruction. This technical operator simulation passed on 2026-07-19. The browser room-flow suite covers the corresponding UI states; an external-player fun/usability session is still recommended before a public launch.
@@ -273,7 +273,7 @@ Recommended MVP mode.
 
 All players answer at the same time. The server accepts guesses only before the published `answerPhaseEndsAt` deadline. PostgreSQL-backed servers reveal automatically at expiry (after an optional reveal-only grace period), and the host may reveal early. Next-round advancement stays manual so the host has an unbounded review window for suggestions and score corrections. The durable transition and emergency-disable contract is documented in [`docs/deadline-transitions.md`](docs/deadline-transitions.md).
 
-While a round is accepting answers, every public API response hides the frozen board, guess text, normalized answers, match and duplicate outcomes, awarded points, and the current round's score changes. Players can see who has submitted and the scoreboard through the last revealed round. Reveal publishes the frozen board and round results and applies the new totals to the public scoreboard.
+While a round is accepting answers, every public API response hides the frozen board, guess text, normalized answers, match and duplicate outcomes, awarded points, and the current round's score changes. The joined-player presentation additionally omits roster, settings, submission progress for others, and live scores so the question remains the only task. Reveal publishes the frozen board and round results to the host view and applies the new totals; joined players wait for the next round and see rankings only when the game completes.
 
 After completion, the room exposes a random replay identifier. Anyone with its link can view final rankings (including ties), revealed boards and guesses, answer matches, and per-round score deltas. Replay responses exclude player tokens, normalized guesses, answer aliases, provider/model/prompt metadata, audits, judge records, and raw provider content. Replays currently follow completed-game retention and do not have an automatic expiry; see [`docs/operations.md`](docs/operations.md).
 

@@ -15,6 +15,7 @@ Status note:
 	- the creation form and backend now share the MVP bounds of 1–5 rounds, a 15–120 second timer, and bounded names.
 	- CI runs the locked client test suite and production build alongside backend and PostgreSQL lifecycle gates.
 	- the root baseline command records production bundle size and representative polling volume; browser rendering and physical-device performance remain playtest work.
+	- joined participants now use a role/phase-focused surface; the host-only operational room view remains unchanged.
 
 ## Phase 0 — Project Setup
 
@@ -221,3 +222,4 @@ Status note:
 - [x] Scores are visible.
 - [x] Final scoreboard works.
 - [x] Basic mobile layout is usable.
+- [x] Joined players see only lobby confirmation, their current action/waiting state, and final rankings.

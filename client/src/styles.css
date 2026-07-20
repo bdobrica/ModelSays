@@ -196,8 +196,46 @@ select {
 .panel-hero,
 .form-panel,
 .room-overview,
-.player-panel {
+.player-panel,
+.participant-surface {
     padding: clamp(1.25rem, 3vw, 2rem);
+}
+
+.participant-room {
+    width: min(46rem, 100%);
+    margin: 0 auto;
+}
+
+.participant-surface {
+    display: grid;
+    gap: 1.25rem;
+    overflow: hidden;
+}
+
+.participant-phase {
+    min-width: 0;
+}
+
+.participant-phase h1 {
+    margin: 0.45rem 0 1rem;
+    font-size: clamp(2rem, 7vw, 4rem);
+    line-height: 1.05;
+    overflow-wrap: anywhere;
+}
+
+.participant-phase h2 {
+    overflow-wrap: anywhere;
+}
+
+.participant-waiting {
+    padding-block: clamp(2rem, 10vh, 6rem);
+    text-align: center;
+}
+
+.participant-score-list {
+    padding: 0;
+    border: 0;
+    background: transparent;
 }
 
 .panel-stack {
@@ -603,7 +641,8 @@ select {
     .panel-hero,
     .form-panel,
     .room-overview,
-    .player-panel {
+    .player-panel,
+    .participant-surface {
         padding: 1rem;
         border-radius: 1.2rem;
     }

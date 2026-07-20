@@ -1,6 +1,6 @@
 # Client Accessibility and Responsive Play
 
-The supported viewport contract is 360×800 phone, 768×1024 tablet, 1366×768 laptop, and 1920×1080 shared display. The room changes from two columns to one below 900 px and tightens navigation and card layout below 480 px. Controls have a 48 px minimum height, visible keyboard focus, and touch-action behavior that avoids delayed activation.
+The supported viewport contract is 360×800 phone, 768×1024 tablet, 1366×768 laptop, and 1920×1080 shared display. The host room changes from two columns to one below 900 px and tightens navigation and card layout below 480 px. A joined participant always uses one centered panel with no roster/sidebar column or hidden-panel gap. Controls have a 48 px minimum height, visible keyboard focus, and touch-action behavior that avoids delayed activation.
 
 ## Interaction behavior
 
@@ -10,10 +10,11 @@ The supported viewport contract is 360×800 phone, 768×1024 tablet, 1366×768 l
 - **Copy invite** writes a join URL whose code pre-fills the join form. A text fallback retains the six-character code if clipboard access is unavailable.
 - **Presentation mode** uses the browser Fullscreen API. It removes setup chrome and enlarges the revealed answer board, but does not hide or delay host controls.
 - Reveal uses a 420 ms opacity/position transition. `prefers-reduced-motion: reduce` reduces all animation and transition duration to effectively immediate.
+- Participant focus follows the action boundary: lobby confirmation, question/answer, revealed waiting, and final rankings. Long questions/names wrap within the panel, and errors stay assertive without exposing host refresh or management controls.
 
 ## Automated coverage
 
-`npm test` runs `axe-core` against the home, create, and invite/join routes and fails on serious or critical violations. jsdom cannot calculate layout or color contrast, so the test disables axe's color-contrast rule; contrast, clipping, zoom, and browser/screen-reader behavior remain manual checks. Component tests cover phase focus, announcements, invite copying, fullscreen state, long/tied result labels, empty guesses, errors, simultaneous/team/sequential states, and the declared viewport/touch/motion contract.
+`npm test` runs `axe-core` against the home, create, invite/join, maximum-player host lobby, and participant lobby/answering/waiting/completed states and fails on serious or critical violations. jsdom cannot calculate layout or color contrast, so the test disables axe's color-contrast rule; contrast, clipping, zoom, and browser/screen-reader behavior remain manual checks. Component tests cover the host/participant visibility boundary, phase focus, announcements, invite copying, fullscreen state, long/tied individual and team result labels, empty guesses, errors, simultaneous/team/sequential states, and the declared viewport/touch/motion contract.
 
 The production client must remain within the PB-00 budget of 350 KiB uncompressed and 110 KiB compressed. FUTURE-05D measured 275,896 bytes uncompressed and 84,670 bytes gzip (JavaScript plus CSS), leaving the framework and state architecture unchanged.
 
