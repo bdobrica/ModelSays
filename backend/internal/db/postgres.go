@@ -22,7 +22,82 @@ type queryRower interface {
 }
 
 type PostgresRoomRepository struct {
-	pool *pgxpool.Pool
+	pool        *pgxpool.Pool
+	revealPause time.Duration
+}
+
+func (repository *PostgresRoomRepository) SetLivingRoomRevealPause(pause time.Duration) {
+	repository.revealPause = pause
+}
+
+func (repository *PostgresRoomRepository) livingRoomPause() time.Duration {
+	if repository.revealPause < 3*time.Second || repository.revealPause > 30*time.Second {
+		return 8 * time.Second
+	}
+	return repository.revealPause
+}
+
+func (repository *PostgresRoomRepository) advanceDueLivingRooms(ctx context.Context, tx pgx.Tx, dueAt, occurredAt time.Time, limit int) (int, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT rooms.code,g.id,r.id,g.current_round_index,g.total_rounds,
+		       COALESCE((rooms.settings_jsonb->>'answerTimerSeconds')::integer,45)
+		FROM rounds r
+		JOIN games g ON g.id=r.game_id
+		JOIN rooms ON rooms.code=g.room_code
+		WHERE g.mode='livingroom' AND g.status='in_progress' AND r.status='revealed'
+		  AND r.round_index=g.current_round_index AND r.reveal_phase_ends_at <= $1
+		ORDER BY r.reveal_phase_ends_at,r.id
+		FOR UPDATE OF r,g SKIP LOCKED LIMIT $2`, dueAt, limit)
+	if err != nil {
+		return 0, fmt.Errorf("claim due living-room reveals: %w", err)
+	}
+	type dueReveal struct {
+		code, gameID, roundID string
+		index, total, timer   int
+	}
+	var due []dueReveal
+	for rows.Next() {
+		var item dueReveal
+		if err := rows.Scan(&item.code, &item.gameID, &item.roundID, &item.index, &item.total, &item.timer); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		due = append(due, item)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, err
+	}
+	rows.Close()
+	for _, item := range due {
+		if item.index >= item.total {
+			if _, err := tx.Exec(ctx, `UPDATE games SET status='completed',ended_at=$2 WHERE id=$1 AND status='in_progress'`, item.gameID, occurredAt); err != nil {
+				return 0, fmt.Errorf("complete living-room game: %w", err)
+			}
+			transition := models.RoundTransition{ID: newEventID(), RoomCode: item.code, GameID: item.gameID, RoundID: item.roundID,
+				Action: "complete_game", Actor: models.RoundTransitionActorScheduler, Reason: "final_reveal_pause_elapsed", CreatedAt: occurredAt}
+			if err := appendTransitionEventTx(ctx, tx, transition, models.RoomEventGameCompleted); err != nil {
+				return 0, err
+			}
+			continue
+		}
+		var nextRoundID string
+		if err := tx.QueryRow(ctx, `UPDATE rounds SET status='answering',answer_phase_started_at=$3::timestamptz,
+			answer_phase_ends_at=$3::timestamptz+make_interval(secs=>$4::int),reveal_started_at=NULL,reveal_phase_ends_at=NULL
+			WHERE game_id=$1 AND round_index=$2 AND status='pending' RETURNING id`,
+			item.gameID, item.index+1, occurredAt, item.timer).Scan(&nextRoundID); err != nil {
+			return 0, fmt.Errorf("start prepared living-room round: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `UPDATE games SET current_round_index=$2 WHERE id=$1`, item.gameID, item.index+1); err != nil {
+			return 0, err
+		}
+		transition := models.RoundTransition{ID: newEventID(), RoomCode: item.code, GameID: item.gameID, RoundID: nextRoundID,
+			Action: "start_round", Actor: models.RoundTransitionActorScheduler, Reason: "reveal_pause_elapsed", CreatedAt: occurredAt}
+		if err := appendTransitionEventTx(ctx, tx, transition, models.RoomEventRoundStarted); err != nil {
+			return 0, err
+		}
+	}
+	return len(due), nil
 }
 
 func (repository *PostgresRoomRepository) RevealDueRounds(ctx context.Context, dueAt, occurredAt time.Time, limit int) (int, error) {
@@ -34,6 +109,14 @@ func (repository *PostgresRoomRepository) RevealDueRounds(ctx context.Context, d
 		return 0, fmt.Errorf("begin due round transition tx: %w", err)
 	}
 	defer tx.Rollback(ctx)
+
+	// Living-room reveal pauses use their own wall-clock cutoff. Process phases
+	// that were already revealed before claiming answer deadlines so a round can
+	// never be revealed and advanced in the same worker pass.
+	advanced, err := repository.advanceDueLivingRooms(ctx, tx, occurredAt, occurredAt, limit)
+	if err != nil {
+		return 0, err
+	}
 
 	rows, err := tx.Query(ctx, `
 		SELECT rooms.code, games.id, rounds.id, games.mode, rounds.turn_order_jsonb,
@@ -87,22 +170,24 @@ func (repository *PostgresRoomRepository) RevealDueRounds(ctx context.Context, d
 		if tag.RowsAffected() != 1 {
 			continue
 		}
+		if item.mode == models.GameModeLivingRoom {
+			if _, err := tx.Exec(ctx, `UPDATE rounds SET reveal_phase_ends_at=$2 WHERE id=$1`, item.roundID, occurredAt.Add(repository.livingRoomPause())); err != nil {
+				return 0, fmt.Errorf("set living-room reveal pause: %w", err)
+			}
+		}
 		transition := models.RoundTransition{
 			ID: newEventID(), RoomCode: item.code, GameID: item.gameID, RoundID: item.roundID,
 			Action: "reveal", Actor: models.RoundTransitionActorScheduler,
 			Reason: "answer_deadline_elapsed", CreatedAt: occurredAt,
 		}
-		if err := insertRoundTransition(ctx, tx, transition); err != nil {
-			return 0, err
-		}
-		if _, err := appendRoomEventTx(ctx, tx, item.code, models.RoomEventRoundRevealed, occurredAt); err != nil {
+		if err := appendTransitionEventTx(ctx, tx, transition, models.RoomEventRoundRevealed); err != nil {
 			return 0, err
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return 0, fmt.Errorf("commit due round transitions: %w", err)
 	}
-	return len(due), nil
+	return len(due) + advanced, nil
 }
 
 func OpenPostgresPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
@@ -136,8 +221,8 @@ func (repository *PostgresRoomRepository) Ready(ctx context.Context) error {
 	if err := repository.pool.QueryRow(checkCtx, `SELECT version_id, is_applied = false FROM goose_db_version ORDER BY id DESC LIMIT 1`).Scan(&version, &dirty); err != nil {
 		return fmt.Errorf("migration compatibility: %w", err)
 	}
-	if dirty || version != 12 {
-		return fmt.Errorf("migration compatibility: database version %d dirty=%t, want 12 clean", version, dirty)
+	if dirty || version != 13 {
+		return fmt.Errorf("migration compatibility: database version %d dirty=%t, want 13 clean", version, dirty)
 	}
 	return nil
 }
@@ -350,9 +435,9 @@ func (repository *PostgresRoomRepository) CreateRoom(ctx context.Context, room m
 
 	host := room.Players[0]
 	_, err = tx.Exec(ctx, `
-		INSERT INTO players (id, room_code, display_name, display_name_normalized, is_host, token, joined_at, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-	`, host.ID, room.Code, host.DisplayName, normalizeDisplayName(host.DisplayName), host.IsHost, host.Token, host.JoinedAt, room.CreatedAt)
+		INSERT INTO players (id, room_code, display_name, display_name_normalized, is_host, token, joined_at, created_at, role)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	`, host.ID, room.Code, host.DisplayName, normalizeDisplayName(host.DisplayName), host.IsHost, host.Token, host.JoinedAt, room.CreatedAt, normalizedPlayerRole(host.Role))
 	if err != nil {
 		return fmt.Errorf("insert host player: %w", err)
 	}
@@ -438,9 +523,9 @@ func (repository *PostgresRoomRepository) AddPlayer(ctx context.Context, code st
 	}
 
 	_, err = tx.Exec(ctx, `
-		INSERT INTO players (id, room_code, display_name, display_name_normalized, is_host, token, joined_at, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-	`, player.ID, roomCode, player.DisplayName, normalizeDisplayName(player.DisplayName), player.IsHost, player.Token, player.JoinedAt, player.JoinedAt)
+		INSERT INTO players (id, room_code, display_name, display_name_normalized, is_host, token, joined_at, created_at, role)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	`, player.ID, roomCode, player.DisplayName, normalizeDisplayName(player.DisplayName), player.IsHost, player.Token, player.JoinedAt, player.JoinedAt, normalizedPlayerRole(player.Role))
 	if err != nil {
 		if isUniqueViolation(err) {
 			return models.Room{}, game.ErrDuplicatePlayer
@@ -619,6 +704,11 @@ func (repository *PostgresRoomRepository) StartGame(ctx context.Context, code st
 	if err := insertProviderAudits(ctx, tx, gameState.CurrentRound.ProviderAudits); err != nil {
 		return models.Room{}, err
 	}
+	for index := range gameState.PreparedRounds {
+		if err := insertPreparedRound(ctx, tx, gameState.ID, &gameState.PreparedRounds[index]); err != nil {
+			return models.Room{}, err
+		}
+	}
 
 	_, err = tx.Exec(ctx, `UPDATE rooms SET status = $2, updated_at = $3 WHERE code = $1`, code, models.RoomStatusInGame, time.Now().UTC())
 	if err != nil {
@@ -635,6 +725,37 @@ func (repository *PostgresRoomRepository) StartGame(ctx context.Context, code st
 	}
 
 	return room, nil
+}
+
+func insertPreparedRound(ctx context.Context, tx pgx.Tx, gameID string, round *models.Round) error {
+	if round.Board == nil {
+		return fmt.Errorf("prepared round missing prediction board")
+	}
+	question, board := round.Question, round.Board
+	if _, err := tx.Exec(ctx, `INSERT INTO questions (id,text,locale,category,created_at) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (id) DO NOTHING`,
+		question.ID, question.Text, question.Locale, question.Category, question.CreatedAt); err != nil {
+		return fmt.Errorf("insert prepared question: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO prediction_boards (id,question_id,provider,model_name,prompt_version,board_hash,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+		board.ID, question.ID, board.Provider, board.ModelName, board.PromptVersion, board.BoardHash, board.CreatedAt); err != nil {
+		return fmt.Errorf("insert prepared board: %w", err)
+	}
+	for _, answer := range board.Answers {
+		aliases, err := json.Marshal(answer.Aliases)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO prediction_answers (id,board_id,canonical_answer,aliases_jsonb,rank,score,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+			answer.ID, board.ID, answer.CanonicalAnswer, aliases, answer.Rank, answer.Score, answer.CreatedAt); err != nil {
+			return fmt.Errorf("insert prepared answer: %w", err)
+		}
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO rounds (id,game_id,round_index,question_id,board_id,status,answer_phase_started_at,answer_phase_ends_at,created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$7,$7)`,
+		round.ID, gameID, round.RoundIndex, question.ID, board.ID, models.RoundStatusPending, round.CreatedAt); err != nil {
+		return fmt.Errorf("insert prepared round: %w", err)
+	}
+	return insertProviderAudits(ctx, tx, round.ProviderAudits)
 }
 
 func (repository *PostgresRoomRepository) SubmitGuess(ctx context.Context, code string, roundID string, submission game.GuessSubmission, clock game.Clock) (models.Room, error) {
@@ -718,6 +839,30 @@ func (repository *PostgresRoomRepository) SubmitGuess(ctx context.Context, code 
 			return models.Room{}, err
 		}
 	}
+	if mode == models.GameModeLivingRoom {
+		var participants, submissions int
+		if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM players WHERE room_code=$1 AND role='participant'`, code).Scan(&participants); err != nil {
+			return models.Room{}, fmt.Errorf("count living-room participants: %w", err)
+		}
+		if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM guesses WHERE round_id=$1`, lockedRoundID).Scan(&submissions); err != nil {
+			return models.Room{}, fmt.Errorf("count living-room submissions: %w", err)
+		}
+		if participants >= 2 && submissions == participants {
+			revealAt := submission.CreatedAt
+			tag, revealErr := tx.Exec(ctx, `UPDATE rounds SET status='revealed', reveal_started_at=$2, reveal_phase_ends_at=$3 WHERE id=$1 AND status='answering'`,
+				lockedRoundID, revealAt, revealAt.Add(repository.livingRoomPause()))
+			if revealErr != nil {
+				return models.Room{}, fmt.Errorf("reveal all-submitted living-room round: %w", revealErr)
+			}
+			if tag.RowsAffected() == 1 {
+				transition := models.RoundTransition{ID: newEventID(), RoomCode: code, GameID: gameID, RoundID: lockedRoundID,
+					Action: "reveal", Actor: models.RoundTransitionActorScheduler, Reason: "all_participants_submitted", CreatedAt: revealAt}
+				if err := appendTransitionEventTx(ctx, tx, transition, models.RoomEventRoundRevealed); err != nil {
+					return models.Room{}, err
+				}
+			}
+		}
+	}
 
 	room, err := repository.loadRoom(ctx, tx, code)
 	if err != nil {
@@ -781,15 +926,11 @@ func advanceSequentialRoundTx(ctx context.Context, tx pgx.Tx, code, gameID, roun
 			return fmt.Errorf("advance turn: %w", err)
 		}
 	}
-	if err := insertRoundTransition(ctx, tx, transition); err != nil {
-		return err
-	}
 	eventType := models.RoomEventSubmissionProgress
 	if transition.Action == "reveal" {
 		eventType = models.RoomEventRoundRevealed
 	}
-	_, err := appendRoomEventTx(ctx, tx, code, eventType, at)
-	return err
+	return appendTransitionEventTx(ctx, tx, transition, eventType)
 }
 
 func (repository *PostgresRoomRepository) RevealRound(ctx context.Context, code string, roundID string, transition models.RoundTransition) (models.Room, error) {
@@ -801,10 +942,12 @@ func (repository *PostgresRoomRepository) RevealRound(ctx context.Context, code 
 
 	commandTag, err := tx.Exec(ctx, `
 		UPDATE rounds r
-		SET status = $3, reveal_started_at = $4
+		SET status = $3, reveal_started_at = $4,
+		    reveal_phase_ends_at = CASE WHEN g.mode = 'livingroom' THEN $6::timestamptz ELSE NULL::timestamptz END
 		FROM games g
 		WHERE r.game_id = g.id AND g.room_code = $1 AND r.id = $2 AND r.status = $5
-	`, code, roundID, models.RoundStatusRevealed, transition.CreatedAt, models.RoundStatusAnswering)
+	`, code, roundID, models.RoundStatusRevealed, transition.CreatedAt, models.RoundStatusAnswering,
+		transition.CreatedAt.Add(repository.livingRoomPause()))
 	if err != nil {
 		return models.Room{}, fmt.Errorf("update round reveal state: %w", err)
 	}
@@ -827,10 +970,7 @@ func (repository *PostgresRoomRepository) RevealRound(ctx context.Context, code 
 		}
 		return models.Room{}, game.ErrRoundNotAcceptingGuesses
 	}
-	if err := insertRoundTransition(ctx, tx, transition); err != nil {
-		return models.Room{}, err
-	}
-	if _, err := appendRoomEventTx(ctx, tx, code, models.RoomEventRoundRevealed, transition.CreatedAt); err != nil {
+	if err := appendTransitionEventTx(ctx, tx, transition, models.RoomEventRoundRevealed); err != nil {
 		return models.Room{}, err
 	}
 
@@ -848,12 +988,26 @@ func (repository *PostgresRoomRepository) RevealRound(ctx context.Context, code 
 
 func insertRoundTransition(ctx context.Context, tx pgx.Tx, transition models.RoundTransition) error {
 	_, err := tx.Exec(ctx, `
-		INSERT INTO round_transitions (id, room_code, game_id, round_id, action, actor, reason, created_at, turn_index)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+		INSERT INTO round_transitions (id, room_code, game_id, round_id, action, actor, reason, created_at, turn_index, room_revision)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
 	`, transition.ID, transition.RoomCode, transition.GameID, transition.RoundID, transition.Action,
-		transition.Actor, transition.Reason, transition.CreatedAt, transition.TurnIndex)
+		transition.Actor, transition.Reason, transition.CreatedAt, transition.TurnIndex, transition.Revision)
 	if err != nil {
 		return fmt.Errorf("insert round transition: %w", err)
+	}
+	return nil
+}
+
+func appendTransitionEventTx(ctx context.Context, tx pgx.Tx, transition models.RoundTransition, eventType models.RoomEventType) error {
+	if err := insertRoundTransition(ctx, tx, transition); err != nil {
+		return err
+	}
+	event, err := appendRoomEventTx(ctx, tx, transition.RoomCode, eventType, transition.CreatedAt)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE round_transitions SET room_revision=$2 WHERE id=$1`, transition.ID, event.RoomRevision); err != nil {
+		return fmt.Errorf("link transition room revision: %w", err)
 	}
 	return nil
 }
@@ -1065,7 +1219,7 @@ func (repository *PostgresRoomRepository) loadRoom(ctx context.Context, querier 
 	}
 
 	rows, err := querier.Query(ctx, `
-		SELECT id, display_name, is_host, token, joined_at, COALESCE(team_id, '')
+		SELECT id, display_name, is_host, token, joined_at, COALESCE(team_id, ''), role
 		FROM players
 		WHERE room_code = $1
 		ORDER BY joined_at ASC, id ASC
@@ -1078,7 +1232,7 @@ func (repository *PostgresRoomRepository) loadRoom(ctx context.Context, querier 
 	players := make([]models.Player, 0)
 	for rows.Next() {
 		var player models.Player
-		if err := rows.Scan(&player.ID, &player.DisplayName, &player.IsHost, &player.Token, &player.JoinedAt, &player.TeamID); err != nil {
+		if err := rows.Scan(&player.ID, &player.DisplayName, &player.IsHost, &player.Token, &player.JoinedAt, &player.TeamID, &player.Role); err != nil {
 			return models.Room{}, fmt.Errorf("scan player: %w", err)
 		}
 		players = append(players, player)
@@ -1156,6 +1310,7 @@ func (repository *PostgresRoomRepository) loadCurrentGame(ctx context.Context, q
 		roundEndsAt       *time.Time
 		roundCreatedAt    *time.Time
 		revealStartedAt   *time.Time
+		revealPhaseEndsAt *time.Time
 		questionCreatedAt *time.Time
 		turnOrderJSON     []byte
 		currentTurnIndex  *int
@@ -1180,6 +1335,7 @@ func (repository *PostgresRoomRepository) loadCurrentGame(ctx context.Context, q
 			r.answer_phase_started_at,
 			r.answer_phase_ends_at,
 			r.reveal_started_at,
+			r.reveal_phase_ends_at,
 			r.created_at,
 			r.turn_order_jsonb,
 			r.current_turn_index,
@@ -1212,6 +1368,7 @@ func (repository *PostgresRoomRepository) loadCurrentGame(ctx context.Context, q
 		&roundStartedAt,
 		&roundEndsAt,
 		&revealStartedAt,
+		&revealPhaseEndsAt,
 		&roundCreatedAt,
 		&turnOrderJSON,
 		&currentTurnIndex,
@@ -1262,6 +1419,7 @@ func (repository *PostgresRoomRepository) loadCurrentGame(ctx context.Context, q
 			AnswerPhaseStartedAt: *roundStartedAt,
 			AnswerPhaseEndsAt:    *roundEndsAt,
 			RevealStartedAt:      revealStartedAt,
+			RevealPhaseEndsAt:    revealPhaseEndsAt,
 			CreatedAt:            *roundCreatedAt,
 			CurrentTurnIndex:     currentTurnIndex,
 			TurnEndsAt:           turnEndsAt,
@@ -1380,6 +1538,9 @@ func (repository *PostgresRoomRepository) loadScoreboard(ctx context.Context, qu
 
 	entries := make([]models.ScoreboardEntry, 0, len(players))
 	for _, player := range players {
+		if player.Role == models.PlayerRoleHostDisplay {
+			continue
+		}
 		entries = append(entries, models.ScoreboardEntry{
 			PlayerID:       player.ID,
 			DisplayName:    player.DisplayName,
@@ -1419,4 +1580,11 @@ func isUniqueViolation(err error) bool {
 
 func normalizeDisplayName(displayName string) string {
 	return strings.ToLower(strings.TrimSpace(displayName))
+}
+
+func normalizedPlayerRole(role models.PlayerRole) models.PlayerRole {
+	if role == "" {
+		return models.PlayerRoleParticipant
+	}
+	return role
 }

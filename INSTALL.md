@@ -57,7 +57,7 @@ After the first installation, `make start` starts the stack without reinstalling
 
 Use separate browser profiles, private windows, or devices so each participant has separate browser storage.
 
-1. The host opens `http://localhost:5173`, selects **Create room**, enters a name, chooses individual, team, or sequential mode, 1–5 rounds, and a 15–120 second timer, then creates the room.
+1. The host opens `http://localhost:5173`, selects **Create room**, enters a name, chooses individual, team, sequential, or living-room mode, 1–5 rounds, and a 15–120 second timer, then creates the room.
 2. Select **Copy invite** and share the join link, or share the six-character room code before starting. Invite links pre-fill the code.
 3. Each player opens **Join room**, enters the code and a display name, and joins a focused lobby that confirms their name and waits for the host.
 4. The host waits for everyone to appear. In team mode, create 2–4 teams and assign every player; every team must have a player. Then select **Start game**. Team assignments cannot change afterward.
@@ -71,6 +71,8 @@ Only the earliest accepted guess matching a board answer earns its points. A lat
 In team mode, guesses and answer claims remain individual and global: a player on one team can claim an answer before every other team. Team totals are the sum of member score events, so host overrides update individual and team results together.
 
 In sequential mode, players act in lobby join order. The timer resets for each player; submit or choose **Pass turn** to advance immediately. Prior raw claims are visible, but their match and score outcomes stay hidden. An expired or disconnected player's turn is passed automatically, and the last turn reveals the round. Sequential and team modes cannot be combined.
+
+In living-room mode, open the creator session on the shared TV and optionally select **Fullscreen**. Players scan the displayed QR (or use its ordinary join link/code) and enter names on their phones. The QR contains only the same-origin join URL—never a session token or replay/provider data. Once at least two people have joined, select **Start game**. The display cannot answer and is absent from rankings. The TV uses the full viewport for the complete question and shared timer, reveals early when everyone answers or at the deadline, keeps results readable for the configured pause, then gives the following round its full timer or completes automatically. Phones show a waiting state during TV reveal and the final scoreboard at completion. Select **Back to home** on the TV scoreboard to create or join another game.
 
 Refreshing the same browser restores its player session. Do not clear browser storage during a game. Cross-device session transfer is not currently supported.
 
@@ -94,7 +96,7 @@ Raw provider response capture is disabled by default. See [`docs/provider-operat
 
 The browser uses authenticated SSE invalidations for prompt updates and automatically falls back to polling if streaming is unavailable. The room page shows a non-blocking live/reconnecting/offline indicator. If it remains in reconnecting mode, verify that reverse proxies do not buffer `text/event-stream`, preserve `X-Player-Token` and `Last-Event-ID`, and allow long-lived responses. Play can continue through polling recovery. See [`docs/events.md`](docs/events.md) for the event contract and connection-limit configuration.
 
-PostgreSQL reveals expired rounds automatically. `AUTO_REVEAL_GRACE_SECONDS` may delay reveal without extending the answer cutoff. `GET /readyz` fails if the enabled transition worker cannot complete database passes. For emergency manual-only play, set `AUTO_REVEAL_ENABLED=false` and restart the backend. See [`docs/deadline-transitions.md`](docs/deadline-transitions.md) before changing worker cadence, batch size, or rolling back migration `000009`.
+PostgreSQL reveals expired rounds automatically. `LIVINGROOM_REVEAL_PAUSE_SECONDS` controls the living-room result pause and must be 3–30 seconds (default `8`). `AUTO_REVEAL_GRACE_SECONDS` may delay reveal without extending the answer cutoff. `GET /readyz` fails if the enabled transition worker cannot complete database passes. For emergency manual-only play, set `AUTO_REVEAL_ENABLED=false` and restart the backend. That emergency stop pauses living-room games until automation returns. See [`docs/deadline-transitions.md`](docs/deadline-transitions.md) before changing worker cadence, batch size, or rolling back transition migrations.
 
 ## Verification
 

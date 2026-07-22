@@ -119,6 +119,12 @@ Flow:
 
 Team creation and assignment are host-only and lobby-only. A game requires 2–4 non-empty teams and no unassigned players. Assignments are immutable after start. Players submit individually, first-committed answer claims remain global across the round, and team totals are derived from member `score_events` rather than stored as a mutable second score.
 
+### Living-room Mode
+
+The creator is persisted as `host_display`, can start the game, cannot guess, and is excluded from the frozen participant quorum, claims, score events, rankings, and replay rankings. At least two joined `participant` players are required. Living-room cannot be combined with teams or sequential turns.
+
+All rounds are generated and stored at start; later rounds remain `pending`, so transition workers never perform provider calls while holding locks. The last committed participant guess can reveal early. Otherwise the answer deadline reveals normally. Both persist `reveal_phase_ends_at`; when it becomes due, the worker atomically records a unique `start_round` or `complete_game` transition.
+
 ## Data Model Sketch
 
 ### rooms
@@ -382,6 +388,7 @@ MODEL_RAW_RESPONSE_MAX_BYTES=4096
 EVENT_POLL_INTERVAL_MS=250
 EVENT_HEARTBEAT_SECONDS=15
 EVENT_MAX_CONNECTIONS=100
+LIVINGROOM_REVEAL_PAUSE_SECONDS=8
 EVENT_WRITE_TIMEOUT_SECONDS=5
 TRUSTED_PROXY_CIDRS=
 RATE_LIMIT_MAX_KEYS=10000

@@ -201,6 +201,87 @@ select {
     padding: clamp(1.25rem, 3vw, 2rem);
 }
 
+.livingroom-display {
+  min-height: 100vh;
+  display: grid;
+}
+
+.app-shell:has(.livingroom-display) {
+  overflow: visible;
+}
+
+.app-shell:has(.livingroom-display) > .topbar {
+  display: none;
+}
+
+.app-shell:has(.livingroom-display) > .page-frame {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+.livingroom-surface {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  align-content: start;
+  gap: 2rem;
+  min-width: 0;
+  padding: clamp(1.25rem, 3vw, 3rem);
+  min-height: 100vh;
+  border-radius: 0;
+}
+
+.livingroom-topbar,
+.livingroom-lobby {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 2rem;
+}
+
+.livingroom-lobby > * {
+  flex: 1;
+}
+
+.join-qr {
+  display: block;
+  width: min(320px, 70vw);
+  height: auto;
+  margin: 1rem 0;
+  border-radius: 1rem;
+  background: white;
+}
+
+.livingroom-question {
+  min-height: 0;
+  height: 100%;
+  display: grid;
+  place-content: center;
+  gap: 1.5rem;
+  text-align: center;
+}
+
+.livingroom-question h2 {
+  max-width: 24ch;
+  font-size: clamp(2rem, 5vw, 5rem);
+  overflow-wrap: anywhere;
+}
+
+.livingroom-question .countdown {
+  font-size: clamp(3rem, 10vw, 8rem);
+}
+
+.livingroom-final-actions {
+  justify-content: center;
+}
+
+@media (max-width: 720px) {
+  .livingroom-topbar,
+  .livingroom-lobby {
+    flex-direction: column;
+  }
+}
+
 .participant-room {
     width: min(46rem, 100%);
     margin: 0 auto;

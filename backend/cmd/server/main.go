@@ -55,6 +55,7 @@ func main() {
 		defer pool.Close()
 
 		postgresRepository = db.NewPostgresRoomRepository(pool)
+		postgresRepository.SetLivingRoomRevealPause(cfg.LivingRoomRevealPause)
 		roomRepository = postgresRepository
 		dueRepository = postgresRepository
 		logger.Info("using postgres room repository")

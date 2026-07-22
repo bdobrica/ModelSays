@@ -1,5 +1,7 @@
 # Client Accessibility and Responsive Play
 
+The living-room TV surface provides a text room code and copyable link alongside (not only) the QR, a visible joined count/list, accessible start and fullscreen controls, the shared timer, and connection status. During play it owns the full viewport without the application navigation header, permits document overflow instead of clipping long content, and moves phase focus without scrolling the question under a sticky element. The QR alternative identifies its exact public join URL. Reduced-motion policy applies to TV reveal, and phone participants retain the focused phase headings and live states.
+
 The supported viewport contract is 360×800 phone, 768×1024 tablet, 1366×768 laptop, and 1920×1080 shared display. The host room changes from two columns to one below 900 px and tightens navigation and card layout below 480 px. A joined participant always uses one centered panel with no roster/sidebar column or hidden-panel gap. Controls have a 48 px minimum height, visible keyboard focus, and touch-action behavior that avoids delayed activation.
 
 ## Interaction behavior

@@ -242,6 +242,14 @@ func (repository *InMemoryRoomRepository) SubmitGuess(_ context.Context, code st
 		advanceSequentialRound(round, submission.CreatedAt, room.Settings.AnswerTimerSeconds)
 		appendSequentialEvent(repository, room, submission.CreatedAt)
 	}
+	if room.CurrentGame.Mode == models.GameModeLivingRoom && len(round.Guesses) == len(room.CurrentGame.Scoreboard) {
+		revealAt := submission.CreatedAt
+		revealEnd := revealAt.Add(8 * time.Second)
+		round.Status = models.RoundStatusRevealed
+		round.RevealStartedAt = &revealAt
+		round.RevealPhaseEndsAt = &revealEnd
+		appendSequentialEvent(repository, room, revealAt)
+	}
 	room.CurrentGame.TeamScoreboard = deriveTeamScoreboard(room.Teams, room.Players, room.CurrentGame.Scoreboard)
 	room.UpdatedAt = time.Now().UTC()
 
@@ -314,6 +322,10 @@ func (repository *InMemoryRoomRepository) RevealRound(_ context.Context, code st
 
 	round.Status = models.RoundStatusRevealed
 	round.RevealStartedAt = &transition.CreatedAt
+	if room.CurrentGame.Mode == models.GameModeLivingRoom {
+		revealEnd := transition.CreatedAt.Add(8 * time.Second)
+		round.RevealPhaseEndsAt = &revealEnd
+	}
 	room.UpdatedAt = transition.CreatedAt
 	room.Revision++
 	event := models.RoomEvent{Version: models.RoomEventVersion, ID: newID(), RoomCode: code,

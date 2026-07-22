@@ -14,6 +14,7 @@ type RoundStatus string
 const (
 	RoundStatusAnswering RoundStatus = "answering"
 	RoundStatusRevealed  RoundStatus = "revealed"
+	RoundStatusPending   RoundStatus = "pending"
 )
 
 type PredictionAnswer struct {
@@ -90,6 +91,7 @@ type Round struct {
 	AnswerPhaseStartedAt time.Time           `json:"answerPhaseStartedAt"`
 	AnswerPhaseEndsAt    time.Time           `json:"answerPhaseEndsAt"`
 	RevealStartedAt      *time.Time          `json:"revealStartedAt,omitempty"`
+	RevealPhaseEndsAt    *time.Time          `json:"revealPhaseEndsAt,omitempty"`
 	CreatedAt            time.Time           `json:"createdAt"`
 	ProviderAudits       []ProviderCallAudit `json:"-"`
 	TurnOrder            []string            `json:"turnOrder,omitempty"`
@@ -115,6 +117,7 @@ type RoundTransition struct {
 	Reason    string               `json:"reason"`
 	CreatedAt time.Time            `json:"createdAt"`
 	TurnIndex *int                 `json:"turnIndex,omitempty"`
+	Revision  int64                `json:"revision,omitempty"`
 }
 
 type ProviderCallAudit struct {
@@ -172,6 +175,7 @@ type Game struct {
 	CreatedAt         time.Time             `json:"createdAt"`
 	StartedAt         time.Time             `json:"startedAt"`
 	EndedAt           *time.Time            `json:"endedAt,omitempty"`
+	PreparedRounds    []Round               `json:"-"`
 }
 
 type ReplayRound struct {

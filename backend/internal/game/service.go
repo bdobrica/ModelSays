@@ -56,6 +56,8 @@ var (
 	ErrTeamNotFound             = errors.New("team not found")
 	ErrTeamConfigurationInvalid = errors.New("team games require 2 to 4 non-empty teams and every player assigned")
 	ErrNotPlayersTurn           = errors.New("it is not this player's turn")
+	ErrHostDisplayCannotGuess   = errors.New("the living-room host display cannot submit guesses")
+	ErrNotEnoughParticipants    = errors.New("living-room games require at least two joined participants")
 )
 
 const (
@@ -276,8 +278,12 @@ func (service *RoomService) CreateRoom(ctx context.Context, input CreateRoomInpu
 		ID:          newID(),
 		DisplayName: hostDisplayName,
 		IsHost:      true,
+		Role:        models.PlayerRoleParticipant,
 		JoinedAt:    now,
 		Token:       newToken(),
+	}
+	if settings.Mode == models.GameModeLivingRoom {
+		host.Role = models.PlayerRoleHostDisplay
 	}
 	for attempts := 0; attempts < 5; attempts++ {
 		room := models.Room{
@@ -416,6 +422,7 @@ func (service *RoomService) JoinRoom(ctx context.Context, input JoinRoomInput) (
 		ID:          newID(),
 		DisplayName: displayName,
 		IsHost:      false,
+		Role:        models.PlayerRoleParticipant,
 		JoinedAt:    service.clock.Now(),
 		Token:       newToken(),
 	}
@@ -453,6 +460,9 @@ func (service *RoomService) StartGame(ctx context.Context, input StartGameInput)
 			return models.Room{}, err
 		}
 	}
+	if room.Settings.Mode == models.GameModeLivingRoom && len(scoringPlayers(room.Players)) < 2 {
+		return models.Room{}, ErrNotEnoughParticipants
+	}
 
 	now := service.clock.Now()
 	gameID := newID()
@@ -469,7 +479,7 @@ func (service *RoomService) StartGame(ctx context.Context, input StartGameInput)
 		Mode:              room.Settings.Mode,
 		TotalRounds:       room.Settings.TotalRounds,
 		CurrentRoundIndex: 1,
-		Scoreboard:        initialScoreboard(room.Players),
+		Scoreboard:        initialScoreboard(scoringPlayers(room.Players)),
 		TeamScoreboard:    deriveTeamScoreboard(room.Teams, room.Players, initialScoreboard(room.Players)),
 		CreatedAt:         now,
 		StartedAt:         now,
@@ -485,6 +495,25 @@ func (service *RoomService) StartGame(ctx context.Context, input StartGameInput)
 			CreatedAt:            now,
 			ProviderAudits:       roundSeed.Audits,
 		},
+	}
+	if room.Settings.Mode == models.GameModeLivingRoom && room.Settings.TotalRounds > 1 {
+		usedQuestions := []string{roundSeed.Question.Text}
+		priorAudits := append([]models.ProviderCallAudit(nil), roundSeed.Audits...)
+		for index := 2; index <= room.Settings.TotalRounds; index++ {
+			preparedID := newID()
+			seed, generateErr := service.generateRoundScoped(ctx, room.Code, gameID, preparedID, room.Settings, index, usedQuestions, now, priorAudits)
+			if generateErr != nil {
+				return models.Room{}, generateErr
+			}
+			prepared := models.Round{
+				ID: preparedID, RoundIndex: index, Status: models.RoundStatusPending,
+				Question: seed.Question, BoardHash: seed.Board.BoardHash, Board: &seed.Board,
+				CreatedAt: now, ProviderAudits: seed.Audits,
+			}
+			gameState.PreparedRounds = append(gameState.PreparedRounds, prepared)
+			usedQuestions = append(usedQuestions, seed.Question.Text)
+			priorAudits = append(priorAudits, seed.Audits...)
+		}
 	}
 	if room.Settings.Mode == models.GameModeSequential {
 		order := make([]string, len(room.Players))
@@ -525,6 +554,9 @@ func (service *RoomService) SubmitGuess(ctx context.Context, input SubmitGuessIn
 	player, ok := findPlayerByToken(room.Players, strings.TrimSpace(input.PlayerToken))
 	if !ok {
 		return models.Room{}, ErrPlayerNotFound
+	}
+	if player.Role == models.PlayerRoleHostDisplay {
+		return models.Room{}, ErrHostDisplayCannotGuess
 	}
 
 	round, err := currentRound(room, roundID)
@@ -1149,8 +1181,8 @@ func validateDisplayName(displayName string) error {
 }
 
 func (service *RoomService) validateSettings(settings models.RoomSettings) error {
-	if settings.Mode != models.GameModeSimultaneous && settings.Mode != models.GameModeTeams && settings.Mode != models.GameModeSequential {
-		return fmt.Errorf("%w: mode must be simultaneous, teams, or sequential", ErrRoomSettingsInvalid)
+	if settings.Mode != models.GameModeSimultaneous && settings.Mode != models.GameModeTeams && settings.Mode != models.GameModeSequential && settings.Mode != models.GameModeLivingRoom {
+		return fmt.Errorf("%w: mode must be simultaneous, teams, sequential, or livingroom", ErrRoomSettingsInvalid)
 	}
 	if settings.TotalRounds < minTotalRounds || settings.TotalRounds > maxTotalRounds {
 		return fmt.Errorf("%w: total rounds must be between %d and %d", ErrRoomSettingsInvalid, minTotalRounds, maxTotalRounds)
@@ -1251,6 +1283,7 @@ func cloneGame(gameState *models.Game) *models.Game {
 	}
 	clonedGame.Scoreboard = append([]models.ScoreboardEntry(nil), gameState.Scoreboard...)
 	clonedGame.TeamScoreboard = append([]models.TeamScoreboardEntry(nil), gameState.TeamScoreboard...)
+	clonedGame.PreparedRounds = append([]models.Round(nil), gameState.PreparedRounds...)
 	if gameState.CurrentRound != nil {
 		clonedRound := *gameState.CurrentRound
 		clonedRound.Guesses = append([]models.Guess(nil), gameState.CurrentRound.Guesses...)
@@ -1262,6 +1295,10 @@ func cloneGame(gameState *models.Game) *models.Game {
 		if gameState.CurrentRound.TurnEndsAt != nil {
 			deadline := *gameState.CurrentRound.TurnEndsAt
 			clonedRound.TurnEndsAt = &deadline
+		}
+		if gameState.CurrentRound.RevealPhaseEndsAt != nil {
+			deadline := *gameState.CurrentRound.RevealPhaseEndsAt
+			clonedRound.RevealPhaseEndsAt = &deadline
 		}
 		if gameState.CurrentRound.Board != nil {
 			clonedBoard := *gameState.CurrentRound.Board
@@ -1499,6 +1536,16 @@ func initialScoreboard(players []models.Player) []models.ScoreboardEntry {
 	}
 
 	return entries
+}
+
+func scoringPlayers(players []models.Player) []models.Player {
+	result := make([]models.Player, 0, len(players))
+	for _, player := range players {
+		if player.Role != models.PlayerRoleHostDisplay {
+			result = append(result, player)
+		}
+	}
+	return result
 }
 
 type generatedRound struct {

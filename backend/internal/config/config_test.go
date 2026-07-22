@@ -11,12 +11,20 @@ func TestLoadDeadlineTransitionConfiguration(t *testing.T) {
 	t.Setenv("AUTO_REVEAL_GRACE_SECONDS", "3")
 	t.Setenv("TRANSITION_POLL_INTERVAL_MS", "400")
 	t.Setenv("TRANSITION_BATCH_SIZE", "12")
+	t.Setenv("LIVINGROOM_REVEAL_PAUSE_SECONDS", "9")
 	cfg := Load()
 	if cfg.AutoRevealEnabled {
 		t.Fatal("AUTO_REVEAL_ENABLED=false was not applied")
 	}
 	if cfg.AutoRevealGrace != 3*time.Second || cfg.TransitionPoll != 400*time.Millisecond || cfg.TransitionBatchSize != 12 {
 		t.Fatalf("transition config = grace %s poll %s batch %d", cfg.AutoRevealGrace, cfg.TransitionPoll, cfg.TransitionBatchSize)
+	}
+	if cfg.LivingRoomRevealPause != 9*time.Second {
+		t.Fatalf("living-room reveal pause = %s", cfg.LivingRoomRevealPause)
+	}
+	cfg.LivingRoomRevealPause = 2 * time.Second
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "LIVINGROOM_REVEAL_PAUSE_SECONDS") {
+		t.Fatalf("invalid living-room reveal pause validation = %v", err)
 	}
 }
 

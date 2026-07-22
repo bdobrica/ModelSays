@@ -40,6 +40,8 @@ or:
 
 ## User Roles
 
+Living-room creator sessions use a dedicated shared-TV surface. Its lobby provides a locally generated, secret-free QR for the ordinary join URL, code/copy fallback, participant arrivals, start validation, connection feedback, and fullscreen. During play it shows the shared question and authoritative countdown; reveal shows the board/rankings during the server-owned pause, and completion shows the final ranking. Phone participants retain the focused player surface.
+
 ### Host
 
 The host can:

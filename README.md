@@ -25,7 +25,7 @@ For each round:
 
 The generated board is stored persistently so every player competes against the same frozen set of answers.
 
-Rooms may use individual simultaneous mode, team mode, or sequential mode. Team mode aggregates individual scores into 2–4 host-configured teams. Sequential mode gives every player one timed turn in lobby join order.
+Rooms may use individual simultaneous, team, sequential, or living-room mode. Team mode aggregates individual scores into 2–4 host-configured teams. Sequential mode gives every player one timed turn in lobby join order. Living-room mode turns the creator into a non-playing TV display while every human plays from a phone.
 
 ## Example
 
@@ -180,7 +180,7 @@ Without `OPENAI_API_KEY`, games use a five-question English curated bank and sup
 
 Provider calls use server-owned model allowlists, a 10-second timeout, two-attempt retry ceiling, and shared per-game call/cost budgets. Every generated question, board, and semantic-judge call—including zero-cost curated behavior—is recorded in a private room audit; raw response capture is disabled by default. A judge only evaluates deterministic misses, never changes a score, and exposes its bounded suggestion to the host only after reveal. See [`docs/provider-operations.md`](docs/provider-operations.md) for configuration, privacy, host review/audit access, retention, and rollback.
 
-The supported MVP room contract is intentionally narrow: simultaneous mode, 1–5 rounds, a 15–120 second answer timer, English (`en`), and the server-configured `DEFAULT_PREDICTION_MODEL`. Room names are 3–48 Unicode characters and display names are 2–24; control characters are rejected. Room codes are six characters from the displayed invite alphabet. New players may join only while the room is in the lobby; attempting to reuse an invite after start returns a conflict response. JSON mutation requests are limited to 16 KiB and reject unknown fields, trailing values, and malformed input. The browser validates its stored player token with the server after refresh and offers a clear-session action.
+The supported room contract keeps modes isolated: simultaneous, team, sequential, or living-room mode; 1–5 rounds; a 15–120 second answer timer; English (`en`); and the server-configured `DEFAULT_PREDICTION_MODEL`. Room names are 3–48 Unicode characters and display names are 2–24; control characters are rejected. Room codes are six characters from the displayed invite alphabet. New players may join only while the room is in the lobby; attempting to reuse an invite after start returns a conflict response. JSON mutation requests are limited to 16 KiB and reject unknown fields, trailing values, and malformed input. The browser validates its stored player token with the server after refresh and offers a clear-session action.
 
 ## Suggested Tech Stack
 
@@ -244,7 +244,7 @@ The host can correct a match or miss after reveal.
 
 The controlled MVP is playable with one host and at least two players:
 
-- simultaneous, team, or sequential English games with 1–5 rounds and 15–120 second timers;
+- simultaneous, team, sequential, or living-room English games with 1–5 rounds and 15–120 second timers;
 - PostgreSQL-persisted rooms, frozen boards, guesses, score events, and final rankings;
 - a five-round curated bank that works without an OpenAI key, plus validated OpenAI generation when configured;
 - deterministic canonical/alias matching with first committed claim wins;
@@ -296,6 +296,12 @@ First claim remains global and scores exactly as in simultaneous mode. Submissio
 ### Team Mode
 
 Players are grouped into teams and scores are accumulated per team.
+
+### Living-room Mode
+
+Choose **Living-room TV host** when the creator browser is shown on a shared television. The creator receives an authenticated non-playing `host_display` session; it can start the game but cannot guess and never appears in submission counts, claims, scores, rankings, or replays. The TV lobby shows a locally generated QR containing only the ordinary same-origin `/join?code=…` URL, the room code, joined participants, copy fallback, connection state, fullscreen, and **Start game**. At least two joined participants are required.
+
+Rounds use simultaneous deterministic scoring. The server reveals as soon as every frozen participant submits, or at the authoritative deadline otherwise. Results remain on the TV until the persisted reveal-pause deadline (eight seconds by default), after which the PostgreSQL transition worker starts the prepared next round or completes the game exactly once. Phones reuse the focused question/waiting/final-ranking surface. Living-room mode cannot be combined with teams or sequential turns.
 
 This is especially useful for remote team-building.
 

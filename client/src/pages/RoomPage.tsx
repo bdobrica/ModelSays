@@ -43,6 +43,7 @@ export function RoomPage() {
   const [shareStatus, setShareStatus] = useState('')
   const [presentationStatus, setPresentationStatus] = useState('')
   const [teamName, setTeamName] = useState('')
+  const [joinQRCode, setJoinQRCode] = useState('')
   const [now, setNow] = useState(() => Date.now())
   const requestSequence = useRef(0)
   const activeRequest = useRef<AbortController | null>(null)
@@ -139,6 +140,7 @@ export function RoomPage() {
     : 0
   const hasLocallyExpired = currentRound?.status === 'answering' && secondsRemaining === 0
   const isHost = activePlayer?.isHost ?? false
+  const isLivingRoomDisplay = activePlayer?.role === 'host_display' && room?.settings.mode === 'livingroom'
   const activePlayerToken = activePlayer?.token ?? ''
 
   useEffect(() => {
@@ -177,13 +179,19 @@ export function RoomPage() {
   }, [answerPhaseEndsAt, hasLocallyExpired])
 
   useEffect(() => {
+    if (!isLivingRoomDisplay || currentRound?.status !== 'revealed' || !currentRound.revealPhaseEndsAt) return
+    const timer = window.setInterval(() => setNow(Date.now()), 250)
+    return () => window.clearInterval(timer)
+  }, [currentRound?.revealPhaseEndsAt, currentRound?.status, isLivingRoomDisplay])
+
+  useEffect(() => {
     setGuessAnswer('')
     setOverrideSelections({})
     setNow(Date.now())
   }, [currentRound?.id])
 
   useEffect(() => {
-    if (!isLoading && (currentRound?.status || room?.status)) phaseHeading.current?.focus()
+    if (!isLoading && (currentRound?.status || room?.status)) phaseHeading.current?.focus({ preventScroll: true })
   }, [currentRound?.id, currentRound?.status, isLoading, room?.status])
 
   useEffect(() => {
@@ -375,6 +383,19 @@ export function RoomPage() {
   const showLobbyState = room != null && !currentGame
   const showAnswerState = currentRound?.status === 'answering'
   const showRevealState = currentRound?.status === 'revealed'
+  const joinURL = `${window.location.origin}/join?code=${encodeURIComponent(code)}`
+  useEffect(() => {
+    if (!isLivingRoomDisplay || !showLobbyState) {
+      setJoinQRCode('')
+      return
+    }
+    let cancelled = false
+    void import('qrcode')
+      .then(({ default: QRCode }) => QRCode.toDataURL(joinURL, { errorCorrectionLevel: 'M', margin: 2, width: 320 }))
+      .then((value) => { if (!cancelled) setJoinQRCode(value) })
+      .catch(() => { if (!cancelled) setJoinQRCode('') })
+    return () => { cancelled = true }
+  }, [isLivingRoomDisplay, joinURL, showLobbyState])
   const connectionMessage = connectionState === 'live'
     ? 'Live updates connected'
     : connectionState === 'offline'
@@ -384,6 +405,70 @@ export function RoomPage() {
         : connectionState === 'fallback'
           ? 'Reconnecting — polling for updates'
           : 'Connecting live updates…'
+
+  if (isLivingRoomDisplay) {
+    const participants = room?.players.filter((player) => player.role !== 'host_display') ?? []
+    const revealSeconds = currentRound?.revealPhaseEndsAt
+      ? Math.max(0, Math.ceil((Date.parse(currentRound.revealPhaseEndsAt) - now) / 1000))
+      : 0
+    return (
+      <section className="livingroom-display" aria-busy={isLoading || isMutating}>
+        <article className="panel livingroom-surface">
+          <div className="livingroom-topbar">
+            <div><p className="eyebrow">Living-room game</p><h1>{room?.name}</h1></div>
+            <p aria-live="polite" className={`connection-indicator connection-${connectionState}`} role="status">{connectionMessage}</p>
+            <button className="button button-secondary" onClick={() => void handleFullscreen()} type="button">Fullscreen</button>
+          </div>
+          {showLobbyState ? (
+            <section className="livingroom-lobby">
+              <div>
+                <p className="eyebrow">Scan to join</p>
+                <div className="room-code-row"><span>Room code</span><strong>{code}</strong></div>
+                {joinQRCode
+                  ? <img alt={`QR code for ${joinURL}`} className="join-qr" src={joinQRCode} />
+                  : <p className="status-note">QR unavailable. Join at {joinURL}</p>}
+                <button className="button button-secondary" onClick={() => void handleCopyInvite()} type="button">Copy join link</button>
+              </div>
+              <div>
+                <h2 ref={phaseHeading} tabIndex={-1}>{participants.length} players joined</h2>
+                <ul className="player-list">{participants.map((player) => <li className="player-card" key={player.id}><strong>{player.displayName}</strong></li>)}</ul>
+                <button className="button button-primary" disabled={isMutating || participants.length < 2} onClick={() => void handleStartGame()} type="button">
+                  {participants.length < 2 ? 'Waiting for 2 players' : isMutating ? 'Starting…' : 'Start game'}
+                </button>
+              </div>
+            </section>
+          ) : null}
+          {showAnswerState && currentRound ? (
+            <section className="livingroom-question">
+              <p className="eyebrow">Round {currentRound.roundIndex} of {currentGame?.totalRounds}</p>
+              <h2 ref={phaseHeading} tabIndex={-1}>{currentRound.question.text}</h2>
+              <p className="countdown" role="timer">{hasLocallyExpired ? 'Revealing…' : `${secondsRemaining}s`}</p>
+              <p className="status-note">{currentGame?.scoreboard.filter((entry) => entry.submissionMade).length ?? 0} of {participants.length} answered</p>
+            </section>
+          ) : null}
+          {showRevealState && currentRound && !isGameCompleted ? (
+            <section className="phase-card reveal-card">
+              <p className="eyebrow">Results · next round in {revealSeconds}s</p>
+              <h2 ref={phaseHeading} tabIndex={-1}>{currentRound.question.text}</h2>
+              <div className="answer-board">{currentRound.board?.answers.map((answer) => <div className="answer-row" key={answer.id}><span>#{answer.rank}</span><strong>{answer.canonicalAnswer}</strong><em>{answer.score} pts</em></div>)}</div>
+              <div className="score-list">{rankedScoreboard.map((entry, index) => <div className="score-row" key={entry.playerId}><strong>#{index + 1}</strong><span>{entry.displayName}</span><em>{entry.score} pts</em></div>)}</div>
+            </section>
+          ) : null}
+          {isGameCompleted && currentGame ? (
+            <section className="livingroom-question">
+              <p className="eyebrow">Game complete</p><h2 ref={phaseHeading} tabIndex={-1}>Final scoreboard</h2>
+              <div className="score-list">{rankedScoreboard.map((entry, index) => <div className={entry.score === winningScore ? 'score-row score-row-winner' : 'score-row'} key={entry.playerId}><strong>#{index + 1}</strong><span>{entry.displayName}</span><em>{entry.score} pts</em></div>)}</div>
+              <div className="action-row livingroom-final-actions">
+                <button className="button button-primary" onClick={() => navigate('/')} type="button">Back to home</button>
+              </div>
+            </section>
+          ) : null}
+          <p aria-live="polite" className="status-note" role="status">{shareStatus} {presentationStatus}</p>
+          {errorMessage ? <p className="form-error" role="alert">{errorMessage}</p> : null}
+        </article>
+      </section>
+    )
+  }
 
   if (matchingSession && !matchingSession.player.isHost && !activePlayer) {
     return (
@@ -462,7 +547,9 @@ export function RoomPage() {
             <section className="participant-phase participant-waiting">
               <p className="eyebrow">Round {currentRound.roundIndex} complete</p>
               <h1 ref={phaseHeading} tabIndex={-1}>Result is on the host display</h1>
-              <p aria-live="polite" className="status-note" role="status">Waiting for the host to start the next round.</p>
+              <p aria-live="polite" className="status-note" role="status">
+                {currentGame?.mode === 'livingroom' ? 'Waiting for the TV to start the next round automatically.' : 'Waiting for the host to start the next round.'}
+              </p>
             </section>
           ) : null}
 

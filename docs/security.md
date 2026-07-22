@@ -1,5 +1,9 @@
 # Public API abuse controls
 
+## Living-room QR and display identity
+
+The TV QR is generated locally from `window.location.origin + "/join?code=" + roomCode`. Its payload contains no player token, replay identifier, provider/model metadata, or hidden content; the visible code and copy fallback are equivalent public invitations. The display remains authenticated for host start/session recovery, but its persisted `host_display` role is enforced by the backend: guesses are forbidden and the identity is excluded from the scoring quorum, claims, score events, rankings, and replay rankings. Late joins remain rejected after start.
+
 The API applies in-process, fixed-window limits before room handlers run. Limits are layered by a privacy-preserving client-IP key, room code, player-token hash, action, and paid-provider budget. Each map has a hard key bound (`RATE_LIMIT_MAX_KEYS`, default 10,000); the oldest entry is evicted when that bound is reached. Rejections are deterministic HTTP `429` JSON responses:
 
 ```json

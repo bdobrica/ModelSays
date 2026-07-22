@@ -13,7 +13,7 @@ export function CreateRoomPage() {
     const [locale, setLocale] = useState('en')
     const [predictionModel, setPredictionModel] = useState('gpt-5.6-luna')
     const [teamSafeMode, setTeamSafeMode] = useState(false)
-    const [mode, setMode] = useState<'simultaneous' | 'teams' | 'sequential'>('simultaneous')
+    const [mode, setMode] = useState<'simultaneous' | 'teams' | 'sequential' | 'livingroom'>('simultaneous')
     const [isSubmitting, setIsSubmitting] = useState(false)
     const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
@@ -53,16 +53,17 @@ export function CreateRoomPage() {
             <div className="section-heading">
                 <p className="eyebrow">Host setup</p>
                 <h1>Create a room</h1>
-                <p>Choose individual competition or auditable team competition with individual guesses.</p>
+                <p>Choose phone play, teams, turns, or a non-playing living-room TV host.</p>
             </div>
 
             <form className="form-grid" onSubmit={handleSubmit}>
                 <label>
                     Game mode
-                    <select value={mode} onChange={(event) => setMode(event.target.value as 'simultaneous' | 'teams' | 'sequential')}>
+                    <select value={mode} onChange={(event) => setMode(event.target.value as 'simultaneous' | 'teams' | 'sequential' | 'livingroom')}>
                         <option value="simultaneous">Individual</option>
                         <option value="teams">Teams</option>
                         <option value="sequential">Sequential turns</option>
+                        <option value="livingroom">Living-room TV host</option>
                     </select>
                 </label>
                 <label>
@@ -71,7 +72,7 @@ export function CreateRoomPage() {
                 </label>
 
                 <label>
-                    Host display name
+                    {mode === 'livingroom' ? 'TV display name' : 'Host display name'}
                     <input
                         value={hostDisplayName}
                         maxLength={24}

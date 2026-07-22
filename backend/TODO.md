@@ -85,6 +85,7 @@ Status note:
 - [x] Define game settings.
 - [x] Implement simultaneous mode.
 - [x] Implement sequential mode with persisted join-order turns, pass/timeout advancement, and separate projections.
+- [x] Implement isolated living-room mode with a non-playing display, frozen participant quorum, persisted reveal pause, and durable automatic advancement/completion.
 - [x] Implement game creation from a room.
 - [x] Implement round creation.
 - [x] Implement current round state machine.

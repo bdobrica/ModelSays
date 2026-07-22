@@ -111,11 +111,12 @@ type publicRoom struct {
 }
 
 type publicPlayer struct {
-	ID          string    `json:"id"`
-	DisplayName string    `json:"displayName"`
-	IsHost      bool      `json:"isHost"`
-	JoinedAt    time.Time `json:"joinedAt"`
-	TeamID      string    `json:"teamId,omitempty"`
+	ID          string            `json:"id"`
+	DisplayName string            `json:"displayName"`
+	IsHost      bool              `json:"isHost"`
+	Role        models.PlayerRole `json:"role"`
+	JoinedAt    time.Time         `json:"joinedAt"`
+	TeamID      string            `json:"teamId,omitempty"`
 }
 
 type publicGame struct {
@@ -144,6 +145,7 @@ type publicRound struct {
 	AnswerPhaseStartedAt time.Time               `json:"answerPhaseStartedAt"`
 	AnswerPhaseEndsAt    time.Time               `json:"answerPhaseEndsAt"`
 	RevealStartedAt      *time.Time              `json:"revealStartedAt,omitempty"`
+	RevealPhaseEndsAt    *time.Time              `json:"revealPhaseEndsAt,omitempty"`
 	TurnOrder            []string                `json:"turnOrder,omitempty"`
 	CurrentTurnIndex     *int                    `json:"currentTurnIndex,omitempty"`
 	TurnEndsAt           *time.Time              `json:"turnEndsAt,omitempty"`
@@ -831,7 +833,7 @@ func (server *Server) writeDomainError(writer http.ResponseWriter, err error) {
 		writeError(writer, http.StatusNotFound, err.Error())
 	case errors.Is(err, game.ErrUnauthorizedStart):
 		writeError(writer, http.StatusForbidden, err.Error())
-	case errors.Is(err, game.ErrUnauthorizedReveal), errors.Is(err, game.ErrUnauthorizedAdvance), errors.Is(err, game.ErrUnauthorizedOverride), errors.Is(err, game.ErrUnauthorizedAudit), errors.Is(err, game.ErrUnauthorizedJudgeReview), errors.Is(err, game.ErrUnauthorizedPlayAgain), errors.Is(err, game.ErrUnauthorizedTeams), errors.Is(err, game.ErrPlayerNotFound):
+	case errors.Is(err, game.ErrUnauthorizedReveal), errors.Is(err, game.ErrUnauthorizedAdvance), errors.Is(err, game.ErrUnauthorizedOverride), errors.Is(err, game.ErrUnauthorizedAudit), errors.Is(err, game.ErrUnauthorizedJudgeReview), errors.Is(err, game.ErrUnauthorizedPlayAgain), errors.Is(err, game.ErrUnauthorizedTeams), errors.Is(err, game.ErrPlayerNotFound), errors.Is(err, game.ErrHostDisplayCannotGuess):
 		writeError(writer, http.StatusForbidden, err.Error())
 	case errors.Is(err, game.ErrTeamNotFound):
 		writeError(writer, http.StatusNotFound, err.Error())
@@ -841,7 +843,7 @@ func (server *Server) writeDomainError(writer http.ResponseWriter, err error) {
 		writeError(writer, http.StatusConflict, err.Error())
 	case errors.Is(err, game.ErrContentUnavailable):
 		writeError(writer, http.StatusServiceUnavailable, game.ErrContentUnavailable.Error())
-	case errors.Is(err, game.ErrDisplayNameInvalid), errors.Is(err, game.ErrRoomNameInvalid), errors.Is(err, game.ErrRoomCodeInvalid), errors.Is(err, game.ErrRoomSettingsInvalid), errors.Is(err, game.ErrDuplicatePlayer), errors.Is(err, game.ErrAnswerInvalid), errors.Is(err, game.ErrPredictionAnswerNotFound), errors.Is(err, game.ErrGuessNotFound), errors.Is(err, game.ErrTeamNameInvalid), errors.Is(err, game.ErrTeamConfigurationInvalid):
+	case errors.Is(err, game.ErrDisplayNameInvalid), errors.Is(err, game.ErrRoomNameInvalid), errors.Is(err, game.ErrRoomCodeInvalid), errors.Is(err, game.ErrRoomSettingsInvalid), errors.Is(err, game.ErrDuplicatePlayer), errors.Is(err, game.ErrAnswerInvalid), errors.Is(err, game.ErrPredictionAnswerNotFound), errors.Is(err, game.ErrGuessNotFound), errors.Is(err, game.ErrTeamNameInvalid), errors.Is(err, game.ErrTeamConfigurationInvalid), errors.Is(err, game.ErrNotEnoughParticipants):
 		writeError(writer, http.StatusBadRequest, err.Error())
 	default:
 		server.logger.Error("unexpected request failure", "error", err)
@@ -942,6 +944,7 @@ func projectRoom(room models.Room) publicRoom {
 			ID:          player.ID,
 			DisplayName: player.DisplayName,
 			IsHost:      player.IsHost,
+			Role:        player.Role,
 			JoinedAt:    player.JoinedAt,
 			TeamID:      player.TeamID,
 		})
@@ -982,6 +985,7 @@ func projectRoom(room models.Room) publicRoom {
 		AnswerPhaseStartedAt: round.AnswerPhaseStartedAt,
 		AnswerPhaseEndsAt:    round.AnswerPhaseEndsAt,
 		RevealStartedAt:      round.RevealStartedAt,
+		RevealPhaseEndsAt:    round.RevealPhaseEndsAt,
 		CreatedAt:            round.CreatedAt,
 		TurnOrder:            append([]string(nil), round.TurnOrder...),
 		CurrentTurnIndex:     round.CurrentTurnIndex,

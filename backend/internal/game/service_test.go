@@ -482,6 +482,41 @@ func TestStartGameCreatesCurrentRound(t *testing.T) {
 	}
 }
 
+func TestLivingRoomHostDisplayIsNotAPlayer(t *testing.T) {
+	t.Parallel()
+	service := NewInMemoryRoomService()
+	room, display, err := service.CreateRoom(context.Background(), CreateRoomInput{
+		RoomName: "Living room", HostDisplayName: "TV",
+		Settings: models.RoomSettings{Mode: models.GameModeLivingRoom, TotalRounds: 2, AnswerTimerSeconds: 30, Locale: "en"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if display.Role != models.PlayerRoleHostDisplay {
+		t.Fatalf("display role = %q", display.Role)
+	}
+	if _, err := service.StartGame(context.Background(), StartGameInput{Code: room.Code, PlayerToken: display.Token}); !errors.Is(err, ErrNotEnoughParticipants) {
+		t.Fatalf("start with no participants = %v", err)
+	}
+	for _, name := range []string{"Ana", "Mihai"} {
+		if _, _, err := service.JoinRoom(context.Background(), JoinRoomInput{Code: room.Code, DisplayName: name}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	started, err := service.StartGame(context.Background(), StartGameInput{Code: room.Code, PlayerToken: display.Token})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(started.CurrentGame.Scoreboard) != 2 || len(started.CurrentGame.PreparedRounds) != 1 {
+		t.Fatalf("scoreboard/prepared rounds = %d/%d", len(started.CurrentGame.Scoreboard), len(started.CurrentGame.PreparedRounds))
+	}
+	if _, err := service.SubmitGuess(context.Background(), SubmitGuessInput{
+		Code: room.Code, RoundID: started.CurrentGame.CurrentRound.ID, PlayerToken: display.Token, Answer: "Apple",
+	}); !errors.Is(err, ErrHostDisplayCannotGuess) {
+		t.Fatalf("display guess = %v", err)
+	}
+}
+
 func TestStartGameRequiresHostToken(t *testing.T) {
 	t.Parallel()
 

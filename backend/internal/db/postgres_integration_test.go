@@ -213,6 +213,139 @@ func TestSequentialModeMigrationDownAndUp(t *testing.T) {
 	executeMigrationSection(t, pool, path, true)
 }
 
+func TestLivingRoomMigrationDownAndUp(t *testing.T) {
+	pool := integrationPool(t)
+	path := migrationPath(t, "000013_livingroom_mode.sql")
+	executeMigrationSection(t, pool, path, false)
+	executeMigrationSection(t, pool, path, true)
+}
+
+func TestPostgresLivingRoomAutomaticLifecycle(t *testing.T) {
+	pool := integrationPool(t)
+	repository := db.NewPostgresRoomRepository(pool)
+	repository.SetLivingRoomRevealPause(8 * time.Second)
+	service := game.NewRoomService(repository, nil)
+	ctx := context.Background()
+	room, display, err := service.CreateRoom(ctx, game.CreateRoomInput{
+		RoomName: "TV game", HostDisplayName: "TV",
+		Settings: models.RoomSettings{Mode: models.GameModeLivingRoom, TotalRounds: 2, AnswerTimerSeconds: 15},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var participants []models.Player
+	for _, name := range []string{"Ana", "Mihai"} {
+		_, participant, joinErr := service.JoinRoom(ctx, game.JoinRoomInput{Code: room.Code, DisplayName: name})
+		if joinErr != nil {
+			t.Fatal(joinErr)
+		}
+		participants = append(participants, participant)
+	}
+	started, err := service.StartGame(ctx, game.StartGameInput{Code: room.Code, PlayerToken: display.Token})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(started.CurrentGame.Scoreboard) != 2 {
+		t.Fatalf("display leaked into scoreboard: %+v", started.CurrentGame.Scoreboard)
+	}
+	first := started.CurrentGame.CurrentRound
+	submitErrors := make(chan error, len(participants))
+	for index, participant := range participants {
+		go func(participant models.Player, answer string) {
+			_, submitErr := service.SubmitGuess(ctx, game.SubmitGuessInput{Code: room.Code, RoundID: first.ID, PlayerToken: participant.Token, Answer: answer})
+			submitErrors <- submitErr
+		}(participant, first.Board.Answers[index].CanonicalAnswer)
+	}
+	for range participants {
+		if submitErr := <-submitErrors; submitErr != nil {
+			t.Fatal(submitErr)
+		}
+	}
+	revealed, err := repository.GetRoom(ctx, room.Code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if revealed.CurrentGame.CurrentRound.Status != models.RoundStatusRevealed || revealed.CurrentGame.CurrentRound.RevealPhaseEndsAt == nil {
+		t.Fatalf("early reveal was not persisted: %+v", revealed.CurrentGame.CurrentRound)
+	}
+	pauseEnd := *revealed.CurrentGame.CurrentRound.RevealPhaseEndsAt
+	if pauseEnd.Sub(*revealed.CurrentGame.CurrentRound.RevealStartedAt) != 8*time.Second {
+		t.Fatalf("reveal pause = %s, want 8s", pauseEnd.Sub(*revealed.CurrentGame.CurrentRound.RevealStartedAt))
+	}
+	// A reveal/answer cutoff must never consume the independent result pause.
+	if count, err := repository.RevealDueRounds(ctx, pauseEnd.Add(time.Hour), pauseEnd.Add(-time.Nanosecond), 25); err != nil || count != 0 {
+		t.Fatalf("advanced before pause: count=%d err=%v", count, err)
+	}
+	counts := make(chan int, 2)
+	errs := make(chan error, 2)
+	for range 2 {
+		go func() {
+			count, processErr := repository.RevealDueRounds(ctx, pauseEnd, pauseEnd, 25)
+			counts <- count
+			errs <- processErr
+		}()
+	}
+	processed := 0
+	for range 2 {
+		if processErr := <-errs; processErr != nil {
+			t.Fatalf("concurrent start next round: %v", processErr)
+		}
+		processed += <-counts
+	}
+	if processed != 1 {
+		t.Fatalf("concurrent workers processed %d transitions, want 1", processed)
+	}
+	second, err := repository.GetRoom(ctx, room.Code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.CurrentGame.CurrentRoundIndex != 2 || second.CurrentGame.CurrentRound.Status != models.RoundStatusAnswering {
+		t.Fatalf("second round = %+v", second.CurrentGame)
+	}
+	if !second.CurrentGame.CurrentRound.AnswerPhaseStartedAt.Equal(pauseEnd) ||
+		second.CurrentGame.CurrentRound.AnswerPhaseEndsAt.Sub(second.CurrentGame.CurrentRound.AnswerPhaseStartedAt) != 15*time.Second {
+		t.Fatalf("second-round window = %s to %s, want pause end plus full 15s",
+			second.CurrentGame.CurrentRound.AnswerPhaseStartedAt, second.CurrentGame.CurrentRound.AnswerPhaseEndsAt)
+	}
+	deadline := second.CurrentGame.CurrentRound.AnswerPhaseEndsAt
+	if count, err := repository.RevealDueRounds(ctx, deadline, deadline, 25); err != nil || count != 1 {
+		t.Fatalf("deadline reveal: count=%d err=%v", count, err)
+	}
+	finalReveal, err := repository.GetRoom(ctx, room.Code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count, err := repository.RevealDueRounds(ctx, *finalReveal.CurrentGame.CurrentRound.RevealPhaseEndsAt, *finalReveal.CurrentGame.CurrentRound.RevealPhaseEndsAt, 25); err != nil || count != 1 {
+		t.Fatalf("automatic completion: count=%d err=%v", count, err)
+	}
+	completed, err := db.NewPostgresRoomRepository(pool).GetRoom(ctx, room.Code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completed.CurrentGame.Status != models.GameStatusCompleted || len(completed.CurrentGame.Scoreboard) != 2 {
+		t.Fatalf("completed living-room game = %+v", completed.CurrentGame)
+	}
+	var revealCount, startCount, completeCount int
+	if err := pool.QueryRow(ctx, `SELECT
+		COUNT(*) FILTER (WHERE action='reveal'),
+		COUNT(*) FILTER (WHERE action='start_round'),
+		COUNT(*) FILTER (WHERE action='complete_game')
+		FROM round_transitions WHERE game_id=$1`, completed.CurrentGame.ID).Scan(&revealCount, &startCount, &completeCount); err != nil {
+		t.Fatal(err)
+	}
+	if revealCount != 2 || startCount != 1 || completeCount != 1 {
+		t.Fatalf("transition counts = %d/%d/%d", revealCount, startCount, completeCount)
+	}
+	var missingRevisions int
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM round_transitions WHERE game_id=$1 AND COALESCE(room_revision,0)=0`,
+		completed.CurrentGame.ID).Scan(&missingRevisions); err != nil {
+		t.Fatal(err)
+	}
+	if missingRevisions != 0 {
+		t.Fatalf("%d living-room transitions are missing room revisions", missingRevisions)
+	}
+}
+
 func TestPostgresSequentialSubmissionAndTwoWorkerTimeout(t *testing.T) {
 	pool := integrationPool(t)
 	repository := db.NewPostgresRoomRepository(pool)

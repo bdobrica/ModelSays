@@ -4,6 +4,8 @@ Use this guide for facilitated tests of the existing simultaneous mode. Record r
 
 ## Before play
 
+For a living-room check, use one TV/laptop creator browser and at least two separate phone/browser sessions. Record device/browser descriptions without names. Confirm the QR resolves to exactly the displayed same-origin join URL; the display cannot answer or appear in rankings; all-submitted reveal happens once; a later round reaches deadline reveal; results remain readable for roughly the configured eight seconds; disconnect/reconnect catches up; and the final scoreboard appears automatically. Record scanner/readability observations as human evidence rather than automated claims.
+
 - Ask each participant to explain the premise after reading the home page. Record whether they understand that they are predicting a model-generated board, not survey answers.
 - Ask the host to create and share a room without coaching. Note hesitation, failed joins, and time to start.
 - Include at least one phone-sized or physical mobile participant.

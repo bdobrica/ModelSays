@@ -1,6 +1,6 @@
 import { env } from './env'
 
-export type GameMode = 'simultaneous' | 'teams' | 'sequential'
+export type GameMode = 'simultaneous' | 'teams' | 'sequential' | 'livingroom'
 
 export interface RoomSettings {
   mode: GameMode
@@ -15,6 +15,7 @@ export interface Player {
   id: string
   displayName: string
   isHost: boolean
+  role?: 'participant' | 'host_display'
   joinedAt: string
   token?: string
   teamId?: string
@@ -85,6 +86,7 @@ export interface Round {
   answerPhaseStartedAt: string
   answerPhaseEndsAt: string
   revealStartedAt?: string
+  revealPhaseEndsAt?: string
   createdAt: string
   turnOrder?: string[]
   currentTurnIndex?: number

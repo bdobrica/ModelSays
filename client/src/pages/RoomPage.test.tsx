@@ -26,6 +26,12 @@ vi.mock('../lib/api', async () => {
   }
 })
 
+vi.mock('qrcode', () => ({
+  default: {
+    toDataURL: vi.fn(async (value: string) => `data:image/png;base64,${btoa(value)}`),
+  },
+}))
+
 const host = {
   id: 'host-1',
   displayName: 'Host',
@@ -138,6 +144,54 @@ afterEach(() => {
 })
 
 describe('RoomPage', () => {
+  it('renders a non-playing living-room TV lobby with a safe QR join URL', async () => {
+    const focus = vi.spyOn(HTMLElement.prototype, 'focus')
+    const display = { ...host, role: 'host_display' as const }
+    const livingRoom = roomState('lobby')
+    livingRoom.settings = { ...settings, mode: 'livingroom' }
+    livingRoom.players = [display, { ...player, role: 'participant' }, { ...player, id: 'player-2', displayName: 'Second', role: 'participant' }]
+    saveSession('ABC234', display)
+    vi.mocked(api.recoverSession).mockResolvedValue({ room: livingRoom, player: display })
+    vi.mocked(api.getRoom).mockResolvedValue({ room: livingRoom })
+    vi.mocked(api.startGame).mockResolvedValue({ room: livingRoom })
+
+    renderRoom()
+
+    expect(await screen.findByRole('heading', { name: '2 players joined' })).toBeInTheDocument()
+    const qr = await screen.findByRole('img', { name: /QR code for/i })
+    expect(qr.getAttribute('alt')).toBe('QR code for http://localhost:3000/join?code=ABC234')
+    expect(qr.getAttribute('src')).toMatch(/^data:image\/png;base64,/)
+    expect(qr.getAttribute('alt')).not.toMatch(/token|replay|provider/i)
+    fireEvent.click(screen.getByRole('button', { name: 'Start game' }))
+    await waitFor(() => expect(api.startGame).toHaveBeenCalledWith('ABC234', { playerToken: 'host-token' }))
+    expect(screen.queryByLabelText('Your guess')).not.toBeInTheDocument()
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true })
+  })
+
+  it('lets the living-room TV return home from the final scoreboard', async () => {
+    const display = { ...host, role: 'host_display' as const }
+    const completed = roomState('completed')
+    completed.settings = { ...settings, mode: 'livingroom' }
+    completed.players = [display, { ...player, role: 'participant' }]
+    completed.currentGame!.mode = 'livingroom'
+    completed.currentGame!.scoreboard = [{
+      playerId: player.id,
+      displayName: player.displayName,
+      isHost: false,
+      score: 50,
+      submissionMade: true,
+    }]
+    saveSession('ABC234', display)
+    vi.mocked(api.recoverSession).mockResolvedValue({ room: completed, player: display })
+
+    renderRoom()
+
+    expect(await screen.findByRole('heading', { name: 'Final scoreboard' })).toBeInTheDocument()
+    expect(screen.queryByText('Host')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Back to home' }))
+    expect(await screen.findByText('Home')).toBeInTheDocument()
+  })
+
   it('has no serious or critical accessibility violations in a maximum-player lobby', async () => {
     saveSession('ABC234', host)
     const maximumPlayerRoom = roomState('lobby')
