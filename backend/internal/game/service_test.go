@@ -602,12 +602,14 @@ func TestSubmitGuessMatchesAliasAndScores(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartGame returned error: %v", err)
 	}
+	canonical, alias, expectedScore := curatedTopAnswer(t, startedRoom.CurrentGame.CurrentRound.Question.ID)
+	_ = canonical
 
 	updatedRoom, err := service.SubmitGuess(context.Background(), SubmitGuessInput{
 		Code:        room.Code,
 		RoundID:     startedRoom.CurrentGame.CurrentRound.ID,
 		PlayerToken: player.Token,
-		Answer:      "bitcoin",
+		Answer:      alias,
 	})
 	if err != nil {
 		t.Fatalf("SubmitGuess returned error: %v", err)
@@ -616,8 +618,8 @@ func TestSubmitGuessMatchesAliasAndScores(t *testing.T) {
 	if len(updatedRoom.CurrentGame.CurrentRound.Guesses) != 1 {
 		t.Fatalf("expected one guess, got %d", len(updatedRoom.CurrentGame.CurrentRound.Guesses))
 	}
-	if updatedRoom.CurrentGame.CurrentRound.Guesses[0].ScoreAwarded != 50 {
-		t.Fatalf("expected alias match score 50, got %d", updatedRoom.CurrentGame.CurrentRound.Guesses[0].ScoreAwarded)
+	if updatedRoom.CurrentGame.CurrentRound.Guesses[0].ScoreAwarded != expectedScore {
+		t.Fatalf("expected alias match score %d, got %d", expectedScore, updatedRoom.CurrentGame.CurrentRound.Guesses[0].ScoreAwarded)
 	}
 	if len(updatedRoom.CurrentGame.Scoreboard) < 2 {
 		t.Fatalf("expected scoreboard entries for both players, got %d", len(updatedRoom.CurrentGame.Scoreboard))
@@ -1404,13 +1406,14 @@ func TestDuplicateAnswerScoresZero(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartGame returned error: %v", err)
 	}
+	canonical, alias, _ := curatedTopAnswer(t, startedRoom.CurrentGame.CurrentRound.Question.ID)
 
-	updatedRoom, err := service.SubmitGuess(context.Background(), SubmitGuessInput{Code: room.Code, RoundID: startedRoom.CurrentGame.CurrentRound.ID, PlayerToken: playerOne.Token, Answer: "bitcoin"})
+	updatedRoom, err := service.SubmitGuess(context.Background(), SubmitGuessInput{Code: room.Code, RoundID: startedRoom.CurrentGame.CurrentRound.ID, PlayerToken: playerOne.Token, Answer: canonical})
 	if err != nil {
 		t.Fatalf("first SubmitGuess returned error: %v", err)
 	}
 
-	updatedRoom, err = service.SubmitGuess(context.Background(), SubmitGuessInput{Code: room.Code, RoundID: startedRoom.CurrentGame.CurrentRound.ID, PlayerToken: playerTwo.Token, Answer: "crypto"})
+	updatedRoom, err = service.SubmitGuess(context.Background(), SubmitGuessInput{Code: room.Code, RoundID: startedRoom.CurrentGame.CurrentRound.ID, PlayerToken: playerTwo.Token, Answer: alias})
 	if err != nil {
 		t.Fatalf("second SubmitGuess returned error: %v", err)
 	}
@@ -1424,6 +1427,26 @@ func TestDuplicateAnswerScoresZero(t *testing.T) {
 	if !updatedRoom.CurrentGame.CurrentRound.Guesses[1].Duplicate {
 		t.Fatal("expected duplicate guess to be flagged")
 	}
+}
+
+func curatedTopAnswer(t *testing.T, questionID string) (canonical string, alias string, score int) {
+	t.Helper()
+	answers := map[string]struct {
+		canonical string
+		alias     string
+		score     int
+	}{
+		"question-en-001": {canonical: "cryptocurrency", alias: "bitcoin", score: 50},
+		"question-en-002": {canonical: "airport food", alias: "airport snacks", score: 45},
+		"question-en-003": {canonical: "dieting", alias: "diet", score: 40},
+		"question-en-004": {canonical: "their keys", alias: "keys", score: 50},
+		"question-en-005": {canonical: "no clear agenda", alias: "no agenda", score: 50},
+	}
+	answer, ok := answers[questionID]
+	if !ok {
+		t.Fatalf("no curated answer fixture for question %q", questionID)
+	}
+	return answer.canonical, answer.alias, answer.score
 }
 
 func TestOverrideMatchAdjustsScore(t *testing.T) {
@@ -1460,6 +1483,7 @@ func TestOverrideMatchAdjustsScore(t *testing.T) {
 
 	guess := updatedRoom.CurrentGame.CurrentRound.Guesses[0]
 	answerID := revealedRoom.CurrentGame.CurrentRound.Board.Answers[2].ID
+	expectedScore := revealedRoom.CurrentGame.CurrentRound.Board.Answers[2].Score
 	overriddenRoom, err := service.OverrideMatch(context.Background(), OverrideMatchInput{
 		Code:                      room.Code,
 		RoundID:                   startedRoom.CurrentGame.CurrentRound.ID,
@@ -1471,8 +1495,8 @@ func TestOverrideMatchAdjustsScore(t *testing.T) {
 		t.Fatalf("OverrideMatch returned error: %v", err)
 	}
 
-	if overriddenRoom.CurrentGame.CurrentRound.Guesses[0].ScoreAwarded != 25 {
-		t.Fatalf("expected overridden score 25, got %d", overriddenRoom.CurrentGame.CurrentRound.Guesses[0].ScoreAwarded)
+	if overriddenRoom.CurrentGame.CurrentRound.Guesses[0].ScoreAwarded != expectedScore {
+		t.Fatalf("expected overridden score %d, got %d", expectedScore, overriddenRoom.CurrentGame.CurrentRound.Guesses[0].ScoreAwarded)
 	}
 }
 

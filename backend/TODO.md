@@ -107,6 +107,7 @@ Status note:
 - [ ] Add team-building safe mode.
 - [x] Store generated questions.
 - [x] Avoid duplicate questions in a five-round curated MVP game.
+- [x] Randomize the curated question order for each new game.
 - [ ] Add prompt versioning.
 
 ## Phase 6 — Prediction Board Generation

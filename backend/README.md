@@ -14,7 +14,7 @@ From the repository root, `make baseline` runs deterministic 3-, 8-, and 12-play
 
 For each round:
 
-1. A question is selected.
+1. A question is selected; curated play randomly samples from questions not yet used in that game.
 2. A chosen prediction model generates an answer board.
 3. The board is stored before players submit answers.
 4. Players submit answers before the server-enforced deadline.

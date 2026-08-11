@@ -426,12 +426,14 @@ func TestRoomResponsesHideRoundOutcomeUntilReveal(t *testing.T) {
 		fmt.Sprintf(`{"playerToken":%q}`, host.Token),
 	)
 	roundID := nestedString(t, started, "room", "currentGame", "currentRound", "id")
+	questionID := nestedString(t, started, "room", "currentGame", "currentRound", "question", "id")
+	answer, expectedScore := curatedScoringAnswer(t, questionID)
 	submitted := performRoomRequest(
 		t,
 		server,
 		http.MethodPost,
 		fmt.Sprintf("/api/rooms/%s/rounds/%s/guesses", room.Code, roundID),
-		fmt.Sprintf(`{"playerToken":%q,"answer":"bitcoin"}`, player.Token),
+		fmt.Sprintf(`{"playerToken":%q,"answer":%q}`, player.Token, answer),
 	)
 	hostView := performRoomRequest(
 		t,
@@ -468,7 +470,7 @@ func TestRoomResponsesHideRoundOutcomeUntilReveal(t *testing.T) {
 		{name: "answering after scoring submission", response: submitted, wantCurrentGame: true, wantSubmitted: true},
 		{name: "answering host view", response: hostView, wantCurrentGame: true, wantSubmitted: true},
 		{name: "answering non-host view", response: playerView, wantCurrentGame: true, wantSubmitted: true},
-		{name: "revealed", response: revealed, wantCurrentGame: true, wantRoundSecrets: true, wantScore: 50, wantSubmitted: true},
+		{name: "revealed", response: revealed, wantCurrentGame: true, wantRoundSecrets: true, wantScore: float64(expectedScore), wantSubmitted: true},
 	}
 
 	for _, test := range tests {
@@ -514,6 +516,32 @@ func TestRoomResponsesHideRoundOutcomeUntilReveal(t *testing.T) {
 	if !reflect.DeepEqual(hostView, playerView) {
 		t.Fatal("host and non-host answering views have different secrecy projections")
 	}
+}
+
+func curatedScoringAnswer(t *testing.T, questionID string) (string, int) {
+	t.Helper()
+	_, alias, score := curatedEquivalentAnswers(t, questionID)
+	return alias, score
+}
+
+func curatedEquivalentAnswers(t *testing.T, questionID string) (string, string, int) {
+	t.Helper()
+	answers := map[string]struct {
+		canonical string
+		alias     string
+		score     int
+	}{
+		"question-en-001": {canonical: "cryptocurrency", alias: "bitcoin", score: 50},
+		"question-en-002": {canonical: "airport food", alias: "airport snacks", score: 45},
+		"question-en-003": {canonical: "dieting", alias: "diet", score: 40},
+		"question-en-004": {canonical: "their keys", alias: "keys", score: 50},
+		"question-en-005": {canonical: "no clear agenda", alias: "no agenda", score: 50},
+	}
+	result, ok := answers[questionID]
+	if !ok {
+		t.Fatalf("no curated answer fixture for question %q", questionID)
+	}
+	return result.canonical, result.alias, result.score
 }
 
 func TestProviderAuditsRequireHostHeaderAndStayOutOfRoomProjection(t *testing.T) {

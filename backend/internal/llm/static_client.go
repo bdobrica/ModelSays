@@ -2,13 +2,17 @@ package llm
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
+	"math/big"
 	"strings"
 
 	"github.com/bogdandobrica/modelsays/backend/internal/models"
 )
 
-type StaticModelClient struct{}
+type StaticModelClient struct {
+	randomIndex func(int) (int, error)
+}
 
 func (client *StaticModelClient) JudgeGuess(_ context.Context, req JudgeGuessRequest) (*JudgeGuessResponse, error) {
 	return &JudgeGuessResponse{
@@ -123,7 +127,7 @@ var curatedRoundDataByLocale = map[string][]curatedRoundData{
 }
 
 func NewStaticModelClient() *StaticModelClient {
-	return &StaticModelClient{}
+	return &StaticModelClient{randomIndex: cryptographicRandomIndex}
 }
 
 func (client *StaticModelClient) GenerateQuestions(_ context.Context, req GenerateQuestionsRequest) (*GenerateQuestionsResponse, error) {
@@ -136,24 +140,50 @@ func (client *StaticModelClient) GenerateQuestions(_ context.Context, req Genera
 		return nil, fmt.Errorf("no curated questions available")
 	}
 
-	count := maxInt(req.Count, 1)
-	offset := req.RoundIndex - 1
-	if offset < 0 {
-		offset = 0
+	available := make([]models.Question, 0, len(questionSet))
+	for _, entry := range questionSet {
+		if !containsFold(req.ExcludedText, entry.question.Text) {
+			available = append(available, entry.question)
+		}
 	}
 
+	count := minInt(maxInt(req.Count, 1), len(available))
 	questions := make([]models.Question, 0, count)
+	randomIndex := client.randomIndex
+	if randomIndex == nil {
+		randomIndex = cryptographicRandomIndex
+	}
 	for index := 0; index < count; index++ {
-		selected := questionSet[(offset+index)%len(questionSet)].question
-		if containsFold(req.ExcludedText, selected.Text) {
-			continue
+		selectedOffset, err := randomIndex(len(available) - index)
+		if err != nil {
+			return nil, fmt.Errorf("select curated question: %w", err)
 		}
-		questions = append(questions, selected)
+		selectedIndex := index + selectedOffset
+		available[index], available[selectedIndex] = available[selectedIndex], available[index]
+		questions = append(questions, available[index])
 	}
 
 	return &GenerateQuestionsResponse{Questions: questions, Metadata: CallMetadata{
 		Provider: "static", Model: "curated-bank", PromptVersion: "v1",
 	}}, nil
+}
+
+func cryptographicRandomIndex(limit int) (int, error) {
+	if limit <= 0 {
+		return 0, fmt.Errorf("random selection limit must be positive")
+	}
+	value, err := rand.Int(rand.Reader, big.NewInt(int64(limit)))
+	if err != nil {
+		return 0, err
+	}
+	return int(value.Int64()), nil
+}
+
+func minInt(left int, right int) int {
+	if left < right {
+		return left
+	}
+	return right
 }
 
 func containsFold(values []string, candidate string) bool {

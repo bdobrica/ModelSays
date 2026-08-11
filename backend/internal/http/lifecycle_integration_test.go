@@ -44,6 +44,8 @@ func TestPostgresAPIFullLifecycleSurvivesReload(t *testing.T) {
 	started := performRoomRequest(t, server, http.MethodPost, fmt.Sprintf("/api/rooms/%s/start", code), fmt.Sprintf(`{"playerToken":%q}`, hostToken))
 	firstRoundID := nestedString(t, started, "room", "currentGame", "currentRound", "id")
 	firstBoardHash := nestedString(t, started, "room", "currentGame", "currentRound", "boardHash")
+	questionID := nestedString(t, started, "room", "currentGame", "currentRound", "question", "id")
+	canonicalAnswer, aliasAnswer, _ := curatedEquivalentAnswers(t, questionID)
 	if round := nestedMap(t, started, "room", "currentGame", "currentRound"); round["board"] != nil || round["guesses"] != nil {
 		t.Fatalf("answering response leaked board or guesses: %#v", round)
 	}
@@ -54,7 +56,7 @@ func TestPostgresAPIFullLifecycleSurvivesReload(t *testing.T) {
 	submitted := performRoomRequest(
 		t, server, http.MethodPost,
 		fmt.Sprintf("/api/rooms/%s/rounds/%s/guesses", code, firstRoundID),
-		fmt.Sprintf(`{"playerToken":%q,"answer":"crypto"}`, playerToken),
+		fmt.Sprintf(`{"playerToken":%q,"answer":%q}`, playerToken, canonicalAnswer),
 	)
 	if round := nestedMap(t, submitted, "room", "currentGame", "currentRound"); round["board"] != nil || round["guesses"] != nil {
 		t.Fatalf("submission response leaked board or guesses: %#v", round)
@@ -62,7 +64,7 @@ func TestPostgresAPIFullLifecycleSurvivesReload(t *testing.T) {
 	performRoomRequest(
 		t, server, http.MethodPost,
 		fmt.Sprintf("/api/rooms/%s/rounds/%s/guesses", code, firstRoundID),
-		fmt.Sprintf(`{"playerToken":%q,"answer":"bitcoin"}`, secondPlayerToken),
+		fmt.Sprintf(`{"playerToken":%q,"answer":%q}`, secondPlayerToken, aliasAnswer),
 	)
 
 	deadline, err := time.Parse(time.RFC3339Nano, nestedString(t, started, "room", "currentGame", "currentRound", "answerPhaseEndsAt"))
