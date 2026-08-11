@@ -142,6 +142,28 @@ function openTriviaState(phase: 'answering' | 'revealed', active: typeof host | 
   return room
 }
 
+function choiceTriviaState(phase: 'answering' | 'revealed', active: typeof host | typeof player = player): api.Room {
+  const room = roomState(phase)
+  const options = [
+    { id: 'opt-c', label: 'Madrid' },
+    { id: 'opt-a', label: 'Paris' },
+    { id: 'opt-d', label: 'Rome' },
+    { id: 'opt-b', label: 'Berlin' },
+  ]
+  room.settings = { ...settings, gameKind: 'trivia_choice' }
+  room.currentGame!.gameKind = 'trivia_choice'
+  room.currentGame!.currentRound!.board = undefined
+  room.currentGame!.currentRound!.question = { ...question, text: 'What is the capital of France?' }
+  room.currentGame!.currentRound!.triviaContent = phase === 'answering'
+    ? { version: 1, kind: 'trivia_choice', baseScore: 100, options }
+    : { version: 1, kind: 'trivia_choice', baseScore: 100, options, canonicalAnswer: 'Paris', correctOptionId: 'opt-a', explanation: 'Paris is the capital.', source: 'Reviewed bank' }
+  room.currentGame!.currentRound!.guesses = phase === 'answering' ? undefined : [{
+    id: 'choice-guess', playerId: active.id, playerDisplayName: active.displayName, rawAnswer: '', normalizedAnswer: '', selectedOptionId: 'opt-a', correct: true, scoreAwarded: 100, duplicate: false, createdAt: '2026-07-19T12:00:10Z',
+  }]
+  room.currentGame!.scoreboard = room.currentGame!.scoreboard.map((entry) => ({ ...entry, score: entry.playerId === active.id && phase === 'revealed' ? 100 : 0, submissionMade: entry.playerId === active.id && phase === 'revealed' }))
+  return room
+}
+
 function renderRoom(code = 'abc234') {
   return render(
     <MemoryRouter initialEntries={[`/room/${code}`]}>
@@ -216,6 +238,96 @@ describe('RoomPage', () => {
     await waitFor(() => expect(api.overrideMatch).toHaveBeenCalledWith('ABC234', {
       playerToken: host.token, roundId: 'round-1', guessId: 'trivia-guess', correct: false,
     }))
+  })
+
+  it('renders four server-ordered opaque choices and submits only one option ID', async () => {
+    saveSession('ABC234', player)
+    let current = choiceTriviaState('answering')
+    vi.mocked(api.recoverSession).mockResolvedValue({ room: current, player })
+    vi.mocked(api.getRoom).mockImplementation(async () => ({ room: current }))
+    let resolveSubmission!: (value: api.RoomResponse) => void
+    vi.mocked(api.submitGuess).mockImplementation(() => new Promise((resolve) => { resolveSubmission = resolve }))
+    renderRoom()
+
+    const group = await screen.findByRole('group', { name: 'Answer choices' })
+    expect(Array.from(group.querySelectorAll('button')).map((button) => button.textContent)).toEqual(['Madrid', 'Paris', 'Rome', 'Berlin'])
+    expect(group.innerHTML).not.toContain('opt-a')
+    expect(screen.queryByText('Correct answer')).not.toBeInTheDocument()
+    const paris = screen.getByRole('button', { name: 'Paris' })
+    paris.focus()
+    fireEvent.click(paris)
+    fireEvent.click(paris)
+    expect(api.submitGuess).toHaveBeenCalledTimes(1)
+    expect(api.submitGuess).toHaveBeenCalledWith('ABC234', 'round-1', { playerToken: player.token, optionId: 'opt-a' })
+    expect(screen.getByRole('button', { name: 'Paris Selected' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getAllByRole('button').filter((button) => ['Madrid', 'Paris Selected', 'Rome', 'Berlin'].includes(button.textContent ?? '')).every((button) => button.hasAttribute('disabled'))).toBe(true)
+    current = choiceTriviaState('answering')
+    current.currentGame!.scoreboard[1].submissionMade = true
+    resolveSubmission({ room: current })
+    expect(await screen.findByText('Choice submitted. Your selection is locked until the result.')).toBeInTheDocument()
+  })
+
+  it('reveals every Choice Trivia option with textual correctness, selection, award, and ranking', async () => {
+    saveSession('ABC234', player)
+    const current = choiceTriviaState('revealed')
+    vi.mocked(api.recoverSession).mockResolvedValue({ room: current, player })
+    vi.mocked(api.getRoom).mockResolvedValue({ room: current })
+    const { container } = renderRoom()
+
+    expect(await screen.findByRole('heading', { name: 'Correct!' })).toHaveFocus()
+    expect(screen.getByText('Correct answer').nextSibling).toHaveTextContent('Paris')
+    expect(screen.getByText('Your answer').nextSibling).toHaveTextContent('Paris')
+    expect(screen.getByText('Correct · 100 pts')).toBeInTheDocument()
+    expect(screen.getByText('Correct answer · your choice')).toBeInTheDocument()
+    expect(screen.getAllByText('Incorrect option')).toHaveLength(3)
+    expect(screen.getByRole('heading', { name: 'Current ranking' })).toBeInTheDocument()
+    const result = await axe.run(container, { rules: { 'color-contrast': { enabled: false } } })
+    expect(result.violations.filter((violation) => ['serious', 'critical'].includes(violation.impact ?? ''))).toEqual([])
+  })
+
+  it('keeps a recovered submitted Choice Trivia round disabled without leaking the selection', async () => {
+    saveSession('ABC234', player)
+    const current = choiceTriviaState('answering')
+    current.currentGame!.scoreboard[1].submissionMade = true
+    vi.mocked(api.recoverSession).mockResolvedValue({ room: current, player })
+    vi.mocked(api.getRoom).mockResolvedValue({ room: current })
+    renderRoom()
+
+    expect(await screen.findByText('Choice submitted. Your selection is locked until the result.')).toBeInTheDocument()
+    expect(screen.getAllByRole('button').filter((button) => ['Madrid', 'Paris', 'Rome', 'Berlin'].includes(button.textContent ?? '')).every((button) => button.hasAttribute('disabled'))).toBe(true)
+    expect(screen.queryByText('Selected')).not.toBeInTheDocument()
+    expect(screen.queryByText('Correct answer')).not.toBeInTheDocument()
+  })
+
+  it('reports a Choice Trivia submission error and permits a retry', async () => {
+    saveSession('ABC234', player)
+    const current = choiceTriviaState('answering')
+    vi.mocked(api.recoverSession).mockResolvedValue({ room: current, player })
+    vi.mocked(api.getRoom).mockResolvedValue({ room: current })
+    vi.mocked(api.submitGuess).mockRejectedValue(new Error('Choice was not accepted'))
+    renderRoom()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Berlin' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Choice was not accepted')
+    expect(screen.getByRole('button', { name: 'Berlin Selected' })).toBeEnabled()
+    expect(screen.queryByText('Correct answer')).not.toBeInTheDocument()
+  })
+
+  it('disables every Choice Trivia option when the local deadline expires', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-19T12:00:00Z'))
+    saveSession('ABC234', player)
+    const current = choiceTriviaState('answering')
+    current.currentGame!.currentRound!.answerPhaseStartedAt = new Date().toISOString()
+    current.currentGame!.currentRound!.answerPhaseEndsAt = new Date(Date.now() + 30_000).toISOString()
+    vi.mocked(api.recoverSession).mockResolvedValue({ room: current, player })
+    vi.mocked(api.getRoom).mockResolvedValue({ room: current })
+    renderRoom()
+    await act(async () => {})
+
+    await act(async () => vi.advanceTimersByTime(30_000))
+    expect(screen.getByText('Time expired', { selector: '[role="timer"]' })).toBeInTheDocument()
+    expect(screen.getAllByRole('button').filter((button) => ['Madrid', 'Paris', 'Rome', 'Berlin'].includes(button.textContent ?? '')).every((button) => button.hasAttribute('disabled'))).toBe(true)
   })
   it('renders a non-playing living-room TV lobby with a safe QR join URL', async () => {
     const focus = vi.spyOn(HTMLElement.prototype, 'focus')

@@ -57,18 +57,20 @@ After the first installation, `make start` starts the stack without reinstalling
 
 Use separate browser profiles, private windows, or devices so each participant has separate browser storage.
 
-1. The host opens `http://localhost:5173`, selects **Create room**, chooses **Model Says** or **Open Trivia** separately from individual, team, sequential, or living-room pacing, enters the remaining settings, then creates the room. Open Trivia supports every pacing except sequential; Four-choice Trivia remains visibly marked as coming next until its answer grid ships.
+1. The host opens `http://localhost:5173`, selects **Create room**, chooses **Model Says**, **Open Trivia**, or **Choice Trivia** separately from individual, team, sequential, or living-room pacing, enters the remaining settings, then creates the room. Trivia supports every pacing except sequential.
 2. Select **Copy invite** and share the join link, or share the six-character room code before starting. Invite links pre-fill the code.
 3. Each player opens **Join room**, enters the code and a display name, and joins a focused lobby that confirms their name and waits for the host.
 4. The host waits for everyone to appear. In team mode, create 2–4 teams and assign every player; every team must have a player. Then select **Start game**. Team assignments cannot change afterward.
-5. Each participant submits one answer before the countdown expires. Model Says asks for a board guess; Open Trivia asks for the single correct answer. The frozen solution, correctness, and round scoring stay hidden during this phase.
+5. Each participant submits one answer before the countdown expires. Model Says asks for a board guess, Open Trivia asks for the single correct answer, and Choice Trivia asks the player to select one of four buttons. The frozen solution, correctness, and round scoring stay hidden during this phase.
 6. At expiry the server reveals automatically; the host can reveal early if desired.
-7. In Model Says, the host reviews the frozen board, matches, duplicate claims, and live scores while joined players see a short waiting state. In Open Trivia, every player sees the canonical answer, their submitted answer, explicit correct/incorrect text, awarded points, and current ranking; the host can audit every submission and mark it correct or incorrect.
+7. In Model Says, the host reviews the frozen board, matches, duplicate claims, and live scores while joined players see a short waiting state. In either trivia kind, every player sees the correct answer, their submitted answer or choice, explicit correct/incorrect text, awarded points, and current ranking; the host can audit every submission and mark it correct or incorrect.
 8. The host selects **Next round**. After the final reveal, advancing once more opens the ranked final individual and, when applicable, team scoreboard on every device.
 
 Only the earliest accepted guess matching a board answer earns its points. A later canonical or alias match for the same answer is shown as a zero-point duplicate. Automatic matching ignores capitalization, punctuation, and repeated whitespace. Optional judge suggestions are advisory, hidden until reveal, and never score without a host override.
 
 Open Trivia has no first-claim rule: every correct participant receives 100 points. Matching is intentionally conservative and accepts only the frozen canonical answer or explicit aliases after case, punctuation, whitespace, and Unicode normalization. Near answers score zero unless the host corrects the revealed result.
+
+Choice Trivia also awards every correct participant 100 points. The four options retain their server-issued order. Selecting a button immediately submits its opaque identifier and locks the grid; the correct option is identified only after reveal. At ordinary widths the choices form a 2×2 grid and collapse to one column on the narrowest supported phones.
 
 In team mode, guesses and answer claims remain individual and global: a player on one team can claim an answer before every other team. Team totals are the sum of member score events, so host overrides update individual and team results together.
 
@@ -78,7 +80,7 @@ In living-room mode, open the creator session on the shared TV and optionally se
 
 Refreshing the same browser restores its player session. Do not clear browser storage during a game. Cross-device session transfer is not currently supported.
 
-Joined-player screens intentionally omit room settings, roster, and management controls. During answering they show only the current question/timer/action, mode-required sequential prior claims, and clear submitted, expired, reconnecting, or waiting feedback. Model Says keeps its board/review on the host display; Open Trivia reveals the canonical answer, the player's own answer/result, points, and current ranking to that player. The host keeps the complete operational view and correction controls.
+Joined-player screens intentionally omit room settings, roster, and management controls. During answering they show only the current question/timer/action, mode-required sequential prior claims, and clear submitted, expired, reconnecting, or waiting feedback. Model Says keeps its board/review on the host display; both trivia kinds reveal the correct answer, the player's own answer/result, points, and current ranking to that player. The host keeps the complete operational view and correction controls.
 
 When the final round is complete, use **Share results** to share or copy the unguessable replay link. The replay shows winners/ties and every revealed round without exposing session credentials or private provider records. The host can select **Play again** to create a fresh lobby with the same room name and settings; other players join the new code, and no prior guesses, claims, boards, deadlines, scores, or credentials carry over.
 

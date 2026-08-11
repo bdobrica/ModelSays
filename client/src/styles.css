@@ -325,6 +325,39 @@ select {
 .trivia-result-details dd { margin: 0.25rem 0 0; font-size: 1.15rem; font-weight: 700; overflow-wrap: anywhere; }
 .trivia-correction { margin: 0; flex-wrap: wrap; }
 
+.choice-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+    margin: 1rem 0;
+}
+
+.choice-button {
+    display: grid;
+    gap: 0.4rem;
+    min-width: 0;
+    min-height: 4.5rem;
+    padding: 1rem;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 1rem;
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text);
+    font: inherit;
+    font-weight: 700;
+    text-align: left;
+    overflow-wrap: anywhere;
+}
+
+button.choice-button { cursor: pointer; touch-action: manipulation; }
+button.choice-button:hover:not(:disabled) { border-color: var(--secondary); background: rgba(255, 255, 255, 0.1); }
+.choice-button:focus-visible { outline: 3px solid var(--secondary); outline-offset: 3px; }
+.choice-button:disabled { cursor: default; opacity: 0.7; }
+.choice-button small { color: var(--text-dim); font-weight: 600; }
+.choice-button-selected,
+.choice-result-selected { border-color: var(--secondary); background: rgba(255, 185, 92, 0.13); }
+.choice-result-correct { border-color: #7ddc9d; background: rgba(82, 190, 119, 0.14); }
+.choice-results .choice-button { min-height: 0; }
+
 .panel-stack {
     display: grid;
     gap: 1rem;
@@ -768,6 +801,10 @@ select {
     .room-code-row {
         align-items: flex-start;
         flex-direction: column;
+    }
+
+    .choice-grid {
+        grid-template-columns: 1fr;
     }
 
     .answer-row,

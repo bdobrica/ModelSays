@@ -4,6 +4,8 @@ Use this guide for facilitated tests of the existing simultaneous mode. Record r
 
 For Open Trivia, additionally confirm the ruleset and pacing controls are understood as separate choices; the typed field is announced as a trivia answer; no solution or correctness appears before reveal; and reveal clearly communicates the canonical answer, personal answer, correct/incorrect result, points, and ranking. Ask the host to correct one result in each direction and verify the visible score follows the auditable server update.
 
+For Choice Trivia, confirm exactly four options retain the displayed order, form a 2×2 grid on tablet/desktop and a usable single column at 360 px, work with keyboard and touch, submit only once under rapid activation, and retain the selected label while waiting. Inspect accessible names and the answering network payload for any correct-answer clue. After reveal, confirm text distinguishes the correct option, the player's choice, every incorrect option, award, and ranking.
+
 ## Before play
 
 For a living-room check, use one TV/laptop creator browser and at least two separate phone/browser sessions. Record device/browser descriptions without names. Confirm the QR resolves to exactly the displayed same-origin join URL; the display cannot answer or appear in rankings; all-submitted reveal happens once; a later round reaches deadline reveal; results remain readable for roughly the configured eight seconds; disconnect/reconnect catches up; and the final scoreboard appears automatically. Record scanner/readability observations as human evidence rather than automated claims.
@@ -17,7 +19,7 @@ For a living-room check, use one TV/laptop creator browser and at least two sepa
 
 - Record time from question visibility to the first and last submission.
 - Ask whether the countdown, submitted state, expiry, reveal ownership, and duplicate rule are clear.
-- Confirm joined-player phones never show host settings, roster, or management/review controls. Model Says reveal should show only the host-display waiting state; Open Trivia reveal should show only the canonical answer, that player's answer/result, award, and current ranking.
+- Confirm joined-player phones never show host settings, roster, or management/review controls. Model Says reveal should show only the host-display waiting state; trivia reveal should show only the correct answer, that player's answer/result, award, and current ranking.
 - Record every disputed deterministic match, the raw guess, expected answer, and whether the host override was discoverable and sufficient.
 - Count host interventions and estimate host effort per round.
 - Observe the live-update indicator during normal play, a backend restart, and a short offline/online cycle. Record mutation-to-visible delay, reconnect delay, stale state, and whether fallback polling is understandable.

@@ -63,7 +63,7 @@ export function CreateRoomPage() {
                     <legend>Game rules</legend>
                     <label><input checked={gameKind === 'model_says'} name="game-kind" onChange={() => setGameKind('model_says')} type="radio" /> <span><strong>Model Says</strong><small>Guess the answers the model ranked.</small></span></label>
                     <label><input checked={gameKind === 'trivia_open'} name="game-kind" onChange={() => { setGameKind('trivia_open'); if (mode === 'sequential') setMode('simultaneous') }} type="radio" /> <span><strong>Open Trivia</strong><small>Type the single correct answer. Accepted spelling variants count.</small></span></label>
-                    <label className="ruleset-disabled"><input disabled name="game-kind" type="radio" /> <span><strong>Four-choice Trivia</strong><small>Coming next: choose from four answers.</small></span></label>
+                    <label><input checked={gameKind === 'trivia_choice'} name="game-kind" onChange={() => { setGameKind('trivia_choice'); if (mode === 'sequential') setMode('simultaneous') }} type="radio" /> <span><strong>Choice Trivia</strong><small>Pick the one correct answer from four options.</small></span></label>
                 </fieldset>
                 <label>
                     Pacing

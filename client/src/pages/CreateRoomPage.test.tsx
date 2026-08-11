@@ -21,7 +21,7 @@ describe('CreateRoomPage', () => {
     render(<MemoryRouter initialEntries={['/create']}><Routes><Route path="/create" element={<CreateRoomPage />} /><Route path="/room/:code" element={<p>Created</p>} /></Routes></MemoryRouter>)
 
     expect(screen.getByRole('group', { name: 'Game rules' })).toBeInTheDocument()
-    expect(screen.getByLabelText(/Four-choice Trivia/)).toBeDisabled()
+    expect(screen.getByLabelText(/Choice Trivia/)).toBeEnabled()
     fireEvent.click(screen.getByLabelText(/Open Trivia/))
     expect(screen.getByRole('combobox', { name: 'Pacing' })).toHaveValue('simultaneous')
     expect(screen.getByRole('option', { name: /Sequential turns/ })).toBeDisabled()
@@ -31,5 +31,14 @@ describe('CreateRoomPage', () => {
       settings: expect.objectContaining({ gameKind: 'trivia_open', mode: 'simultaneous' }),
     })))
     expect(await screen.findByText('Created')).toBeInTheDocument()
+  })
+
+  it('creates Choice Trivia independently from pacing', async () => {
+    vi.mocked(api.createRoom).mockResolvedValue({ room: { code: 'ABC234' } as api.Room, player: { id: 'host', displayName: 'Host', isHost: true, joinedAt: '', token: 'token' } })
+    render(<MemoryRouter initialEntries={['/create']}><Routes><Route path="/create" element={<CreateRoomPage />} /><Route path="/room/:code" element={<p>Created</p>} /></Routes></MemoryRouter>)
+
+    fireEvent.click(screen.getByLabelText(/Choice Trivia/))
+    fireEvent.click(screen.getByRole('button', { name: 'Create room' }))
+    await waitFor(() => expect(api.createRoom).toHaveBeenCalledWith(expect.objectContaining({ settings: expect.objectContaining({ gameKind: 'trivia_choice', mode: 'simultaneous' }) })))
   })
 })

@@ -37,6 +37,7 @@ export function RoomPage() {
   const [isMutating, setIsMutating] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [guessAnswer, setGuessAnswer] = useState('')
+  const [selectedOptionId, setSelectedOptionId] = useState('')
   const [overrideSelections, setOverrideSelections] = useState<Record<string, string>>({})
   const [judgeSuggestions, setJudgeSuggestions] = useState<JudgeSuggestion[]>([])
   const [connectionState, setConnectionState] = useState<RoomConnectionState>('connecting')
@@ -124,6 +125,8 @@ export function RoomPage() {
   const currentGame = room?.currentGame
   const currentRound = currentGame?.currentRound
   const isOpenTrivia = currentGame?.gameKind === 'trivia_open'
+  const isChoiceTrivia = currentGame?.gameKind === 'trivia_choice'
+  const isTrivia = isOpenTrivia || isChoiceTrivia
   const activeScore = currentGame?.scoreboard.find((entry) => entry.playerId === activePlayer?.id)
   const hasSubmitted = activeScore?.submissionMade ?? false
   const isGameCompleted = currentGame?.status === 'completed'
@@ -187,6 +190,7 @@ export function RoomPage() {
 
   useEffect(() => {
     setGuessAnswer('')
+    setSelectedOptionId('')
     setOverrideSelections({})
     setNow(Date.now())
   }, [currentRound?.id])
@@ -196,7 +200,7 @@ export function RoomPage() {
   }, [currentRound?.id, currentRound?.status, isLoading, room?.status])
 
   useEffect(() => {
-    if (!isHost || isOpenTrivia || !activePlayerToken || currentRound?.status !== 'revealed') {
+    if (!isHost || isTrivia || !activePlayerToken || currentRound?.status !== 'revealed') {
       setJudgeSuggestions([])
       return
     }
@@ -209,7 +213,7 @@ export function RoomPage() {
         if (!cancelled) setErrorMessage(error instanceof Error ? error.message : 'Unable to load judge suggestions')
       })
     return () => { cancelled = true }
-  }, [activePlayerToken, code, currentRound?.id, currentRound?.status, isHost, isOpenTrivia, room?.updatedAt])
+  }, [activePlayerToken, code, currentRound?.id, currentRound?.status, isHost, isTrivia, room?.updatedAt])
 
   useEffect(() => {
     if (isGameCompleted) return
@@ -292,6 +296,17 @@ export function RoomPage() {
     await mutateRoom(() => submitGuess(code, currentRound.id, {
       playerToken: activePlayerToken,
       answer: guessAnswer,
+    }))
+  }
+
+  async function handleChoiceSubmit(optionId: string) {
+    if (!activePlayerToken || !currentRound) return setErrorMessage('Missing player session or round state')
+    if (hasSubmitted || mutationInFlight.current) return
+    if (hasLocallyExpired) return setErrorMessage('Answer time has expired; waiting for the round result')
+    setSelectedOptionId(optionId)
+    await mutateRoom(() => submitGuess(code, currentRound.id, {
+      playerToken: activePlayerToken,
+      optionId,
     }))
   }
 
@@ -395,6 +410,10 @@ export function RoomPage() {
   const showAnswerState = currentRound?.status === 'answering'
   const showRevealState = currentRound?.status === 'revealed'
   const activeGuess = currentRound?.guesses?.find((guess) => guess.playerId === activePlayer?.id)
+  const choiceOptions = currentRound?.triviaContent?.options ?? []
+  const revealedSelectedOptionId = activeGuess?.selectedOptionId ?? selectedOptionId
+  const selectedChoiceLabel = choiceOptions.find((option) => option.id === revealedSelectedOptionId)?.label
+  const correctChoiceLabel = choiceOptions.find((option) => option.id === currentRound?.triviaContent?.correctOptionId)?.label
   const joinURL = `${window.location.origin}/join?code=${encodeURIComponent(code)}`
   useEffect(() => {
     if (!isLivingRoomDisplay || !showLobbyState) {
@@ -525,12 +544,19 @@ export function RoomPage() {
                 {isSequential && !isActiveTurn
                   ? `Waiting for ${currentTurnPlayer?.displayName ?? 'the current player'} to answer.`
                   : hasSubmitted
-                    ? isOpenTrivia ? 'Answer submitted. It is locked until the result.' : 'Submitted. Your guess is locked while you wait for the host.'
+                    ? isChoiceTrivia ? 'Choice submitted. Your selection is locked until the result.' : isOpenTrivia ? 'Answer submitted. It is locked until the result.' : 'Submitted. Your guess is locked while you wait for the host.'
                     : hasLocallyExpired
                       ? 'Answering has expired. Waiting for the round result.'
-                      : isOpenTrivia ? 'Type the correct answer before time runs out.' : 'Enter one answer before time runs out.'}
+                      : isChoiceTrivia ? 'Choose the correct answer before time runs out.' : isOpenTrivia ? 'Type the correct answer before time runs out.' : 'Enter one answer before time runs out.'}
               </p>
-              <form className="answer-form" onSubmit={handleSubmitGuess}>
+              {isChoiceTrivia ? (
+                <div aria-label="Answer choices" className="choice-grid" role="group">
+                  {choiceOptions.map((option) => {
+                    const selected = option.id === selectedOptionId
+                    return <button aria-pressed={selected} className={selected ? 'choice-button choice-button-selected' : 'choice-button'} disabled={hasSubmitted || hasLocallyExpired || isMutating || !activePlayerToken} key={option.id} onClick={() => void handleChoiceSubmit(option.id)} type="button"><span>{option.label}</span>{selected ? <small>Selected</small> : null}</button>
+                  })}
+                </div>
+              ) : <form className="answer-form" onSubmit={handleSubmitGuess}>
                 <input
                   aria-label={isOpenTrivia ? 'Your trivia answer' : 'Your guess'}
                   disabled={!isActiveTurn || hasSubmitted || hasLocallyExpired || isMutating || !activePlayerToken}
@@ -542,7 +568,7 @@ export function RoomPage() {
                 <button className="button button-primary" disabled={!isActiveTurn || hasSubmitted || hasLocallyExpired || isMutating || !guessAnswer.trim()} type="submit">
                   {hasSubmitted ? 'Submitted' : hasLocallyExpired ? 'Time expired' : isMutating ? 'Submitting…' : isOpenTrivia ? 'Submit answer' : 'Submit guess'}
                 </button>
-              </form>
+              </form>}
               {isSequential && isActiveTurn && !hasSubmitted && !hasLocallyExpired ? (
                 <button className="button button-secondary" disabled={isMutating} onClick={() => void handlePassTurn()} type="button">Pass turn</button>
               ) : null}
@@ -555,15 +581,21 @@ export function RoomPage() {
             </section>
           ) : null}
 
-          {showRevealState && currentRound && !isGameCompleted && isOpenTrivia ? (
+          {showRevealState && currentRound && !isGameCompleted && isTrivia ? (
             <section className="participant-phase trivia-result">
               <p className="eyebrow">Round {currentRound.roundIndex} result</p>
               <h1 ref={phaseHeading} tabIndex={-1}>{activeGuess?.correct ? 'Correct!' : 'Not this time'}</h1>
               <dl className="trivia-result-details">
-                <div><dt>Correct answer</dt><dd>{currentRound.triviaContent?.canonicalAnswer}</dd></div>
-                <div><dt>Your answer</dt><dd>{activeGuess?.rawAnswer || 'No answer submitted'}</dd></div>
+                <div><dt>Correct answer</dt><dd>{isChoiceTrivia ? correctChoiceLabel : currentRound.triviaContent?.canonicalAnswer}</dd></div>
+                <div><dt>Your answer</dt><dd>{isChoiceTrivia ? selectedChoiceLabel || 'No answer submitted' : activeGuess?.rawAnswer || 'No answer submitted'}</dd></div>
                 <div><dt>Result</dt><dd>{activeGuess?.correct ? 'Correct' : 'Incorrect'} · {activeGuess?.scoreAwarded ?? 0} pts</dd></div>
               </dl>
+              {isChoiceTrivia ? <div aria-label="Answer choice results" className="choice-grid choice-results">{choiceOptions.map((option) => {
+                const correct = option.id === currentRound.triviaContent?.correctOptionId
+                const selected = option.id === revealedSelectedOptionId
+                const result = correct ? selected ? 'Correct answer · your choice' : 'Correct answer' : selected ? 'Your choice · incorrect' : 'Incorrect option'
+                return <div className={correct ? 'choice-button choice-result-correct' : selected ? 'choice-button choice-result-selected' : 'choice-button'} key={option.id}><span>{option.label}</span><small>{result}</small></div>
+              })}</div> : null}
               <div className="score-list participant-score-list" aria-label="Current ranking">
                 <h2>Current ranking</h2>
                 {rankedScoreboard.map((entry, index) => <div className="score-row" key={entry.playerId}><strong>#{index + 1}</strong><span>{entry.displayName}</span><em>{entry.score} pts</em></div>)}
@@ -572,7 +604,7 @@ export function RoomPage() {
             </section>
           ) : null}
 
-          {showRevealState && currentRound && !isGameCompleted && !isOpenTrivia ? (
+          {showRevealState && currentRound && !isGameCompleted && !isTrivia ? (
             <section className="participant-phase participant-waiting">
               <p className="eyebrow">Round {currentRound.roundIndex} complete</p>
               <h1 ref={phaseHeading} tabIndex={-1}>Result is on the host display</h1>
@@ -705,12 +737,19 @@ export function RoomPage() {
               {isSequential && !isActiveTurn
                 ? `Waiting for ${currentTurnPlayer?.displayName ?? 'the current player'} to answer.`
                 : hasSubmitted
-                ? isOpenTrivia ? 'Answer submitted. It is locked until reveal.' : 'Submitted. Your guess is locked while you wait for reveal.'
+                ? isChoiceTrivia ? 'Choice submitted. Your selection is locked until reveal.' : isOpenTrivia ? 'Answer submitted. It is locked until reveal.' : 'Submitted. Your guess is locked while you wait for reveal.'
                 : hasLocallyExpired
                   ? 'Answering has expired. The server will reveal the round automatically.'
-                  : isOpenTrivia ? 'Accepting one answer. Correctness stays hidden until reveal.' : 'Accepting answers. The board stays hidden until reveal.'}
+                  : isChoiceTrivia ? 'Choose one answer. Correctness stays hidden until reveal.' : isOpenTrivia ? 'Accepting one answer. Correctness stays hidden until reveal.' : 'Accepting answers. The board stays hidden until reveal.'}
             </p>
-            <form className="answer-form" onSubmit={handleSubmitGuess}>
+            {isChoiceTrivia ? (
+              <div aria-label="Answer choices" className="choice-grid" role="group">
+                {choiceOptions.map((option) => {
+                  const selected = option.id === selectedOptionId
+                  return <button aria-pressed={selected} className={selected ? 'choice-button choice-button-selected' : 'choice-button'} disabled={hasSubmitted || hasLocallyExpired || isMutating || !activePlayerToken} key={option.id} onClick={() => void handleChoiceSubmit(option.id)} type="button"><span>{option.label}</span>{selected ? <small>Selected</small> : null}</button>
+                })}
+              </div>
+            ) : <form className="answer-form" onSubmit={handleSubmitGuess}>
               <input
                 aria-label={isOpenTrivia ? 'Your trivia answer' : 'Your guess'}
                 disabled={!isActiveTurn || hasSubmitted || hasLocallyExpired || isMutating || !activePlayerToken}
@@ -722,7 +761,7 @@ export function RoomPage() {
               <button className="button button-primary" disabled={!isActiveTurn || hasSubmitted || hasLocallyExpired || isMutating || !guessAnswer.trim()} type="submit">
                 {hasSubmitted ? 'Submitted' : hasLocallyExpired ? 'Time expired' : isMutating ? 'Submitting…' : isOpenTrivia ? 'Submit answer' : 'Submit guess'}
               </button>
-            </form>
+            </form>}
             {isSequential && isActiveTurn && !hasSubmitted && !hasLocallyExpired ? (
               <button className="button button-secondary" disabled={isMutating} onClick={() => void handlePassTurn()} type="button">Pass turn</button>
             ) : null}
@@ -742,22 +781,24 @@ export function RoomPage() {
 
         {showRevealState && currentRound ? (
           <section className="phase-card reveal-card">
-            <div className="round-meta"><span className="eyebrow">Revealed</span><strong>{isOpenTrivia ? 'Open Trivia result' : `Board hash ${currentRound.boardHash}`}</strong></div>
+            <div className="round-meta"><span className="eyebrow">Revealed</span><strong>{isOpenTrivia ? 'Open Trivia result' : isChoiceTrivia ? 'Choice Trivia result' : `Board hash ${currentRound.boardHash}`}</strong></div>
             <h2 ref={phaseHeading} tabIndex={-1}>{currentRound.question.text}</h2>
             <p aria-live="polite" className="status-note" role="status">Answers and awarded scores are now revealed.</p>
             <div className="answer-board">
               {isOpenTrivia && currentRound.triviaContent?.canonicalAnswer ? <div className="answer-row"><span>Correct answer</span><strong>{currentRound.triviaContent.canonicalAnswer}</strong><em>{currentRound.triviaContent.baseScore} pts</em></div> : null}
+              {isChoiceTrivia && correctChoiceLabel ? <div className="answer-row"><span>Correct answer</span><strong>{correctChoiceLabel}</strong><em>{currentRound.triviaContent?.baseScore} pts</em></div> : null}
               {currentRound.board?.answers.map((answer) => (
                 <div className="answer-row" key={answer.id}><span>#{answer.rank}</span><strong>{answer.canonicalAnswer}</strong><em>{answer.score} pts</em></div>
               ))}
             </div>
+            {isChoiceTrivia ? <div aria-label="Answer choice results" className="choice-grid choice-results">{choiceOptions.map((option) => <div className={option.id === currentRound.triviaContent?.correctOptionId ? 'choice-button choice-result-correct' : 'choice-button'} key={option.id}><span>{option.label}</span><small>{option.id === currentRound.triviaContent?.correctOptionId ? 'Correct answer' : 'Incorrect option'}</small></div>)}</div> : null}
             <div className="guess-list">
               <h3>Guesses</h3>
               {currentRound.guesses?.length ? currentRound.guesses.map((guess) => (
                 <div className="guess-row" key={guess.id}>
                   <div className="guess-main">
-                    <strong>{guess.playerDisplayName}</strong><span>{guess.rawAnswer}</span>
-                    <span>{isOpenTrivia ? guess.correct ? 'Correct' : 'Incorrect' : guess.duplicate ? 'Duplicate answer' : guess.matchedPredictionAnswerId ? 'Matched' : 'Miss'}</span>
+                    <strong>{guess.playerDisplayName}</strong><span>{isChoiceTrivia ? choiceOptions.find((option) => option.id === guess.selectedOptionId)?.label ?? 'Unknown choice' : guess.rawAnswer}</span>
+                    <span>{isTrivia ? guess.correct ? 'Correct' : 'Incorrect' : guess.duplicate ? 'Duplicate answer' : guess.matchedPredictionAnswerId ? 'Matched' : 'Miss'}</span>
                   </div>
                   <div className="guess-actions">
                     <em>{guess.scoreAwarded} pts</em>
@@ -779,7 +820,7 @@ export function RoomPage() {
                         <button className="button button-secondary" disabled={isMutating} onClick={() => void handleOverrideMatch(guess.id)} type="button">Apply override</button>
                       </>
                     ) : null}
-                    {isHost && isOpenTrivia ? (
+                    {isHost && isTrivia ? (
                       <div className="action-row trivia-correction" aria-label={`Correct ${guess.playerDisplayName}'s result`}>
                         <button className="button button-secondary" disabled={isMutating || guess.correct === true} onClick={() => void handleTriviaOverride(guess.id, true)} type="button">Mark correct</button>
                         <button className="button button-secondary" disabled={isMutating || guess.correct === false} onClick={() => void handleTriviaOverride(guess.id, false)} type="button">Mark incorrect</button>
