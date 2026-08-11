@@ -54,6 +54,8 @@ export interface Guess {
   rawAnswer: string
   normalizedAnswer: string
   matchedPredictionAnswerId?: string
+  selectedOptionId?: string
+  correct?: boolean
   scoreAwarded: number
   duplicate: boolean
   createdAt: string
@@ -195,14 +197,13 @@ export interface PlayerTokenPayload {
   playerToken: string
 }
 
-export interface SubmitGuessPayload extends PlayerTokenPayload {
-  answer: string
-}
+export type SubmitGuessPayload = PlayerTokenPayload & ({ answer: string; optionId?: never } | { answer?: never; optionId: string })
 
 export interface OverrideMatchPayload extends PlayerTokenPayload {
   roundId: string
   guessId: string
-  matchedPredictionAnswerId: string | null
+  matchedPredictionAnswerId?: string | null
+  correct?: boolean
   judgeSuggestionId?: string
 }
 

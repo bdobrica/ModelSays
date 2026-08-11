@@ -11,7 +11,7 @@ Status note:
 	- expiry copy reflects the PostgreSQL backend's durable automatic reveal; early reveal and next-round advancement remain host controls;
 	- same-browser refresh validates the stored token with the server; presence and cross-device transfer remain deferred;
 	- loading and error handling still exist as inline page states, not shared reusable components;
-	- the create-room flow exposes individual and team-based simultaneous modes.
+	- the create-room flow separates rules from pacing and exposes playable Open Trivia; Four-choice Trivia remains disabled pending its dedicated UI.
 	- the creation form and backend now share the MVP bounds of 1–5 rounds, a 15–120 second timer, and bounded names.
 	- CI runs the locked client test suite and production build alongside backend and PostgreSQL lifecycle gates.
 	- the root baseline command records production bundle size and representative polling volume; browser rendering and physical-device performance remain playtest work.
@@ -55,7 +55,7 @@ Status note:
 - [x] Build create-room screen.
 - [x] Add host display-name input.
 - [x] Add game mode selector for individual, team, and sequential play.
-- [x] Type and transmit the independent game-kind contract while keeping unfinished trivia choices hidden.
+- [x] Select and transmit Model Says or Open Trivia independently from pacing while clearly disabling unfinished Four-choice Trivia.
 - [x] Type the phase-safe frozen trivia content and replay contracts without exposing unfinished controls.
 - [x] Add round count selector.
 - [x] Add answer timer selector.
@@ -202,7 +202,7 @@ Status note:
 ## Phase 13 — Tests
 
 - [x] Test home screen.
-- [ ] Test create-room form.
+- [x] Test create-room form, ruleset selection, and compatibility behavior.
 - [ ] Test join-room form.
 - [x] Test lobby rendering and host start.
 - [x] Test timer display and expiry.

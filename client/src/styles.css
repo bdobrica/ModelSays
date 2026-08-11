@@ -319,6 +319,12 @@ select {
     background: transparent;
 }
 
+.trivia-result-details { display: grid; gap: 0.75rem; margin: 1rem 0; }
+.trivia-result-details div { padding: 0.85rem; border-radius: 1rem; background: rgba(255, 255, 255, 0.04); }
+.trivia-result-details dt { color: var(--text-dim); font-size: 0.9rem; }
+.trivia-result-details dd { margin: 0.25rem 0 0; font-size: 1.15rem; font-weight: 700; overflow-wrap: anywhere; }
+.trivia-correction { margin: 0; flex-wrap: wrap; }
+
 .panel-stack {
     display: grid;
     gap: 1rem;
@@ -435,6 +441,22 @@ select {
     display: grid;
     gap: 1rem;
 }
+
+.ruleset-picker {
+    display: grid;
+    gap: 0.65rem;
+    margin: 0;
+    padding: 1rem;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 1rem;
+}
+
+.ruleset-picker legend { padding: 0 0.35rem; font-weight: 700; }
+.ruleset-picker label { grid-template-columns: auto 1fr; align-items: start; }
+.ruleset-picker input { min-height: 1.5rem; margin: 0; }
+.ruleset-picker span { display: grid; gap: 0.15rem; }
+.ruleset-picker small { color: var(--text-dim); font-weight: 400; }
+.ruleset-disabled { opacity: 0.58; }
 
 .form-grid label {
     display: grid;

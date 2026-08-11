@@ -1,7 +1,7 @@
 import { FormEvent, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
-import { createRoom } from '../lib/api'
+import { createRoom, type GameKind } from '../lib/api'
 import { saveSession } from '../lib/session'
 
 export function CreateRoomPage() {
@@ -14,6 +14,7 @@ export function CreateRoomPage() {
     const [predictionModel, setPredictionModel] = useState('gpt-5.6-luna')
     const [teamSafeMode, setTeamSafeMode] = useState(false)
     const [mode, setMode] = useState<'simultaneous' | 'teams' | 'sequential' | 'livingroom'>('simultaneous')
+    const [gameKind, setGameKind] = useState<GameKind>('model_says')
     const [isSubmitting, setIsSubmitting] = useState(false)
     const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
@@ -28,7 +29,7 @@ export function CreateRoomPage() {
                 hostDisplayName,
                 settings: {
                     mode,
-                    gameKind: 'model_says',
+                    gameKind,
                     totalRounds,
                     answerTimerSeconds,
                     locale,
@@ -58,12 +59,18 @@ export function CreateRoomPage() {
             </div>
 
             <form className="form-grid" onSubmit={handleSubmit}>
+                <fieldset className="ruleset-picker">
+                    <legend>Game rules</legend>
+                    <label><input checked={gameKind === 'model_says'} name="game-kind" onChange={() => setGameKind('model_says')} type="radio" /> <span><strong>Model Says</strong><small>Guess the answers the model ranked.</small></span></label>
+                    <label><input checked={gameKind === 'trivia_open'} name="game-kind" onChange={() => { setGameKind('trivia_open'); if (mode === 'sequential') setMode('simultaneous') }} type="radio" /> <span><strong>Open Trivia</strong><small>Type the single correct answer. Accepted spelling variants count.</small></span></label>
+                    <label className="ruleset-disabled"><input disabled name="game-kind" type="radio" /> <span><strong>Four-choice Trivia</strong><small>Coming next: choose from four answers.</small></span></label>
+                </fieldset>
                 <label>
-                    Game mode
+                    Pacing
                     <select value={mode} onChange={(event) => setMode(event.target.value as 'simultaneous' | 'teams' | 'sequential' | 'livingroom')}>
                         <option value="simultaneous">Individual</option>
                         <option value="teams">Teams</option>
-                        <option value="sequential">Sequential turns</option>
+                        <option disabled={gameKind !== 'model_says'} value="sequential">Sequential turns{gameKind !== 'model_says' ? ' (Model Says only)' : ''}</option>
                         <option value="livingroom">Living-room TV host</option>
                     </select>
                 </label>

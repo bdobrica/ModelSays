@@ -13,6 +13,7 @@ The supported viewport contract is 360×800 phone, 768×1024 tablet, 1366×768 l
 - **Presentation mode** uses the browser Fullscreen API. It removes setup chrome and enlarges the revealed answer board, but does not hide or delay host controls.
 - Reveal uses a 420 ms opacity/position transition. `prefers-reduced-motion: reduce` reduces all animation and transition duration to effectively immediate.
 - Participant focus follows the action boundary: lobby confirmation, question/answer, revealed waiting, and final rankings. Long questions/names wrap within the panel, and errors stay assertive without exposing host refresh or management controls.
+- Open Trivia labels its text field as the player's trivia answer. Reveal states identify correctness with explicit words, show the canonical and submitted answers in labeled terms, announce the focused result heading, and never rely on color alone.
 
 ## Automated coverage
 
