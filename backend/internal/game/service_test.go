@@ -396,6 +396,9 @@ func TestCreateRoomValidatesMVPSettings(t *testing.T) {
 		settings models.RoomSettings
 	}{
 		{name: "unsupported mode", settings: models.RoomSettings{Mode: "cooperative"}},
+		{name: "unsupported game kind", settings: models.RoomSettings{GameKind: "survey"}},
+		{name: "open trivia sequential", settings: models.RoomSettings{Mode: models.GameModeSequential, GameKind: models.GameKindTriviaOpen}},
+		{name: "choice trivia sequential", settings: models.RoomSettings{Mode: models.GameModeSequential, GameKind: models.GameKindTriviaChoice}},
 		{name: "too many rounds", settings: models.RoomSettings{TotalRounds: 6}},
 		{name: "timer too short", settings: models.RoomSettings{AnswerTimerSeconds: 14}},
 		{name: "timer too long", settings: models.RoomSettings{AnswerTimerSeconds: 121}},
@@ -410,6 +413,45 @@ func TestCreateRoomValidatesMVPSettings(t *testing.T) {
 			})
 			if !errors.Is(err, ErrRoomSettingsInvalid) {
 				t.Fatalf("CreateRoom error = %v, want %v", err, ErrRoomSettingsInvalid)
+			}
+		})
+	}
+}
+
+func TestCreateRoomDefaultsAndPreservesSupportedGameKinds(t *testing.T) {
+	t.Parallel()
+
+	service := NewInMemoryRoomService()
+	defaultRoom, _, err := service.CreateRoom(context.Background(), CreateRoomInput{
+		RoomName: "Default rules", HostDisplayName: "Host",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if defaultRoom.Settings.GameKind != models.GameKindModelSays {
+		t.Fatalf("default game kind = %q, want %q", defaultRoom.Settings.GameKind, models.GameKindModelSays)
+	}
+
+	tests := []struct {
+		kind models.GameKind
+		mode models.GameMode
+	}{
+		{models.GameKindModelSays, models.GameModeSequential},
+		{models.GameKindTriviaOpen, models.GameModeSimultaneous},
+		{models.GameKindTriviaOpen, models.GameModeTeams},
+		{models.GameKindTriviaChoice, models.GameModeLivingRoom},
+	}
+	for _, test := range tests {
+		t.Run(string(test.kind)+"_"+string(test.mode), func(t *testing.T) {
+			room, _, createErr := service.CreateRoom(context.Background(), CreateRoomInput{
+				RoomName: "Rules room", HostDisplayName: "Host",
+				Settings: models.RoomSettings{GameKind: test.kind, Mode: test.mode},
+			})
+			if createErr != nil {
+				t.Fatalf("CreateRoom: %v", createErr)
+			}
+			if room.Settings.GameKind != test.kind || room.Settings.Mode != test.mode {
+				t.Fatalf("settings = %#v, want kind=%q mode=%q", room.Settings, test.kind, test.mode)
 			}
 		})
 	}
@@ -1698,6 +1740,9 @@ func TestCompletedReplayAndPlayAgainArePublicSafeAndIsolated(t *testing.T) {
 	if replay.Rankings[0].PlayerID != player.ID || replay.Rankings[0].Score != answer.Score {
 		t.Fatalf("unexpected rankings: %#v", replay.Rankings)
 	}
+	if replay.GameKind != models.GameKindModelSays {
+		t.Fatalf("replay game kind = %q", replay.GameKind)
+	}
 
 	fresh, freshHost, err := service.PlayAgain(context.Background(), PlayAgainInput{Code: original.Code, PlayerToken: host.Token})
 	if err != nil {
@@ -1708,6 +1753,9 @@ func TestCompletedReplayAndPlayAgainArePublicSafeAndIsolated(t *testing.T) {
 	}
 	if fresh.CurrentGame != nil || len(fresh.Players) != 1 || fresh.Status != models.RoomStatusLobby {
 		t.Fatalf("fresh room inherited game state: %#v", fresh)
+	}
+	if fresh.Settings.GameKind != original.Settings.GameKind {
+		t.Fatalf("play again game kind = %q, want %q", fresh.Settings.GameKind, original.Settings.GameKind)
 	}
 	originalReloaded, err := service.GetRoom(context.Background(), original.Code)
 	if err != nil || originalReloaded.CurrentGame.Status != models.GameStatusCompleted {

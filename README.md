@@ -25,7 +25,7 @@ For each round:
 
 The generated board is stored persistently so every player competes against the same frozen set of answers.
 
-Rooms may use individual simultaneous, team, sequential, or living-room mode. Team mode aggregates individual scores into 2–4 host-configured teams. Sequential mode gives every player one timed turn in lobby join order. Living-room mode turns the creator into a non-playing TV display while every human plays from a phone.
+Room configuration separates game rules from pacing. `gameKind` identifies Model Says or a future trivia ruleset, while `mode` remains individual simultaneous, team, sequential, or living-room pacing. The current create screen deliberately selects `model_says` until trivia content and scoring ship. Team mode aggregates individual scores into 2–4 host-configured teams. Sequential mode gives every player one timed turn in lobby join order. Living-room mode turns the creator into a non-playing TV display while every human plays from a phone. See [ADR-007](docs/adr/07-orthogonal_game_rulesets.md) for the compatibility matrix.
 
 ## Example
 
@@ -180,7 +180,7 @@ Without `OPENAI_API_KEY`, games randomly sample without replacement from a five-
 
 Provider calls use server-owned model allowlists, a 10-second timeout, two-attempt retry ceiling, and shared per-game call/cost budgets. Every generated question, board, and semantic-judge call—including zero-cost curated behavior—is recorded in a private room audit; raw response capture is disabled by default. A judge only evaluates deterministic misses, never changes a score, and exposes its bounded suggestion to the host only after reveal. See [`docs/provider-operations.md`](docs/provider-operations.md) for configuration, privacy, host review/audit access, retention, and rollback.
 
-The supported room contract keeps modes isolated: simultaneous, team, sequential, or living-room mode; 1–5 rounds; a 15–120 second answer timer; English (`en`); and the server-configured `DEFAULT_PREDICTION_MODEL`. Room names are 3–48 Unicode characters and display names are 2–24; control characters are rejected. Room codes are six characters from the displayed invite alphabet. New players may join only while the room is in the lobby; attempting to reuse an invite after start returns a conflict response. JSON mutation requests are limited to 16 KiB and reject unknown fields, trailing values, and malformed input. The browser validates its stored player token with the server after refresh and offers a clear-session action.
+The supported room contract keeps two axes isolated: `gameKind` is `model_says`, `trivia_open`, or `trivia_choice`, while `mode` is simultaneous, teams, sequential, or living-room. Missing game kinds default to `model_says`; trivia plus sequential is currently rejected, and the browser does not expose unfinished trivia kinds yet. Rooms otherwise support 1–5 rounds, a 15–120 second answer timer, English (`en`), and the server-configured `DEFAULT_PREDICTION_MODEL`. Room names are 3–48 Unicode characters and display names are 2–24; control characters are rejected. Room codes are six characters from the displayed invite alphabet. New players may join only while the room is in the lobby; attempting to reuse an invite after start returns a conflict response. JSON mutation requests are limited to 16 KiB and reject unknown fields, trailing values, and malformed input. The browser validates its stored player token with the server after refresh and offers a clear-session action.
 
 ## Suggested Tech Stack
 

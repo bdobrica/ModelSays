@@ -167,6 +167,7 @@ type Game struct {
 	ReplayID          string                `json:"replayId,omitempty"`
 	Status            GameStatus            `json:"status"`
 	Mode              GameMode              `json:"mode"`
+	GameKind          GameKind              `json:"gameKind"`
 	TotalRounds       int                   `json:"totalRounds"`
 	CurrentRoundIndex int                   `json:"currentRoundIndex"`
 	CurrentRound      *Round                `json:"currentRound,omitempty"`
@@ -205,6 +206,7 @@ type ReplaySummary struct {
 	ID           string                `json:"id"`
 	RoomName     string                `json:"roomName"`
 	Mode         GameMode              `json:"mode"`
+	GameKind     GameKind              `json:"gameKind"`
 	StartedAt    time.Time             `json:"startedAt"`
 	EndedAt      time.Time             `json:"endedAt"`
 	Rankings     []ScoreboardEntry     `json:"rankings"`

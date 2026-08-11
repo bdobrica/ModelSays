@@ -220,6 +220,35 @@ func TestLivingRoomMigrationDownAndUp(t *testing.T) {
 	executeMigrationSection(t, pool, path, true)
 }
 
+func TestGameKindsMigrationDefaultsLegacyRowsAndRoundTrips(t *testing.T) {
+	pool := integrationPool(t)
+	ctx := context.Background()
+	path := migrationPath(t, "000014_game_kinds.sql")
+	executeMigrationSection(t, pool, path, false)
+
+	now := time.Now().UTC()
+	roomCode := "LEGACY"
+	settings := `{"mode":"simultaneous","totalRounds":1,"answerTimerSeconds":30,"locale":"en","predictionModel":"gpt-5.6-luna","teamSafeMode":false}`
+	if _, err := pool.Exec(ctx, `INSERT INTO rooms(code,name,status,settings_jsonb,created_at,updated_at) VALUES($1,'Legacy room','in_game',$2,$3,$3)`, roomCode, settings, now); err != nil {
+		t.Fatalf("insert schema-13 room: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO games(id,room_code,status,mode,total_rounds,current_round_index,created_at,started_at) VALUES('legacy-game',$1,'completed','simultaneous',1,1,$2,$2)`, roomCode, now); err != nil {
+		t.Fatalf("insert schema-13 game: %v", err)
+	}
+
+	executeMigrationSection(t, pool, path, true)
+	var roomKind, gameKind string
+	if err := pool.QueryRow(ctx, `SELECT settings_jsonb->>'gameKind' FROM rooms WHERE code=$1`, roomCode).Scan(&roomKind); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT game_kind FROM games WHERE id='legacy-game'`).Scan(&gameKind); err != nil {
+		t.Fatal(err)
+	}
+	if roomKind != string(models.GameKindModelSays) || gameKind != string(models.GameKindModelSays) {
+		t.Fatalf("legacy defaults room=%q game=%q", roomKind, gameKind)
+	}
+}
+
 func TestPostgresLivingRoomAutomaticLifecycle(t *testing.T) {
 	pool := integrationPool(t)
 	repository := db.NewPostgresRoomRepository(pool)
@@ -443,7 +472,7 @@ func TestPostgresReplayAndPlayAgainIsolation(t *testing.T) {
 	ctx := context.Background()
 	room, host, err := service.CreateRoom(ctx, game.CreateRoomInput{
 		RoomName: "Replay isolation", HostDisplayName: "Host",
-		Settings: models.RoomSettings{TotalRounds: 1, AnswerTimerSeconds: 30},
+		Settings: models.RoomSettings{GameKind: models.GameKindTriviaChoice, TotalRounds: 1, AnswerTimerSeconds: 30},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -477,12 +506,18 @@ func TestPostgresReplayAndPlayAgainIsolation(t *testing.T) {
 	if err != nil || len(replay.Rounds) != 1 || replay.Rankings[0].PlayerID != player.ID {
 		t.Fatalf("reloaded replay=%#v err=%v", replay, err)
 	}
+	if replay.GameKind != models.GameKindTriviaChoice {
+		t.Fatalf("reloaded replay game kind = %q", replay.GameKind)
+	}
 	fresh, freshHost, err := reloadedService.PlayAgain(ctx, game.PlayAgainInput{Code: room.Code, PlayerToken: host.Token})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if fresh.Code == room.Code || freshHost.Token == host.Token || fresh.CurrentGame != nil {
 		t.Fatal("fresh lifecycle reused original state")
+	}
+	if fresh.Settings.GameKind != models.GameKindTriviaChoice {
+		t.Fatalf("play again game kind = %q", fresh.Settings.GameKind)
 	}
 	_, freshPlayer, err := reloadedService.JoinRoom(ctx, game.JoinRoomInput{Code: fresh.Code, DisplayName: "Player"})
 	if err != nil {
@@ -497,6 +532,9 @@ func TestPostgresReplayAndPlayAgainIsolation(t *testing.T) {
 		len(secondStarted.CurrentGame.CurrentRound.Guesses) != 0 ||
 		secondStarted.CurrentGame.Scoreboard[0].Score != 0 {
 		t.Fatal("second game inherited original game, round, guesses, or scores")
+	}
+	if secondStarted.CurrentGame.GameKind != models.GameKindTriviaChoice {
+		t.Fatalf("restarted game kind = %q", secondStarted.CurrentGame.GameKind)
 	}
 	secondAnswer := secondStarted.CurrentGame.CurrentRound.Board.Answers[0]
 	if _, err := reloadedService.SubmitGuess(ctx, game.SubmitGuessInput{

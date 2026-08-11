@@ -1,9 +1,11 @@
 import { env } from './env'
 
 export type GameMode = 'simultaneous' | 'teams' | 'sequential' | 'livingroom'
+export type GameKind = 'model_says' | 'trivia_open' | 'trivia_choice'
 
 export interface RoomSettings {
   mode: GameMode
+  gameKind: GameKind
   totalRounds: number
   answerTimerSeconds: number
   locale: string
@@ -98,6 +100,7 @@ export interface Game {
   replayId?: string
   status: GameStatus
   mode: GameMode
+  gameKind: GameKind
   totalRounds: number
   currentRoundIndex: number
   currentRound?: Round
@@ -135,6 +138,7 @@ export interface ReplaySummary {
   id: string
   roomName: string
   mode: GameMode
+  gameKind: GameKind
   startedAt: string
   endedAt: string
   rankings: ScoreboardEntry[]

@@ -124,6 +124,7 @@ type publicGame struct {
 	ReplayID          string                       `json:"replayId,omitempty"`
 	Status            models.GameStatus            `json:"status"`
 	Mode              models.GameMode              `json:"mode"`
+	GameKind          models.GameKind              `json:"gameKind"`
 	TotalRounds       int                          `json:"totalRounds"`
 	CurrentRoundIndex int                          `json:"currentRoundIndex"`
 	CurrentRound      *publicRound                 `json:"currentRound,omitempty"`
@@ -959,6 +960,7 @@ func projectRoom(room models.Room) publicRoom {
 		ID:                gameState.ID,
 		Status:            gameState.Status,
 		Mode:              gameState.Mode,
+		GameKind:          gameState.GameKind,
 		TotalRounds:       gameState.TotalRounds,
 		CurrentRoundIndex: gameState.CurrentRoundIndex,
 		Scoreboard:        append([]models.ScoreboardEntry(nil), gameState.Scoreboard...),

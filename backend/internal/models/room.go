@@ -18,6 +18,14 @@ const (
 	GameModeLivingRoom   GameMode = "livingroom"
 )
 
+type GameKind string
+
+const (
+	GameKindModelSays    GameKind = "model_says"
+	GameKindTriviaOpen   GameKind = "trivia_open"
+	GameKindTriviaChoice GameKind = "trivia_choice"
+)
+
 type PlayerRole string
 
 const (
@@ -27,6 +35,7 @@ const (
 
 type RoomSettings struct {
 	Mode               GameMode `json:"mode"`
+	GameKind           GameKind `json:"gameKind"`
 	TotalRounds        int      `json:"totalRounds"`
 	AnswerTimerSeconds int      `json:"answerTimerSeconds"`
 	Locale             string   `json:"locale"`

@@ -42,6 +42,7 @@ Status note:
 - [x] Create migration for players.
 - [x] Create migration for teams and player assignments.
 - [x] Create migration for games.
+- [x] Add the backward-compatible `game_kind` foundation and keep it orthogonal to pacing modes.
 - [x] Create migration for questions.
 - [x] Create migration for prediction_boards.
 - [x] Create migration for prediction_answers.

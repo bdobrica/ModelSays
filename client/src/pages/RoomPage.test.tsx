@@ -48,6 +48,7 @@ const player = {
 }
 const settings = {
   mode: 'simultaneous' as const,
+  gameKind: 'model_says' as const,
   totalRounds: 2,
   answerTimerSeconds: 30,
   locale: 'en',
@@ -88,6 +89,7 @@ function roomState(phase: 'lobby' | 'answering' | 'revealed' | 'completed', subm
     replayId: phase === 'completed' ? 'replay-12345678901234567890123456789012' : undefined,
     status: phase === 'completed' ? 'completed' : 'in_progress',
     mode: 'simultaneous',
+    gameKind: 'model_says',
     totalRounds: 2,
     currentRoundIndex: phase === 'completed' ? 2 : 1,
     createdAt: '2026-07-19T12:00:00Z',

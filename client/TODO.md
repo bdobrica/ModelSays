@@ -55,6 +55,7 @@ Status note:
 - [x] Build create-room screen.
 - [x] Add host display-name input.
 - [x] Add game mode selector for individual, team, and sequential play.
+- [x] Type and transmit the independent game-kind contract while keeping unfinished trivia choices hidden.
 - [x] Add round count selector.
 - [x] Add answer timer selector.
 - [x] Add locale selector.

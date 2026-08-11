@@ -28,6 +28,7 @@ export function CreateRoomPage() {
                 hostDisplayName,
                 settings: {
                     mode,
+                    gameKind: 'model_says',
                     totalRounds,
                     answerTimerSeconds,
                     locale,

@@ -477,6 +477,7 @@ func (service *RoomService) StartGame(ctx context.Context, input StartGameInput)
 		ReplayID:          newToken(),
 		Status:            models.GameStatusInProgress,
 		Mode:              room.Settings.Mode,
+		GameKind:          room.Settings.GameKind,
 		TotalRounds:       room.Settings.TotalRounds,
 		CurrentRoundIndex: 1,
 		Scoreboard:        initialScoreboard(scoringPlayers(room.Players)),
@@ -786,7 +787,7 @@ func (service *RoomService) GetReplay(ctx context.Context, replayID string) (mod
 		return models.ReplaySummary{}, err
 	}
 	summary := models.ReplaySummary{
-		ID: replayID, RoomName: room.Name, Mode: room.CurrentGame.Mode,
+		ID: replayID, RoomName: room.Name, Mode: room.CurrentGame.Mode, GameKind: room.CurrentGame.GameKind,
 		StartedAt: room.CurrentGame.StartedAt, EndedAt: *room.CurrentGame.EndedAt,
 		Rankings:     append([]models.ScoreboardEntry(nil), room.CurrentGame.Scoreboard...),
 		TeamRankings: deriveTeamScoreboard(room.Teams, room.Players, room.CurrentGame.Scoreboard),
@@ -1154,6 +1155,9 @@ func normalizeSettings(settings models.RoomSettings) models.RoomSettings {
 	if settings.Mode == "" {
 		settings.Mode = models.GameModeSimultaneous
 	}
+	if settings.GameKind == "" {
+		settings.GameKind = models.GameKindModelSays
+	}
 	if settings.TotalRounds == 0 {
 		settings.TotalRounds = 5
 	}
@@ -1183,6 +1187,12 @@ func validateDisplayName(displayName string) error {
 func (service *RoomService) validateSettings(settings models.RoomSettings) error {
 	if settings.Mode != models.GameModeSimultaneous && settings.Mode != models.GameModeTeams && settings.Mode != models.GameModeSequential && settings.Mode != models.GameModeLivingRoom {
 		return fmt.Errorf("%w: mode must be simultaneous, teams, sequential, or livingroom", ErrRoomSettingsInvalid)
+	}
+	if settings.GameKind != models.GameKindModelSays && settings.GameKind != models.GameKindTriviaOpen && settings.GameKind != models.GameKindTriviaChoice {
+		return fmt.Errorf("%w: game kind must be model_says, trivia_open, or trivia_choice", ErrRoomSettingsInvalid)
+	}
+	if settings.GameKind != models.GameKindModelSays && settings.Mode == models.GameModeSequential {
+		return fmt.Errorf("%w: game kind %s does not support mode sequential", ErrRoomSettingsInvalid, settings.GameKind)
 	}
 	if settings.TotalRounds < minTotalRounds || settings.TotalRounds > maxTotalRounds {
 		return fmt.Errorf("%w: total rounds must be between %d and %d", ErrRoomSettingsInvalid, minTotalRounds, maxTotalRounds)

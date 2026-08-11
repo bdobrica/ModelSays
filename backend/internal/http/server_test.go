@@ -717,8 +717,7 @@ func TestRecoverSessionValidatesTokenAndReturnsAuthoritativePlayer(t *testing.T)
 func TestCreateRoomRejectsInvalidSettingsAndMalformedBodies(t *testing.T) {
 	t.Parallel()
 
-	server := NewServer(config.Config{}, slog.New(slog.NewTextHandler(io.Discard, nil)), game.NewInMemoryRoomService())
-	valid := `{"roomName":"Friday Night","hostDisplayName":"Host","settings":{"mode":"simultaneous","totalRounds":1,"answerTimerSeconds":15,"locale":"en","predictionModel":"gpt-5.6-luna","teamSafeMode":false}}`
+	valid := `{"roomName":"Friday Night","hostDisplayName":"Host","settings":{"mode":"simultaneous","gameKind":"model_says","totalRounds":1,"answerTimerSeconds":15,"locale":"en","predictionModel":"gpt-5.6-luna","teamSafeMode":false}}`
 	tests := []struct {
 		name string
 		body string
@@ -727,6 +726,8 @@ func TestCreateRoomRejectsInvalidSettingsAndMalformedBodies(t *testing.T) {
 		{name: "timer below lower bound", body: strings.Replace(valid, `"answerTimerSeconds":15`, `"answerTimerSeconds":14`, 1)},
 		{name: "timer above upper bound", body: strings.Replace(valid, `"answerTimerSeconds":15`, `"answerTimerSeconds":121`, 1)},
 		{name: "unsupported mode", body: strings.Replace(valid, `"simultaneous"`, `"cooperative"`, 1)},
+		{name: "unsupported game kind", body: strings.Replace(valid, `"model_says"`, `"survey"`, 1)},
+		{name: "unsupported ruleset mode combination", body: strings.Replace(strings.Replace(valid, `"model_says"`, `"trivia_open"`, 1), `"simultaneous"`, `"sequential"`, 1)},
 		{name: "unsupported locale", body: strings.Replace(valid, `"locale":"en"`, `"locale":"ro"`, 1)},
 		{name: "unsupported model", body: strings.Replace(valid, `"gpt-5.6-luna"`, `"other-model"`, 1)},
 		{name: "unknown field", body: strings.Replace(valid, `"roomName"`, `"unexpected":true,"roomName"`, 1)},
@@ -735,6 +736,7 @@ func TestCreateRoomRejectsInvalidSettingsAndMalformedBodies(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			server := NewServer(config.Config{}, slog.New(slog.NewTextHandler(io.Discard, nil)), game.NewInMemoryRoomService())
 			response := httptest.NewRecorder()
 			request := httptest.NewRequest(http.MethodPost, "/api/rooms", strings.NewReader(test.body))
 			request.Header.Set("Content-Type", "application/json")
@@ -743,6 +745,37 @@ func TestCreateRoomRejectsInvalidSettingsAndMalformedBodies(t *testing.T) {
 				t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusBadRequest, response.Body.String())
 			}
 		})
+	}
+}
+
+func TestCreateRoomDefaultsAndReturnsTypedGameKinds(t *testing.T) {
+	t.Parallel()
+
+	server := NewServer(config.Config{}, slog.New(slog.NewTextHandler(io.Discard, nil)), game.NewInMemoryRoomService())
+	defaulted := performRoomRequest(t, server, http.MethodPost, "/api/rooms", `{
+		"roomName":"Default rules","hostDisplayName":"Host","settings":{}
+	}`)
+	defaultSettings := nestedMap(t, defaulted, "room", "settings")
+	if defaultSettings["gameKind"] != string(models.GameKindModelSays) {
+		t.Fatalf("default game kind = %q", defaultSettings["gameKind"])
+	}
+
+	trivia := performRoomRequest(t, server, http.MethodPost, "/api/rooms", `{
+		"roomName":"Trivia rules","hostDisplayName":"Host",
+		"settings":{"mode":"simultaneous","gameKind":"trivia_open"}
+	}`)
+	triviaSettings := nestedMap(t, trivia, "room", "settings")
+	if triviaSettings["gameKind"] != string(models.GameKindTriviaOpen) || triviaSettings["mode"] != string(models.GameModeSimultaneous) {
+		t.Fatalf("trivia settings = %#v", triviaSettings)
+	}
+	triviaRoom := nestedMap(t, trivia, "room")
+	triviaPlayer := nestedMap(t, trivia, "player")
+	started := performRoomRequest(t, server, http.MethodPost,
+		fmt.Sprintf("/api/rooms/%s/start", triviaRoom["code"]),
+		fmt.Sprintf(`{"playerToken":%q}`, triviaPlayer["token"]))
+	startedGame := nestedMap(t, started, "room", "currentGame")
+	if startedGame["gameKind"] != string(models.GameKindTriviaOpen) {
+		t.Fatalf("started game kind = %q", startedGame["gameKind"])
 	}
 }
 

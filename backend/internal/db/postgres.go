@@ -683,9 +683,9 @@ func (repository *PostgresRoomRepository) StartGame(ctx context.Context, code st
 	}
 
 	_, err = tx.Exec(ctx, `
-		INSERT INTO games (id, room_code, replay_id, status, mode, total_rounds, current_round_index, created_at, started_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-	`, gameState.ID, code, gameState.ReplayID, gameState.Status, gameState.Mode, gameState.TotalRounds, gameState.CurrentRoundIndex, gameState.CreatedAt, gameState.StartedAt)
+		INSERT INTO games (id, room_code, replay_id, status, mode, game_kind, total_rounds, current_round_index, created_at, started_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+	`, gameState.ID, code, gameState.ReplayID, gameState.Status, gameState.Mode, gameState.GameKind, gameState.TotalRounds, gameState.CurrentRoundIndex, gameState.CreatedAt, gameState.StartedAt)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return models.Room{}, game.ErrGameAlreadyStarted
@@ -1217,6 +1217,9 @@ func (repository *PostgresRoomRepository) loadRoom(ctx context.Context, querier 
 	if err := json.Unmarshal(settingsJSON, &room.Settings); err != nil {
 		return models.Room{}, fmt.Errorf("decode room settings: %w", err)
 	}
+	if room.Settings.GameKind == "" {
+		room.Settings.GameKind = models.GameKindModelSays
+	}
 
 	rows, err := querier.Query(ctx, `
 		SELECT id, display_name, is_host, token, joined_at, COALESCE(team_id, ''), role
@@ -1323,6 +1326,7 @@ func (repository *PostgresRoomRepository) loadCurrentGame(ctx context.Context, q
 			COALESCE(g.replay_id, ''),
 			g.status,
 			g.mode,
+			g.game_kind,
 			g.total_rounds,
 			g.current_round_index,
 			g.created_at,
@@ -1356,6 +1360,7 @@ func (repository *PostgresRoomRepository) loadCurrentGame(ctx context.Context, q
 		&gameState.ReplayID,
 		&gameState.Status,
 		&gameState.Mode,
+		&gameState.GameKind,
 		&gameState.TotalRounds,
 		&gameState.CurrentRoundIndex,
 		&gameState.CreatedAt,

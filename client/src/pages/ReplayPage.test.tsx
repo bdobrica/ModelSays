@@ -23,7 +23,7 @@ describe('ReplayPage', () => {
 
   it('shows tied winners, round matches, guesses, and deltas', async () => {
     vi.mocked(api.getReplay).mockResolvedValue({ replay: {
-      id: 'replay-id', roomName: 'Friday', mode: 'simultaneous',
+      id: 'replay-id', roomName: 'Friday', mode: 'simultaneous', gameKind: 'model_says',
       startedAt: '2026-07-19T10:00:00Z', endedAt: '2026-07-19T10:05:00Z',
       rankings: [
         { playerId: 'one', displayName: 'Ana', score: 50, isHost: false, submissionMade: false },

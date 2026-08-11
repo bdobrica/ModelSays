@@ -57,7 +57,7 @@ After the first installation, `make start` starts the stack without reinstalling
 
 Use separate browser profiles, private windows, or devices so each participant has separate browser storage.
 
-1. The host opens `http://localhost:5173`, selects **Create room**, enters a name, chooses individual, team, sequential, or living-room mode, 1–5 rounds, and a 15–120 second timer, then creates the room.
+1. The host opens `http://localhost:5173`, selects **Create room**, enters a name, chooses individual, team, sequential, or living-room pacing, 1–5 rounds, and a 15–120 second timer, then creates the room. The current UI creates Model Says games; Open Trivia and Choice Trivia remain hidden until their content, scoring, and screens are complete.
 2. Select **Copy invite** and share the join link, or share the six-character room code before starting. Invite links pre-fill the code.
 3. Each player opens **Join room**, enters the code and a display name, and joins a focused lobby that confirms their name and waits for the host.
 4. The host waits for everyone to appear. In team mode, create 2–4 teams and assign every player; every team must have a player. Then select **Start game**. Team assignments cannot change afterward.
