@@ -41,7 +41,13 @@ export function ReplayPage() {
           <section className="phase-card" key={round.roundIndex}>
             <p className="eyebrow">Round {round.roundIndex}</p>
             <h2>{round.question}</h2>
-            <div className="answer-board">
+            {round.triviaContent ? (
+              <dl className="trivia-result-details">
+                <div><dt>Correct answer</dt><dd>{round.triviaContent.canonicalAnswer}</dd></div>
+                {round.triviaContent.explanation ? <div><dt>Explanation</dt><dd>{round.triviaContent.explanation}</dd></div> : null}
+                {round.triviaContent.source ? <div><dt>Source</dt><dd>{round.triviaContent.source}</dd></div> : null}
+              </dl>
+            ) : <div className="answer-board">
               {round.board.map((answer) => {
                 const matches = round.guesses.filter((guess) => guess.matchedPredictionAnswerId === answer.id)
                 return (
@@ -51,15 +57,17 @@ export function ReplayPage() {
                   </div>
                 )
               })}
-            </div>
+            </div>}
             <div className="guess-list">
               <h3>Revealed guesses and round deltas</h3>
-              {round.guesses.length ? round.guesses.map((guess, index) => (
-                <div className="guess-row" key={`${guess.playerDisplayName}-${index}`}>
-                  <span><strong>{guess.playerDisplayName}</strong>: {guess.rawAnswer}</span>
-                  <em>{guess.scoreAwarded > 0 ? '+' : ''}{guess.scoreAwarded} pts{guess.duplicate ? ' — duplicate' : ''}</em>
+              {round.guesses.length ? round.guesses.map((guess, index) => {
+                const optionLabel = round.triviaContent?.options?.find((option) => option.id === guess.selectedOptionId)?.label
+                const displayedAnswer = optionLabel || guess.rawAnswer
+                return <div className="guess-row" key={`${guess.playerDisplayName}-${index}`}>
+                  <span><strong>{guess.playerDisplayName}</strong>: {displayedAnswer}</span>
+                  <em>{guess.correct == null ? `${guess.scoreAwarded > 0 ? '+' : ''}${guess.scoreAwarded} pts${guess.duplicate ? ' — duplicate' : ''}` : `${guess.correct ? 'Correct' : 'Incorrect'} · +${guess.scoreAwarded} pts`}</em>
                 </div>
-              )) : <p>No guesses were submitted.</p>}
+              }) : <p>No guesses were submitted.</p>}
               {round.scoreDeltas.map((entry) => (
                 <div className="score-row" key={entry.playerId}>
                   <span>{entry.displayName}</span>

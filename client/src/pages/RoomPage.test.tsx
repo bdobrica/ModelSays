@@ -138,7 +138,7 @@ function openTriviaState(phase: 'answering' | 'revealed', active: typeof host | 
   room.currentGame!.currentRound!.guesses = phase === 'answering' ? undefined : [{
     id: 'trivia-guess', playerId: active.id, playerDisplayName: active.displayName, rawAnswer: 'Paris', normalizedAnswer: 'paris', correct: true, scoreAwarded: 100, duplicate: false, createdAt: '2026-07-19T12:00:10Z',
   }]
-  room.currentGame!.scoreboard = room.currentGame!.scoreboard.map((entry) => ({ ...entry, score: entry.playerId === active.id && phase === 'revealed' ? 100 : 0, submissionMade: entry.playerId === active.id }))
+  room.currentGame!.scoreboard = room.currentGame!.scoreboard.map((entry) => ({ ...entry, score: entry.playerId === active.id && phase === 'revealed' ? 100 : 0, submissionMade: entry.playerId === active.id && phase === 'revealed' }))
   return room
 }
 
@@ -199,10 +199,11 @@ describe('RoomPage', () => {
     renderRoom()
 
     const input = await screen.findByLabelText('Your trivia answer')
+    const submit = screen.getByRole('button', { name: 'Submit answer' })
     expect(screen.queryByText('Paris')).not.toBeInTheDocument()
     expect(screen.queryByText(/Correct!/)).not.toBeInTheDocument()
     fireEvent.change(input, { target: { value: 'Paris' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Submit answer' }))
+    fireEvent.click(submit)
     await waitFor(() => expect(api.submitGuess).toHaveBeenCalledWith('ABC234', 'round-1', { playerToken: player.token, answer: 'Paris' }))
     expect(await screen.findByText('Answer submitted. It is locked until the result.')).toBeInTheDocument()
   })
@@ -214,7 +215,7 @@ describe('RoomPage', () => {
     vi.mocked(api.getRoom).mockResolvedValue({ room: current })
     const { container } = renderRoom()
 
-    expect(await screen.findByRole('heading', { name: 'Correct!' })).toHaveFocus()
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Correct!' })).toHaveFocus())
     expect(screen.getByText('Correct answer').nextSibling).toHaveTextContent('Paris')
     expect(screen.getByText('Your answer').nextSibling).toHaveTextContent('Paris')
     expect(screen.getByText('Correct · 100 pts')).toBeInTheDocument()
@@ -259,8 +260,8 @@ describe('RoomPage', () => {
     fireEvent.click(paris)
     expect(api.submitGuess).toHaveBeenCalledTimes(1)
     expect(api.submitGuess).toHaveBeenCalledWith('ABC234', 'round-1', { playerToken: player.token, optionId: 'opt-a' })
-    expect(screen.getByRole('button', { name: 'Paris Selected' })).toHaveAttribute('aria-pressed', 'true')
-    expect(screen.getAllByRole('button').filter((button) => ['Madrid', 'Paris Selected', 'Rome', 'Berlin'].includes(button.textContent ?? '')).every((button) => button.hasAttribute('disabled'))).toBe(true)
+    expect(screen.getByRole('button', { name: 'Paris, selected' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getAllByRole('button').filter((button) => ['Madrid', 'ParisSelected', 'Rome', 'Berlin'].includes(button.textContent ?? '')).every((button) => button.hasAttribute('disabled'))).toBe(true)
     current = choiceTriviaState('answering')
     current.currentGame!.scoreboard[1].submissionMade = true
     resolveSubmission({ room: current })
@@ -274,7 +275,7 @@ describe('RoomPage', () => {
     vi.mocked(api.getRoom).mockResolvedValue({ room: current })
     const { container } = renderRoom()
 
-    expect(await screen.findByRole('heading', { name: 'Correct!' })).toHaveFocus()
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Correct!' })).toHaveFocus())
     expect(screen.getByText('Correct answer').nextSibling).toHaveTextContent('Paris')
     expect(screen.getByText('Your answer').nextSibling).toHaveTextContent('Paris')
     expect(screen.getByText('Correct · 100 pts')).toBeInTheDocument()
@@ -309,7 +310,7 @@ describe('RoomPage', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Berlin' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('Choice was not accepted')
-    expect(screen.getByRole('button', { name: 'Berlin Selected' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Berlin, selected' })).toBeEnabled()
     expect(screen.queryByText('Correct answer')).not.toBeInTheDocument()
   })
 
@@ -375,6 +376,64 @@ describe('RoomPage', () => {
     expect(screen.queryByText('Host')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Back to home' }))
     expect(await screen.findByText('Home')).toBeInTheDocument()
+  })
+
+  it('lets the living-room display create a fresh lobby with retained settings', async () => {
+    const display = { ...host, role: 'host_display' as const }
+    const completed = choiceTriviaState('revealed')
+    completed.status = 'completed'
+    completed.settings = { ...settings, mode: 'livingroom', gameKind: 'trivia_choice' }
+    completed.players = [display, { ...player, role: 'participant' }]
+    completed.currentGame = { ...completed.currentGame!, status: 'completed', mode: 'livingroom', gameKind: 'trivia_choice', replayId: 'replay-id' }
+    saveSession('ABC234', display)
+    vi.mocked(api.recoverSession).mockResolvedValue({ room: completed, player: display })
+    vi.mocked(api.playAgain).mockResolvedValue({
+      room: { ...roomState('lobby'), code: 'NEW234', settings: { ...settings, mode: 'livingroom', gameKind: 'trivia_choice' } },
+      player: { ...display, id: 'new-display', token: 'new-token' },
+    })
+
+    renderRoom()
+    fireEvent.click(await screen.findByRole('button', { name: 'Play again' }))
+    await waitFor(() => expect(api.playAgain).toHaveBeenCalledWith('ABC234', { playerToken: display.token }))
+  })
+
+  it('shows Choice Trivia options on TV without correctness during answering', async () => {
+    const display = { ...host, role: 'host_display' as const }
+    const answering = choiceTriviaState('answering')
+    answering.settings.mode = 'livingroom'
+    answering.currentGame!.mode = 'livingroom'
+    answering.players = [display, { ...player, role: 'participant' }]
+    saveSession('ABC234', display)
+    vi.mocked(api.recoverSession).mockResolvedValue({ room: answering, player: display })
+
+    renderRoom()
+
+    expect(await screen.findByRole('heading', { name: 'What is the capital of France?' })).toBeInTheDocument()
+    const choices = screen.getByLabelText('Answer choices')
+    expect(Array.from(choices.children).map((item) => item.textContent)).toEqual(['Madrid', 'Paris', 'Rome', 'Berlin'])
+    expect(screen.queryByText('Correct answer')).not.toBeInTheDocument()
+    expect(document.body.textContent).not.toMatch(/opt-[a-d]/)
+  })
+
+  it.each([
+    ['Open Trivia', openTriviaState('revealed')],
+    ['Choice Trivia', choiceTriviaState('revealed')],
+  ])('shows privacy-safe %s results and rankings on TV', async (_label, revealed) => {
+    const display = { ...host, role: 'host_display' as const }
+    revealed.settings.mode = 'livingroom'
+    revealed.currentGame!.mode = 'livingroom'
+    revealed.currentGame!.currentRound!.revealPhaseEndsAt = new Date(Date.now() + 8_000).toISOString()
+    revealed.players = [display, { ...player, role: 'participant' }]
+    saveSession('ABC234', display)
+    vi.mocked(api.recoverSession).mockResolvedValue({ room: revealed, player: display })
+
+    renderRoom()
+
+    expect(await screen.findByText('Correct answer')).toBeInTheDocument()
+    expect(screen.getAllByText('Paris').length).toBeGreaterThan(0)
+    expect(screen.getByText('Correct · +100 pts')).toBeInTheDocument()
+    expect(screen.queryByText('paris', { exact: true })).not.toBeInTheDocument()
+    expect(screen.getByText(/next round in 8s/)).toBeInTheDocument()
   })
 
   it('has no serious or critical accessibility violations in a maximum-player lobby', async () => {

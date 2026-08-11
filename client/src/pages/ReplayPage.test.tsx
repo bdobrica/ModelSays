@@ -53,4 +53,29 @@ describe('ReplayPage', () => {
     expect(await screen.findByRole('heading', { name: 'Replay unavailable' })).toBeInTheDocument()
     expect(screen.getByRole('alert')).toHaveTextContent('expired')
   })
+
+  it.each([
+    ['trivia_open' as const, undefined, 'Lyon'],
+    ['trivia_choice' as const, [{ id: 'opt-a', label: 'Paris' }, { id: 'opt-b', label: 'Rome' }, { id: 'opt-c', label: 'Madrid' }, { id: 'opt-d', label: 'Berlin' }], 'Paris'],
+  ])('renders durable %s solutions, answers, correctness, and deltas', async (gameKind, options, submittedAnswer) => {
+    vi.mocked(api.getReplay).mockResolvedValue({ replay: {
+      id: 'replay-id', roomName: 'Trivia night', mode: 'livingroom', gameKind,
+      startedAt: '2026-07-19T10:00:00Z', endedAt: '2026-07-19T10:05:00Z',
+      rankings: [{ playerId: 'one', displayName: 'Ana', score: 0, isHost: false, submissionMade: false }],
+      rounds: [{
+        roundIndex: 1, question: 'What is the capital of France?', board: [],
+        triviaContent: { version: 1, kind: gameKind, baseScore: 100, canonicalAnswer: 'Paris', correctOptionId: gameKind === 'trivia_choice' ? 'opt-a' : undefined, options, explanation: 'Paris is the capital.', source: 'Reviewed bank' },
+        guesses: [{ playerDisplayName: 'Ana', rawAnswer: gameKind === 'trivia_open' ? submittedAnswer : '', selectedOptionId: gameKind === 'trivia_choice' ? 'opt-a' : undefined, correct: gameKind === 'trivia_choice', scoreAwarded: gameKind === 'trivia_choice' ? 100 : 0, duplicate: false }],
+        scoreDeltas: [{ playerId: 'one', displayName: 'Ana', score: gameKind === 'trivia_choice' ? 100 : 0, isHost: false, submissionMade: false }],
+      }],
+    } })
+
+    renderReplay()
+
+    expect(await screen.findByText('Correct answer')).toBeInTheDocument()
+    expect(screen.getAllByText('Paris').length).toBeGreaterThan(0)
+    expect(screen.getByText((_text, element) => element?.classList.contains('guess-row') === true && element.textContent?.includes(submittedAnswer) === true)).toBeInTheDocument()
+    expect(screen.getByText(gameKind === 'trivia_choice' ? 'Correct · +100 pts' : 'Incorrect · +0 pts')).toBeInTheDocument()
+    expect(screen.getByText('Reviewed bank')).toBeInTheDocument()
+  })
 })

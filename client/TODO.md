@@ -11,12 +11,12 @@ Status note:
 	- expiry copy reflects the PostgreSQL backend's durable automatic reveal; early reveal and next-round advancement remain host controls;
 	- same-browser refresh validates the stored token with the server; presence and cross-device transfer remain deferred;
 	- loading and error handling still exist as inline page states, not shared reusable components;
-	- the create-room flow separates rules from pacing and exposes playable Open and Choice Trivia; shared-TV trivia presentation remains scheduled separately.
+	- the create-room flow separates rules from pacing and exposes playable Open and Choice Trivia on phones, shared TV, replay, and clean play-again paths.
 	- the creation form and backend now share the MVP bounds of 1–5 rounds, a 15–120 second timer, and bounded names.
 	- CI runs the locked client test suite and production build alongside backend and PostgreSQL lifecycle gates.
 	- the root baseline command records production bundle size and representative polling volume; browser rendering and physical-device performance remain playtest work.
 	- joined participants now use a role/phase-focused surface; the host-only operational room view remains unchanged;
-	- living-room creators now receive a non-playing TV lobby/QR, shared question/timer, persisted reveal-pause, and automatic final-ranking surface.
+	- living-room creators now receive a non-playing TV lobby/QR, shared question/timer/options, privacy-safe result pause, automatic final ranking, and play-again/home actions.
 
 ## Phase 0 — Project Setup
 
@@ -58,6 +58,7 @@ Status note:
 - [x] Select and transmit Model Says, Open Trivia, or Choice Trivia independently from pacing.
 - [x] Render four server-ordered Choice Trivia buttons, submit one opaque option ID, and reveal textual choice results responsively.
 - [x] Type the phase-safe frozen trivia content and replay contracts without exposing unfinished controls.
+- [x] Present Open and Choice Trivia on the living-room TV and render durable trivia replay results.
 - [x] Add round count selector.
 - [x] Add answer timer selector.
 - [x] Add locale selector.

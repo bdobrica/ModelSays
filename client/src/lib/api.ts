@@ -138,6 +138,8 @@ export interface ReplayAnswer {
 export interface ReplayGuess {
   playerDisplayName: string
   rawAnswer: string
+  selectedOptionId?: string
+  correct?: boolean
   matchedPredictionAnswerId?: string
   scoreAwarded: number
   duplicate: boolean

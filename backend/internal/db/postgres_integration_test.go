@@ -576,6 +576,94 @@ func TestPostgresLivingRoomAutomaticLifecycle(t *testing.T) {
 	}
 }
 
+func TestPostgresTriviaLivingRoomEarlyDeadlineReplayAndPlayAgain(t *testing.T) {
+	pool := integrationPool(t)
+	ctx := context.Background()
+	for _, kind := range []models.GameKind{models.GameKindTriviaOpen, models.GameKindTriviaChoice} {
+		t.Run(string(kind), func(t *testing.T) {
+			repository := db.NewPostgresRoomRepository(pool)
+			repository.SetLivingRoomRevealPause(8 * time.Second)
+			service := game.NewRoomService(repository, nil)
+			room, display, err := service.CreateRoom(ctx, game.CreateRoomInput{
+				RoomName: "Trivia TV", HostDisplayName: "TV", Settings: models.RoomSettings{
+					GameKind: kind, Mode: models.GameModeLivingRoom, TotalRounds: 2, AnswerTimerSeconds: 15, Locale: "en",
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			participants := make([]models.Player, 0, 2)
+			for _, name := range []string{"Ana", "Mihai"} {
+				_, participant, joinErr := service.JoinRoom(ctx, game.JoinRoomInput{Code: room.Code, DisplayName: name})
+				if joinErr != nil {
+					t.Fatal(joinErr)
+				}
+				participants = append(participants, participant)
+			}
+			started, err := service.StartGame(ctx, game.StartGameInput{Code: room.Code, PlayerToken: display.Token})
+			if err != nil {
+				t.Fatal(err)
+			}
+			first := started.CurrentGame.CurrentRound
+			for _, participant := range participants {
+				input := game.SubmitGuessInput{Code: room.Code, RoundID: first.ID, PlayerToken: participant.Token}
+				if kind == models.GameKindTriviaChoice {
+					input.OptionID = first.TriviaContent.CorrectOptionID
+				} else {
+					input.Answer = first.TriviaContent.CanonicalAnswer
+				}
+				if _, err := service.SubmitGuess(ctx, input); err != nil {
+					t.Fatal(err)
+				}
+			}
+			revealed, err := db.NewPostgresRoomRepository(pool).GetRoom(ctx, room.Code)
+			if err != nil || revealed.CurrentGame.CurrentRound.Status != models.RoundStatusRevealed {
+				t.Fatalf("early reveal after restart: room=%#v err=%v", revealed, err)
+			}
+			firstPauseEnd := *revealed.CurrentGame.CurrentRound.RevealPhaseEndsAt
+			if firstPauseEnd.Sub(*revealed.CurrentGame.CurrentRound.RevealStartedAt) != 8*time.Second {
+				t.Fatalf("reveal pause = %s", firstPauseEnd.Sub(*revealed.CurrentGame.CurrentRound.RevealStartedAt))
+			}
+			if count, err := repository.RevealDueRounds(ctx, firstPauseEnd, firstPauseEnd, 25); err != nil || count != 1 {
+				t.Fatalf("advance after pause: count=%d err=%v", count, err)
+			}
+			second, err := repository.GetRoom(ctx, room.Code)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if duration := second.CurrentGame.CurrentRound.AnswerPhaseEndsAt.Sub(second.CurrentGame.CurrentRound.AnswerPhaseStartedAt); duration != 15*time.Second {
+				t.Fatalf("next round duration = %s", duration)
+			}
+			deadline := second.CurrentGame.CurrentRound.AnswerPhaseEndsAt
+			if count, err := repository.RevealDueRounds(ctx, deadline, deadline, 25); err != nil || count != 1 {
+				t.Fatalf("deadline reveal: count=%d err=%v", count, err)
+			}
+			finalReveal, err := repository.GetRoom(ctx, room.Code)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if count, err := repository.RevealDueRounds(ctx, *finalReveal.CurrentGame.CurrentRound.RevealPhaseEndsAt, *finalReveal.CurrentGame.CurrentRound.RevealPhaseEndsAt, 25); err != nil || count != 1 {
+				t.Fatalf("completion: count=%d err=%v", count, err)
+			}
+			completed, err := db.NewPostgresRoomRepository(pool).GetRoom(ctx, room.Code)
+			if err != nil {
+				t.Fatal(err)
+			}
+			replay, err := service.GetReplay(ctx, completed.CurrentGame.ReplayID)
+			if err != nil || len(replay.Rounds) != 2 || replay.Rounds[0].TriviaContent == nil || replay.Rounds[0].TriviaContent.CanonicalAnswer == "" {
+				t.Fatalf("trivia replay=%#v err=%v", replay, err)
+			}
+			fresh, freshDisplay, err := service.PlayAgain(ctx, game.PlayAgainInput{Code: room.Code, PlayerToken: display.Token})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if fresh.Settings.GameKind != kind || fresh.Settings.Mode != models.GameModeLivingRoom || fresh.CurrentGame != nil || len(fresh.Players) != 1 || freshDisplay.Role != models.PlayerRoleHostDisplay {
+				t.Fatalf("fresh trivia lobby inherited state or settings changed: %#v", fresh)
+			}
+		})
+	}
+}
+
 func TestPostgresSequentialSubmissionAndTwoWorkerTimeout(t *testing.T) {
 	pool := integrationPool(t)
 	repository := db.NewPostgresRoomRepository(pool)

@@ -473,6 +473,11 @@ export function RoomPage() {
             <section className="livingroom-question">
               <p className="eyebrow">Round {currentRound.roundIndex} of {currentGame?.totalRounds}</p>
               <h2 ref={phaseHeading} tabIndex={-1}>{currentRound.question.text}</h2>
+              {isChoiceTrivia ? (
+                <div aria-label="Answer choices" className="choice-grid livingroom-choice-grid">
+                  {choiceOptions.map((option) => <div className="choice-button" key={option.id}>{option.label}</div>)}
+                </div>
+              ) : null}
               <p className="countdown" role="timer">{hasLocallyExpired ? 'Revealing…' : `${secondsRemaining}s`}</p>
               <p className="status-note">{currentGame?.scoreboard.filter((entry) => entry.submissionMade).length ?? 0} of {participants.length} answered</p>
             </section>
@@ -481,7 +486,21 @@ export function RoomPage() {
             <section className="phase-card reveal-card">
               <p className="eyebrow">Results · next round in {revealSeconds}s</p>
               <h2 ref={phaseHeading} tabIndex={-1}>{currentRound.question.text}</h2>
-              <div className="answer-board">{currentRound.board?.answers.map((answer) => <div className="answer-row" key={answer.id}><span>#{answer.rank}</span><strong>{answer.canonicalAnswer}</strong><em>{answer.score} pts</em></div>)}</div>
+              {isTrivia ? (
+                <div className="livingroom-trivia-result">
+                  <p><span>Correct answer</span><strong>{isChoiceTrivia ? correctChoiceLabel : currentRound.triviaContent?.canonicalAnswer}</strong></p>
+                  {currentRound.triviaContent?.explanation ? <p className="status-note">{currentRound.triviaContent.explanation}</p> : null}
+                  <div className="guess-list">
+                    <h3>Round results</h3>
+                    {currentRound.guesses?.length ? currentRound.guesses.map((guess) => {
+                      const answer = isChoiceTrivia
+                        ? choiceOptions.find((option) => option.id === guess.selectedOptionId)?.label || 'No answer'
+                        : 'Answer submitted'
+                      return <div className="guess-row" key={guess.id}><span><strong>{guess.playerDisplayName}</strong>: {answer}</span><em>{guess.correct ? 'Correct' : 'Incorrect'} · +{guess.scoreAwarded} pts</em></div>
+                    }) : <p>No answers were submitted.</p>}
+                  </div>
+                </div>
+              ) : <div className="answer-board">{currentRound.board?.answers.map((answer) => <div className="answer-row" key={answer.id}><span>#{answer.rank}</span><strong>{answer.canonicalAnswer}</strong><em>{answer.score} pts</em></div>)}</div>}
               <div className="score-list">{rankedScoreboard.map((entry, index) => <div className="score-row" key={entry.playerId}><strong>#{index + 1}</strong><span>{entry.displayName}</span><em>{entry.score} pts</em></div>)}</div>
             </section>
           ) : null}
@@ -490,6 +509,7 @@ export function RoomPage() {
               <p className="eyebrow">Game complete</p><h2 ref={phaseHeading} tabIndex={-1}>Final scoreboard</h2>
               <div className="score-list">{rankedScoreboard.map((entry, index) => <div className={entry.score === winningScore ? 'score-row score-row-winner' : 'score-row'} key={entry.playerId}><strong>#{index + 1}</strong><span>{entry.displayName}</span><em>{entry.score} pts</em></div>)}</div>
               <div className="action-row livingroom-final-actions">
+                <button className="button button-secondary" disabled={isMutating} onClick={() => void handlePlayAgain()} type="button">{isMutating ? 'Creating…' : 'Play again'}</button>
                 <button className="button button-primary" onClick={() => navigate('/')} type="button">Back to home</button>
               </div>
             </section>
@@ -553,7 +573,7 @@ export function RoomPage() {
                 <div aria-label="Answer choices" className="choice-grid" role="group">
                   {choiceOptions.map((option) => {
                     const selected = option.id === selectedOptionId
-                    return <button aria-pressed={selected} className={selected ? 'choice-button choice-button-selected' : 'choice-button'} disabled={hasSubmitted || hasLocallyExpired || isMutating || !activePlayerToken} key={option.id} onClick={() => void handleChoiceSubmit(option.id)} type="button"><span>{option.label}</span>{selected ? <small>Selected</small> : null}</button>
+                    return <button aria-label={selected ? `${option.label}, selected` : option.label} aria-pressed={selected} className={selected ? 'choice-button choice-button-selected' : 'choice-button'} disabled={hasSubmitted || hasLocallyExpired || isMutating || !activePlayerToken} key={option.id} onClick={() => void handleChoiceSubmit(option.id)} type="button"><span>{option.label}</span>{selected ? <small>Selected</small> : null}</button>
                   })}
                 </div>
               ) : <form className="answer-form" onSubmit={handleSubmitGuess}>

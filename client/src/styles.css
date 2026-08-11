@@ -271,6 +271,27 @@ select {
   font-size: clamp(3rem, 10vw, 8rem);
 }
 
+.livingroom-choice-grid {
+  width: min(70rem, 90vw);
+  margin: 0 auto;
+  font-size: clamp(1.2rem, 2.4vw, 2.2rem);
+}
+
+.livingroom-choice-grid .choice-button {
+  place-content: center;
+  min-height: clamp(4.5rem, 10vh, 8rem);
+  text-align: center;
+}
+
+.livingroom-trivia-result > p:first-child {
+  display: grid;
+  gap: 0.35rem;
+  text-align: center;
+}
+
+.livingroom-trivia-result > p:first-child span { color: var(--text-dim); }
+.livingroom-trivia-result > p:first-child strong { font-size: clamp(1.8rem, 4vw, 3.5rem); }
+
 .livingroom-final-actions {
   justify-content: center;
 }
