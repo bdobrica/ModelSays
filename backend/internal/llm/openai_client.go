@@ -67,6 +67,22 @@ type generatedBoardPayload struct {
 	} `json:"answers"`
 }
 
+type generatedTriviaPayload struct {
+	Question        string   `json:"question"`
+	Locale          string   `json:"locale"`
+	Category        string   `json:"category"`
+	CanonicalAnswer string   `json:"canonicalAnswer"`
+	AcceptedAliases []string `json:"acceptedAliases"`
+	BaseScore       int      `json:"baseScore"`
+	Explanation     string   `json:"explanation"`
+	Source          string   `json:"source"`
+	Options         []struct {
+		ID    string `json:"id"`
+		Label string `json:"label"`
+	} `json:"options"`
+	CorrectOptionID string `json:"correctOptionId"`
+}
+
 type judgeGuessPayload struct {
 	AnswerID          *string `json:"answerId"`
 	Confidence        float64 `json:"confidence"`
@@ -166,6 +182,42 @@ func (client *OpenAIModelClient) GenerateBoard(ctx context.Context, req Generate
 	}
 
 	return &GenerateBoardResponse{Board: board, Metadata: metadata}, nil
+}
+
+func (client *OpenAIModelClient) GenerateTrivia(ctx context.Context, req GenerateTriviaRequest) (*GenerateTriviaResponse, error) {
+	model := defaultString(strings.TrimSpace(req.PredictionModel), client.defaults.PredictionModel)
+	if model == "" {
+		model = "gpt-5.6-luna"
+	}
+	promptVersion := defaultString(req.PromptVersion, TriviaPromptVersion)
+	kindInstruction := "an open-answer question with a concise canonical answer and only unquestionably equivalent accepted aliases; options and correctOptionId must be empty"
+	if req.Kind == models.GameKindTriviaChoice {
+		kindInstruction = "a multiple-choice question with exactly four plausible, distinct options using opaque IDs o1 through o4 and a correctOptionId matching exactly one option; acceptedAliases must be empty"
+	}
+	prompt := fmt.Sprintf("Generate %s. Return the question and its complete frozen solution atomically. Locale: %s. Category: %s. Team safe mode: %t. Round: %d. Do not repeat these questions: %q. Base score must be 100. Keep explanation factual and source a short provenance note; avoid disputed, time-sensitive, hateful, sexual, medical, legal, financial, personal, or workplace-sensitive topics.", kindInstruction, req.Locale, defaultString(req.Category, "general_knowledge"), req.TeamSafeMode, req.RoundIndex, req.ExcludedText)
+	body, metadata, err := client.completeJSON(ctx, model, prompt, promptVersion, triviaJSONSchema(req.Kind))
+	if err != nil {
+		return nil, err
+	}
+	var payload generatedTriviaPayload
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, fmt.Errorf("decode trivia payload: %w", err)
+	}
+	options := make([]models.TriviaOption, 0, len(payload.Options))
+	for _, option := range payload.Options {
+		options = append(options, models.TriviaOption{ID: strings.TrimSpace(option.ID), Label: strings.TrimSpace(option.Label)})
+	}
+	locale := defaultString(strings.TrimSpace(payload.Locale), defaultString(strings.TrimSpace(req.Locale), "en"))
+	questionText := strings.TrimSpace(payload.Question)
+	return &GenerateTriviaResponse{
+		Question: models.Question{ID: stableID(string(req.Kind) + "|" + locale + "|" + questionText), Text: questionText,
+			Locale: locale, Category: defaultString(strings.TrimSpace(payload.Category), "general_knowledge")},
+		Content: models.TriviaContent{Version: models.TriviaContentVersion, Kind: req.Kind,
+			CanonicalAnswer: strings.TrimSpace(payload.CanonicalAnswer), AcceptedAliases: payload.AcceptedAliases,
+			BaseScore: payload.BaseScore, Explanation: strings.TrimSpace(payload.Explanation), Source: strings.TrimSpace(payload.Source),
+			Options: options, CorrectOptionID: strings.TrimSpace(payload.CorrectOptionID)},
+		Metadata: metadata,
+	}, nil
 }
 
 func (client *OpenAIModelClient) JudgeGuess(ctx context.Context, req JudgeGuessRequest) (*JudgeGuessResponse, error) {
@@ -323,6 +375,34 @@ func boardJSONSchema() map[string]any {
 			"answers":       map[string]any{"type": "array", "minItems": 5, "maxItems": 5, "items": answer},
 		},
 	}
+}
+
+func triviaJSONSchema(kind models.GameKind) map[string]any {
+	optionMin, optionMax := 0, 0
+	correctMin, correctMax := 0, 0
+	if kind == models.GameKindTriviaChoice {
+		optionMin, optionMax = 4, 4
+		correctMin, correctMax = 1, 80
+	}
+	option := map[string]any{"type": "object", "additionalProperties": false,
+		"required": []string{"id", "label"}, "properties": map[string]any{
+			"id":    map[string]any{"type": "string", "minLength": 1, "maxLength": 80},
+			"label": map[string]any{"type": "string", "minLength": 1, "maxLength": 120},
+		}}
+	return map[string]any{"type": "object", "additionalProperties": false,
+		"required": []string{"question", "locale", "category", "canonicalAnswer", "acceptedAliases", "baseScore", "explanation", "source", "options", "correctOptionId"},
+		"properties": map[string]any{
+			"question":        map[string]any{"type": "string", "minLength": 1, "maxLength": 300},
+			"locale":          map[string]any{"type": "string", "minLength": 1, "maxLength": 20},
+			"category":        map[string]any{"type": "string", "minLength": 1, "maxLength": 80},
+			"canonicalAnswer": map[string]any{"type": "string", "minLength": 1, "maxLength": 120},
+			"acceptedAliases": map[string]any{"type": "array", "maxItems": 12, "items": map[string]any{"type": "string", "minLength": 1, "maxLength": 120}},
+			"baseScore":       map[string]any{"type": "integer", "minimum": 1, "maximum": 1000},
+			"explanation":     map[string]any{"type": "string", "maxLength": 600},
+			"source":          map[string]any{"type": "string", "maxLength": 300},
+			"options":         map[string]any{"type": "array", "minItems": optionMin, "maxItems": optionMax, "items": option},
+			"correctOptionId": map[string]any{"type": "string", "minLength": correctMin, "maxLength": correctMax},
+		}}
 }
 
 func judgeJSONSchema(answerIDs []string) map[string]any {

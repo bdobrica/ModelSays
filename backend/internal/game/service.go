@@ -489,8 +489,9 @@ func (service *RoomService) StartGame(ctx context.Context, input StartGameInput)
 			RoundIndex:           roundSeed.RoundIndex,
 			Status:               models.RoundStatusAnswering,
 			Question:             roundSeed.Question,
-			BoardHash:            roundSeed.Board.BoardHash,
-			Board:                &roundSeed.Board,
+			BoardHash:            roundSeed.contentHash(),
+			Board:                roundSeed.boardPointer(),
+			TriviaContent:        roundSeed.triviaPointer(),
 			AnswerPhaseStartedAt: now,
 			AnswerPhaseEndsAt:    now.Add(time.Duration(room.Settings.AnswerTimerSeconds) * time.Second),
 			CreatedAt:            now,
@@ -508,7 +509,7 @@ func (service *RoomService) StartGame(ctx context.Context, input StartGameInput)
 			}
 			prepared := models.Round{
 				ID: preparedID, RoundIndex: index, Status: models.RoundStatusPending,
-				Question: seed.Question, BoardHash: seed.Board.BoardHash, Board: &seed.Board,
+				Question: seed.Question, BoardHash: seed.contentHash(), Board: seed.boardPointer(), TriviaContent: seed.triviaPointer(),
 				CreatedAt: now, ProviderAudits: seed.Audits,
 			}
 			gameState.PreparedRounds = append(gameState.PreparedRounds, prepared)
@@ -737,8 +738,9 @@ func (service *RoomService) NextRound(ctx context.Context, input NextRoundInput)
 		RoundIndex:           nextRoundIndex,
 		Status:               models.RoundStatusAnswering,
 		Question:             roundSeed.Question,
-		BoardHash:            roundSeed.Board.BoardHash,
-		Board:                &roundSeed.Board,
+		BoardHash:            roundSeed.contentHash(),
+		Board:                roundSeed.boardPointer(),
+		TriviaContent:        roundSeed.triviaPointer(),
 		AnswerPhaseStartedAt: now,
 		AnswerPhaseEndsAt:    now.Add(time.Duration(room.Settings.AnswerTimerSeconds) * time.Second),
 		CreatedAt:            now,
@@ -1566,8 +1568,21 @@ func scoringPlayers(players []models.Player) []models.Player {
 type generatedRound struct {
 	RoundIndex int
 	Question   models.Question
-	Board      models.PredictionBoard
+	Board      *models.PredictionBoard
+	Trivia     *models.TriviaContent
 	Audits     []models.ProviderCallAudit
+}
+
+func (round generatedRound) boardPointer() *models.PredictionBoard { return round.Board }
+func (round generatedRound) triviaPointer() *models.TriviaContent  { return round.Trivia }
+func (round generatedRound) contentHash() string {
+	if round.Trivia != nil {
+		return round.Trivia.IntegrityHash
+	}
+	if round.Board != nil {
+		return round.Board.BoardHash
+	}
+	return ""
 }
 
 func (service *RoomService) generateRound(ctx context.Context, settings models.RoomSettings, roundIndex int, excludedQuestions []string, now time.Time) (generatedRound, error) {
@@ -1618,6 +1633,9 @@ func providerUsage(audits []models.ProviderCallAudit) (int, float64) {
 }
 
 func (service *RoomService) generateRoundWithClient(ctx context.Context, client llm.ModelClient, settings models.RoomSettings, roundIndex int, excludedQuestions []string, now time.Time, roomCode string, gameID string, roundID string, path string, attempt int, remainingCalls int, remainingCost float64, audits *[]models.ProviderCallAudit) (generatedRound, error) {
+	if settings.GameKind == models.GameKindTriviaOpen || settings.GameKind == models.GameKindTriviaChoice {
+		return service.generateTriviaRoundWithClient(ctx, client, settings, roundIndex, excludedQuestions, now, roomCode, gameID, roundID, path, attempt, remainingCalls, remainingCost, audits)
+	}
 	if path == "primary" && service.providerGate != nil {
 		if allowed, _ := service.providerGate.AllowProvider(roomCode); !allowed {
 			*audits = append(*audits, models.ProviderCallAudit{
@@ -1702,7 +1720,67 @@ func (service *RoomService) generateRoundWithClient(ctx context.Context, client 
 	}
 
 	board := prepareBoard(boardResponse.Board, question, now)
-	return generatedRound{RoundIndex: roundIndex, Question: question, Board: board}, nil
+	return generatedRound{RoundIndex: roundIndex, Question: question, Board: &board}, nil
+}
+
+func (service *RoomService) generateTriviaRoundWithClient(ctx context.Context, client llm.ModelClient, settings models.RoomSettings, roundIndex int, excludedQuestions []string, now time.Time, roomCode, gameID, roundID, path string, attempt, remainingCalls int, remainingCost float64, audits *[]models.ProviderCallAudit) (generatedRound, error) {
+	triviaClient, ok := client.(llm.TriviaClient)
+	if !ok {
+		return generatedRound{}, fmt.Errorf("trivia generation is not supported by configured provider")
+	}
+	if path == "primary" && service.providerGate != nil {
+		if allowed, _ := service.providerGate.AllowProvider(roomCode); !allowed {
+			*audits = append(*audits, models.ProviderCallAudit{ID: newID(), RoomCode: roomCode, GameID: gameID, RoundID: roundID,
+				Purpose: "trivia_generation", Provider: "circuit_breaker", Model: settings.PredictionModel,
+				PromptVersion: llm.TriviaPromptVersion, Outcome: "budget_exhausted", ErrorCategory: "circuit_breaker",
+				Path: path, Attempt: attempt, StartedAt: now, CompletedAt: now, RetentionClass: "provider_audit_30d"})
+			return generatedRound{}, llm.ErrBudgetExhausted
+		}
+	}
+	callCtx, cancel := llm.WithTimeout(ctx, service.modelPolicy.Timeout)
+	started := service.clock.Now()
+	response, err := triviaClient.GenerateTrivia(callCtx, llm.GenerateTriviaRequest{Kind: settings.GameKind, Locale: settings.Locale,
+		Category: "general_knowledge", RoundIndex: roundIndex, TeamSafeMode: settings.TeamSafeMode,
+		ExcludedText: excludedQuestions, PredictionModel: settings.PredictionModel, PromptVersion: llm.TriviaPromptVersion})
+	cancel()
+	metadata := llm.MetadataFromError(err)
+	if response != nil {
+		metadata = response.Metadata
+	}
+	service.appendProviderAudit(audits, roomCode, gameID, roundID, "trivia_generation", path, attempt, started, metadata, err)
+	if err != nil {
+		return generatedRound{}, err
+	}
+	if path == "primary" && (remainingCalls < 1 || metadata.EstimatedCostUSD >= remainingCost) {
+		return generatedRound{}, llm.ErrBudgetExhausted
+	}
+	if response == nil {
+		markLastAuditInvalid(audits)
+		return generatedRound{}, fmt.Errorf("trivia generator returned no response")
+	}
+	if err := validateQuestion(response.Question, settings.Locale, excludedQuestions); err != nil {
+		markLastAuditInvalid(audits)
+		return generatedRound{}, err
+	}
+	if response.Question.CreatedAt.IsZero() {
+		response.Question.CreatedAt = now
+	}
+	content := response.Content
+	content.AcceptedAliases = trimmedStrings(content.AcceptedAliases)
+	content.IntegrityHash = ComputeTriviaContentHash(content)
+	if err := ValidateTriviaContent(content); err != nil {
+		markLastAuditInvalid(audits)
+		return generatedRound{}, err
+	}
+	return generatedRound{RoundIndex: roundIndex, Question: response.Question, Trivia: &content}, nil
+}
+
+func trimmedStrings(values []string) []string {
+	result := make([]string, len(values))
+	for index, value := range values {
+		result[index] = strings.TrimSpace(value)
+	}
+	return result
 }
 
 func markLastAuditInvalid(audits *[]models.ProviderCallAudit) {

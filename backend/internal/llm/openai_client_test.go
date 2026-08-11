@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -85,6 +86,44 @@ func TestJudgeGuessUsesFrozenAnswerIDsAndStrictOutput(t *testing.T) {
 	if response.SuggestedPredictionAnswerID == nil || *response.SuggestedPredictionAnswerID != answerID ||
 		response.Confidence != 0.88 || response.Metadata.RequestID != "judge_req" {
 		t.Fatalf("unexpected judge response: %#v", response)
+	}
+}
+
+func TestGenerateTriviaUsesAtomicVersionedStrictSchemas(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		kind    models.GameKind
+		content string
+		options int
+	}{
+		{models.GameKindTriviaOpen, `{"question":"What is the largest planet?","locale":"en","category":"general_knowledge","canonicalAnswer":"Jupiter","acceptedAliases":[],"baseScore":100,"explanation":"Jupiter is largest.","source":"reviewed reference","options":[],"correctOptionId":""}`, 0},
+		{models.GameKindTriviaChoice, `{"question":"What is the largest planet?","locale":"en","category":"general_knowledge","canonicalAnswer":"Jupiter","acceptedAliases":[],"baseScore":100,"explanation":"Jupiter is largest.","source":"reviewed reference","options":[{"id":"o1","label":"Mars"},{"id":"o2","label":"Venus"},{"id":"o3","label":"Jupiter"},{"id":"o4","label":"Saturn"}],"correctOptionId":"o3"}`, 4},
+	} {
+		test := test
+		t.Run(string(test.kind), func(t *testing.T) {
+			transport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				var body openAIChatRequest
+				if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+					t.Fatal(err)
+				}
+				format := body.ResponseFormat.(map[string]any)
+				schema := format["json_schema"].(map[string]any)["schema"].(map[string]any)
+				if schema["additionalProperties"] != false || !strings.Contains(body.Messages[1].Content, "complete frozen solution atomically") {
+					t.Fatalf("trivia request was not atomic and strict: %#v", body)
+				}
+				response := `{"usage":{"prompt_tokens":40,"completion_tokens":30},"choices":[{"message":{"role":"assistant","content":` + strconv.Quote(test.content) + `}}]}`
+				return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"X-Request-Id": []string{"trivia_req"}}, Body: io.NopCloser(strings.NewReader(response))}, nil
+			})
+			client := NewOpenAIModelClient("test-key", ClientDefaults{PredictionModel: "gpt-5.6-luna"})
+			client.http = &http.Client{Transport: transport}
+			result, err := client.GenerateTrivia(context.Background(), GenerateTriviaRequest{Kind: test.kind, Locale: "en", PromptVersion: TriviaPromptVersion})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Content.Kind != test.kind || len(result.Content.Options) != test.options || result.Metadata.PromptVersion != TriviaPromptVersion || result.Metadata.RequestID != "trivia_req" {
+				t.Fatalf("unexpected trivia result: %#v", result)
+			}
+		})
 	}
 }
 

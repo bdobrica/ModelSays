@@ -32,6 +32,25 @@ type GenerateBoardResponse struct {
 	Metadata CallMetadata
 }
 
+const TriviaPromptVersion = "trivia-v1"
+
+type GenerateTriviaRequest struct {
+	Kind            models.GameKind
+	Locale          string
+	Category        string
+	RoundIndex      int
+	TeamSafeMode    bool
+	ExcludedText    []string
+	PredictionModel string
+	PromptVersion   string
+}
+
+type GenerateTriviaResponse struct {
+	Question models.Question
+	Content  models.TriviaContent
+	Metadata CallMetadata
+}
+
 type JudgeGuessRequest struct {
 	Question      models.Question
 	Board         models.PredictionBoard
@@ -56,6 +75,10 @@ type ClientDefaults struct {
 type ModelClient interface {
 	GenerateQuestions(ctx context.Context, req GenerateQuestionsRequest) (*GenerateQuestionsResponse, error)
 	GenerateBoard(ctx context.Context, req GenerateBoardRequest) (*GenerateBoardResponse, error)
+}
+
+type TriviaClient interface {
+	GenerateTrivia(ctx context.Context, req GenerateTriviaRequest) (*GenerateTriviaResponse, error)
 }
 
 type JudgeClient interface {

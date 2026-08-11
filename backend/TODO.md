@@ -48,6 +48,7 @@ Status note:
 - [x] Create migration for prediction_answers.
 - [x] Create migration for rounds.
 - [x] Persist validated, versioned trivia solutions and integrity hashes on rounds.
+- [x] Add reviewed five-round Open/Choice Trivia banks and atomic `trivia-v1` provider generation with validated fallback.
 - [x] Create migration for guesses.
 - [x] Create migration for score_events.
 - [x] Add indexes for room code, game id, round id, player id.

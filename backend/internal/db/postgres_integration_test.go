@@ -24,6 +24,58 @@ type semanticJudgeClient struct {
 	*llm.StaticModelClient
 }
 
+func TestPostgresGeneratesFiveUniqueOfflineTriviaRoundsPerKind(t *testing.T) {
+	pool := integrationPool(t)
+	ctx := context.Background()
+	for _, kind := range []models.GameKind{models.GameKindTriviaOpen, models.GameKindTriviaChoice} {
+		kind := kind
+		t.Run(string(kind), func(t *testing.T) {
+			repository := db.NewPostgresRoomRepository(pool)
+			service := game.NewRoomService(repository, nil)
+			room, host, err := service.CreateRoom(ctx, game.CreateRoomInput{RoomName: "Offline trivia", HostDisplayName: "TV", Settings: models.RoomSettings{
+				GameKind: kind, Mode: models.GameModeLivingRoom, TotalRounds: 5, AnswerTimerSeconds: 30, Locale: "en", PredictionModel: "gpt-5.6-luna",
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := service.JoinRoom(ctx, game.JoinRoomInput{Code: room.Code, DisplayName: "One"}); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := service.JoinRoom(ctx, game.JoinRoomInput{Code: room.Code, DisplayName: "Two"}); err != nil {
+				t.Fatal(err)
+			}
+			started, err := service.StartGame(ctx, game.StartGameInput{Code: room.Code, PlayerToken: host.Token})
+			if err != nil {
+				t.Fatal(err)
+			}
+			rounds, err := repository.ListGameRounds(ctx, started.CurrentGame.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(rounds) != 5 {
+				t.Fatalf("round count = %d, want 5", len(rounds))
+			}
+			seen := map[string]bool{}
+			for _, round := range rounds {
+				if seen[round.Question.Text] {
+					t.Fatalf("duplicate question %q", round.Question.Text)
+				}
+				seen[round.Question.Text] = true
+				if round.Board != nil || round.TriviaContent == nil || round.TriviaContent.Kind != kind {
+					t.Fatalf("unexpected round content: %#v", round)
+				}
+				if err := game.ValidateTriviaContent(*round.TriviaContent); err != nil {
+					t.Fatalf("invalid persisted content: %v", err)
+				}
+			}
+			reloaded, err := db.NewPostgresRoomRepository(pool).GetRoom(ctx, room.Code)
+			if err != nil || reloaded.CurrentGame.CurrentRound.TriviaContent == nil {
+				t.Fatalf("restart reconstruction: room=%#v err=%v", reloaded, err)
+			}
+		})
+	}
+}
+
 func (client semanticJudgeClient) JudgeGuess(_ context.Context, request llm.JudgeGuessRequest) (*llm.JudgeGuessResponse, error) {
 	answerID := request.Board.Answers[0].ID
 	return &llm.JudgeGuessResponse{
@@ -256,7 +308,7 @@ func TestTriviaContentMigrationAndPostgresRoundTrip(t *testing.T) {
 	path := migrationPath(t, "000015_trivia_content.sql")
 	executeMigrationSection(t, pool, path, false)
 	var payloadColumnExists bool
-	if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='rounds' AND column_name='trivia_content_jsonb')`).Scan(&payloadColumnExists); err != nil {
+	if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='rounds' AND column_name='trivia_content_jsonb')`).Scan(&payloadColumnExists); err != nil {
 		t.Fatal(err)
 	}
 	if payloadColumnExists {
@@ -532,7 +584,7 @@ func TestPostgresReplayAndPlayAgainIsolation(t *testing.T) {
 	ctx := context.Background()
 	room, host, err := service.CreateRoom(ctx, game.CreateRoomInput{
 		RoomName: "Replay isolation", HostDisplayName: "Host",
-		Settings: models.RoomSettings{GameKind: models.GameKindTriviaChoice, TotalRounds: 1, AnswerTimerSeconds: 30},
+		Settings: models.RoomSettings{GameKind: models.GameKindModelSays, TotalRounds: 1, AnswerTimerSeconds: 30},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -566,7 +618,7 @@ func TestPostgresReplayAndPlayAgainIsolation(t *testing.T) {
 	if err != nil || len(replay.Rounds) != 1 || replay.Rankings[0].PlayerID != player.ID {
 		t.Fatalf("reloaded replay=%#v err=%v", replay, err)
 	}
-	if replay.GameKind != models.GameKindTriviaChoice {
+	if replay.GameKind != models.GameKindModelSays {
 		t.Fatalf("reloaded replay game kind = %q", replay.GameKind)
 	}
 	fresh, freshHost, err := reloadedService.PlayAgain(ctx, game.PlayAgainInput{Code: room.Code, PlayerToken: host.Token})
@@ -576,7 +628,7 @@ func TestPostgresReplayAndPlayAgainIsolation(t *testing.T) {
 	if fresh.Code == room.Code || freshHost.Token == host.Token || fresh.CurrentGame != nil {
 		t.Fatal("fresh lifecycle reused original state")
 	}
-	if fresh.Settings.GameKind != models.GameKindTriviaChoice {
+	if fresh.Settings.GameKind != models.GameKindModelSays {
 		t.Fatalf("play again game kind = %q", fresh.Settings.GameKind)
 	}
 	_, freshPlayer, err := reloadedService.JoinRoom(ctx, game.JoinRoomInput{Code: fresh.Code, DisplayName: "Player"})
@@ -593,7 +645,7 @@ func TestPostgresReplayAndPlayAgainIsolation(t *testing.T) {
 		secondStarted.CurrentGame.Scoreboard[0].Score != 0 {
 		t.Fatal("second game inherited original game, round, guesses, or scores")
 	}
-	if secondStarted.CurrentGame.GameKind != models.GameKindTriviaChoice {
+	if secondStarted.CurrentGame.GameKind != models.GameKindModelSays {
 		t.Fatalf("restarted game kind = %q", secondStarted.CurrentGame.GameKind)
 	}
 	secondAnswer := secondStarted.CurrentGame.CurrentRound.Board.Answers[0]
