@@ -102,6 +102,7 @@ type SubmitGuessInput struct {
 	RoundID     string
 	PlayerToken string
 	Answer      string
+	OptionID    string
 }
 
 type RevealRoundInput struct {
@@ -138,6 +139,7 @@ type OverrideMatchInput struct {
 	GuessID                   string
 	PlayerToken               string
 	MatchedPredictionAnswerID *string
+	Correct                   *bool
 	JudgeSuggestionID         string
 }
 
@@ -172,6 +174,7 @@ type GuessSubmission struct {
 	PlayerID          string
 	PlayerDisplayName string
 	RawAnswer         string
+	SelectedOptionID  string
 	CreatedAt         time.Time
 	ScoreEventID      string
 }
@@ -179,6 +182,7 @@ type GuessSubmission struct {
 type GuessOverride struct {
 	GuessID                   string
 	MatchedPredictionAnswerID *string
+	Correct                   *bool
 	ScoreEventID              string
 	CreatedAt                 time.Time
 	JudgeSuggestionID         string
@@ -544,9 +548,7 @@ func (service *RoomService) SubmitGuess(ctx context.Context, input SubmitGuessIn
 	}
 	roundID := strings.TrimSpace(input.RoundID)
 	answer := strings.TrimSpace(input.Answer)
-	if validateBoundedText(answer, 1, 120) != nil {
-		return models.Room{}, ErrAnswerInvalid
-	}
+	optionID := strings.TrimSpace(input.OptionID)
 
 	room, err := service.repository.GetRoom(ctx, code)
 	if err != nil {
@@ -568,6 +570,20 @@ func (service *RoomService) SubmitGuess(ctx context.Context, input SubmitGuessIn
 	if round.Status != models.RoundStatusAnswering {
 		return models.Room{}, ErrRoundNotAcceptingGuesses
 	}
+	switch room.CurrentGame.GameKind {
+	case models.GameKindTriviaOpen:
+		if validateBoundedText(answer, 1, 120) != nil || optionID != "" {
+			return models.Room{}, ErrAnswerInvalid
+		}
+	case models.GameKindTriviaChoice:
+		if answer != "" || validateBoundedText(optionID, 1, maxTriviaOptionIDRunes) != nil || round.TriviaContent == nil || !triviaOptionExists(round.TriviaContent, optionID) {
+			return models.Room{}, ErrAnswerInvalid
+		}
+	default:
+		if validateBoundedText(answer, 1, 120) != nil || optionID != "" {
+			return models.Room{}, ErrAnswerInvalid
+		}
+	}
 	if room.Settings.Mode == models.GameModeSequential {
 		if round.CurrentTurnIndex == nil || *round.CurrentTurnIndex >= len(round.TurnOrder) || round.TurnOrder[*round.CurrentTurnIndex] != player.ID {
 			return models.Room{}, ErrNotPlayersTurn
@@ -582,8 +598,8 @@ func (service *RoomService) SubmitGuess(ctx context.Context, input SubmitGuessIn
 			return models.Room{}, ErrGuessAlreadySubmitted
 		}
 	}
-	if round.Board == nil {
-		return models.Room{}, fmt.Errorf("prediction board missing for round")
+	if round.Board == nil && round.TriviaContent == nil {
+		return models.Room{}, fmt.Errorf("round content missing")
 	}
 
 	updated, err := service.repository.SubmitGuess(ctx, code, round.ID, GuessSubmission{
@@ -591,6 +607,7 @@ func (service *RoomService) SubmitGuess(ctx context.Context, input SubmitGuessIn
 		PlayerID:          player.ID,
 		PlayerDisplayName: player.DisplayName,
 		RawAnswer:         answer,
+		SelectedOptionID:  optionID,
 		CreatedAt:         now,
 		ScoreEventID:      newID(),
 	}, service.clock)
@@ -608,7 +625,7 @@ func (service *RoomService) SubmitGuess(ctx context.Context, input SubmitGuessIn
 			break
 		}
 	}
-	if submitted.ID == "" || submitted.MatchedPredictionAnswerID != nil {
+	if room.CurrentGame.GameKind != models.GameKindModelSays || submitted.ID == "" || submitted.MatchedPredictionAnswerID != nil {
 		return updated, nil
 	}
 	if err := service.evaluateSemanticMiss(ctx, updated, submitted); err != nil {
@@ -840,6 +857,7 @@ func (service *RoomService) GetReplay(ctx context.Context, replayID string) (mod
 		for _, guess := range round.Guesses {
 			replayRound.Guesses = append(replayRound.Guesses, models.ReplayGuess{
 				PlayerDisplayName: guess.PlayerDisplayName, RawAnswer: guess.RawAnswer,
+				SelectedOptionID: guess.SelectedOptionID, Correct: guess.Correct,
 				MatchedPredictionAnswerID: guess.MatchedPredictionAnswerID,
 				ScoreAwarded:              guess.ScoreAwarded, Duplicate: guess.Duplicate,
 			})
@@ -967,7 +985,14 @@ func (service *RoomService) OverrideMatch(ctx context.Context, input OverrideMat
 		return models.Room{}, ErrGuessNotFound
 	}
 
-	if input.MatchedPredictionAnswerID != nil {
+	trivia := room.CurrentGame.GameKind != models.GameKindModelSays
+	if trivia {
+		if input.Correct == nil || input.MatchedPredictionAnswerID != nil || strings.TrimSpace(input.JudgeSuggestionID) != "" {
+			return models.Room{}, ErrAnswerInvalid
+		}
+	} else if input.Correct != nil {
+		return models.Room{}, ErrAnswerInvalid
+	} else if input.MatchedPredictionAnswerID != nil {
 		_, ok := findPredictionAnswer(round.Board, *input.MatchedPredictionAnswerID)
 		if !ok {
 			return models.Room{}, ErrPredictionAnswerNotFound
@@ -1004,6 +1029,7 @@ func (service *RoomService) OverrideMatch(ctx context.Context, input OverrideMat
 	updated, err := service.repository.OverrideGuess(ctx, code, round.ID, GuessOverride{
 		GuessID:                   guessID,
 		MatchedPredictionAnswerID: input.MatchedPredictionAnswerID,
+		Correct:                   input.Correct,
 		ScoreEventID:              newID(),
 		CreatedAt:                 service.clock.Now(),
 		JudgeSuggestionID:         suggestionID,
@@ -1489,6 +1515,44 @@ func ResolveGuess(submission GuessSubmission, answers []models.PredictionAnswer,
 	}
 }
 
+func ResolveTriviaGuess(submission GuessSubmission, content *models.TriviaContent) (models.Guess, error) {
+	if content == nil || ValidateTriviaContent(*content) != nil {
+		return models.Guess{}, ErrGeneratedContentInvalid
+	}
+	correct := false
+	normalized := ""
+	if content.Kind == models.GameKindTriviaOpen {
+		normalized = normalizeAnswer(submission.RawAnswer)
+		for _, accepted := range append([]string{content.CanonicalAnswer}, content.AcceptedAliases...) {
+			if normalizeAnswer(accepted) == normalized {
+				correct = true
+				break
+			}
+		}
+	} else {
+		if !triviaOptionExists(content, submission.SelectedOptionID) {
+			return models.Guess{}, ErrAnswerInvalid
+		}
+		correct = submission.SelectedOptionID == content.CorrectOptionID
+	}
+	score := 0
+	if correct {
+		score = content.BaseScore
+	}
+	return models.Guess{ID: submission.ID, PlayerID: submission.PlayerID, PlayerDisplayName: submission.PlayerDisplayName,
+		RawAnswer: submission.RawAnswer, NormalizedAnswer: normalized, SelectedOptionID: submission.SelectedOptionID,
+		Correct: &correct, ScoreAwarded: score, Duplicate: false, CreatedAt: submission.CreatedAt}, nil
+}
+
+func triviaOptionExists(content *models.TriviaContent, id string) bool {
+	for _, option := range content.Options {
+		if option.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
 func ResolveOverride(override GuessOverride, board *models.PredictionBoard, guesses []models.Guess) (models.Guess, int, error) {
 	guess, ok := findGuess(guesses, override.GuessID)
 	if !ok {
@@ -1513,6 +1577,25 @@ func ResolveOverride(override GuessOverride, board *models.PredictionBoard, gues
 	guess.MatchedPredictionAnswerID = override.MatchedPredictionAnswerID
 	guess.ScoreAwarded = newScore
 	guess.Duplicate = duplicate
+	return guess, delta, nil
+}
+
+func ResolveTriviaOverride(override GuessOverride, content *models.TriviaContent, guesses []models.Guess) (models.Guess, int, error) {
+	guess, ok := findGuess(guesses, override.GuessID)
+	if !ok {
+		return models.Guess{}, 0, ErrGuessNotFound
+	}
+	if override.Correct == nil || content == nil {
+		return models.Guess{}, 0, ErrAnswerInvalid
+	}
+	newScore := 0
+	if *override.Correct {
+		newScore = content.BaseScore
+	}
+	delta := newScore - guess.ScoreAwarded
+	guess.Correct = override.Correct
+	guess.ScoreAwarded = newScore
+	guess.Duplicate = false
 	return guess, delta, nil
 }
 
@@ -1766,6 +1849,7 @@ func (service *RoomService) generateTriviaRoundWithClient(ctx context.Context, c
 		response.Question.CreatedAt = now
 	}
 	content := response.Content
+	content.BaseScore = TriviaBaseScore
 	content.AcceptedAliases = trimmedStrings(content.AcceptedAliases)
 	content.IntegrityHash = ComputeTriviaContentHash(content)
 	if err := ValidateTriviaContent(content); err != nil {

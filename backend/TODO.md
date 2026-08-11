@@ -55,6 +55,7 @@ Status note:
 - [x] Add unique constraint for room code.
 - [x] Add unique constraint to prevent duplicate player submissions per round.
 - [x] Add a database-enforced unique scoring claim per round and prediction answer.
+- [x] Persist typed trivia submissions, authoritative correctness, and independent multi-winner score events.
 - [ ] Add seed questions for local development.
 
 ## Phase 2 — Room and Lobby API

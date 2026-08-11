@@ -42,6 +42,8 @@ type Guess struct {
 	PlayerDisplayName         string    `json:"playerDisplayName"`
 	RawAnswer                 string    `json:"rawAnswer"`
 	NormalizedAnswer          string    `json:"normalizedAnswer"`
+	SelectedOptionID          string    `json:"selectedOptionId,omitempty"`
+	Correct                   *bool     `json:"correct,omitempty"`
 	MatchedPredictionAnswerID *string   `json:"matchedPredictionAnswerId,omitempty"`
 	ScoreAwarded              int       `json:"scoreAwarded"`
 	Duplicate                 bool      `json:"duplicate"`
@@ -235,6 +237,8 @@ type ReplayAnswer struct {
 type ReplayGuess struct {
 	PlayerDisplayName         string  `json:"playerDisplayName"`
 	RawAnswer                 string  `json:"rawAnswer"`
+	SelectedOptionID          string  `json:"selectedOptionId,omitempty"`
+	Correct                   *bool   `json:"correct,omitempty"`
 	MatchedPredictionAnswerID *string `json:"matchedPredictionAnswerId,omitempty"`
 	ScoreAwarded              int     `json:"scoreAwarded"`
 	Duplicate                 bool    `json:"duplicate"`

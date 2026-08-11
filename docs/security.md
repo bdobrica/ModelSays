@@ -24,7 +24,7 @@ The API applies in-process, fixed-window limits before room handlers run. Limits
 | Room creation floods | global client-IP and create-per-IP windows |
 | Room-code enumeration and session-token guessing | client-IP lookup/session windows; invalid rooms and credentials retain their existing non-secret errors |
 | Join floods or room-code targeting | join-per-IP and join-per-room windows |
-| Guess spam | client-IP, room, and player-token-hash guess windows; repository duplicate/cutoff checks remain authoritative |
+| Guess spam or forged trivia choices | client-IP, room, and player-token-hash guess windows; repository one-submission/cutoff checks remain authoritative; Choice Trivia accepts only frozen opaque option IDs |
 | Host mutation/token guessing | client-IP, room/action, and player-token-hash action windows plus existing host authorization |
 | Event connection exhaustion | client-IP and room connection-attempt windows plus `EVENT_MAX_CONNECTIONS` |
 | Provider-cost amplification | existing per-game call/cost budget plus global and per-room paid-call circuit breakers; denial makes no paid call and uses curated generation or deterministic misses |
@@ -32,6 +32,8 @@ The API applies in-process, fixed-window limits before room handlers run. Limits
 | Forwarded-header spoofing | forwarded identity is ignored unless the immediate peer is in `TRUSTED_PROXY_CIDRS`; malformed chains fail closed to the peer address |
 
 Rate limiting reduces brute force and resource exhaustion; it is not authentication. Player tokens remain bearer credentials and must be protected by TLS in a public deployment. Room codes are invitations, not secrets.
+
+Trivia solutions and correctness are server-owned secrets during answering. Public room projections omit canonical answers, aliases, correct option IDs, submitted text/options, correctness, and current-round score deltas until reveal. Choice labels are display data, never accepted as answer authority. Host trivia corrections are restricted to revealed rounds and create score-event deltas rather than rewriting frozen content or historical awards.
 
 ## Proxy trust
 

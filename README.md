@@ -279,6 +279,8 @@ After completion, the room exposes a random replay identifier. Anyone with its l
 
 For the MVP, matching is deterministic: Unicode letters and numbers are lowercased, punctuation is removed, and whitespace is collapsed. The result must exactly equal a similarly normalized canonical board answer or alias; accents remain significant, and no semantic or fuzzy inference is performed. A board is rejected if the same normalized phrase belongs to multiple answers. Only the earliest committed guess that claims a board answer receives its points. Later guesses matching that same answer are recorded as duplicates and score zero. After reveal, the host can correct a hit, miss, or disputed answer with an override.
 
+Trivia uses a separate correctness-first rule. Open Trivia compares the server-normalized submission only with the frozen canonical answer and explicit aliases. Choice Trivia accepts only one of the four opaque option IDs issued for that round; labels and unknown IDs are rejected. Every correct participant receives the round's fixed 100-point base award, regardless of submission order, while incorrect and unanswered submissions receive zero. Correctness, submissions, and current-round score changes stay private until reveal. After reveal, the host may mark a submission correct or incorrect; the correction appends an auditable score delta and never changes the frozen solution.
+
 This is ideal for:
 
 * parties;

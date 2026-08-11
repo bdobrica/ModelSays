@@ -397,7 +397,7 @@ func triviaJSONSchema(kind models.GameKind) map[string]any {
 			"category":        map[string]any{"type": "string", "minLength": 1, "maxLength": 80},
 			"canonicalAnswer": map[string]any{"type": "string", "minLength": 1, "maxLength": 120},
 			"acceptedAliases": map[string]any{"type": "array", "maxItems": 12, "items": map[string]any{"type": "string", "minLength": 1, "maxLength": 120}},
-			"baseScore":       map[string]any{"type": "integer", "minimum": 1, "maximum": 1000},
+			"baseScore":       map[string]any{"type": "integer", "minimum": 100, "maximum": 100},
 			"explanation":     map[string]any{"type": "string", "maxLength": 600},
 			"source":          map[string]any{"type": "string", "maxLength": 300},
 			"options":         map[string]any{"type": "array", "minItems": optionMin, "maxItems": optionMax, "items": option},

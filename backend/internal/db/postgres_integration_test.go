@@ -170,6 +170,95 @@ func TestPostgresAtomicAnswerClaimsAndReload(t *testing.T) {
 	}
 }
 
+func TestPostgresTriviaAwardsEveryCorrectPlayerExactlyOnce(t *testing.T) {
+	pool := integrationPool(t)
+	ctx := context.Background()
+	for _, kind := range []models.GameKind{models.GameKindTriviaOpen, models.GameKindTriviaChoice} {
+		t.Run(string(kind), func(t *testing.T) {
+			service := game.NewRoomService(db.NewPostgresRoomRepository(pool), nil)
+			room, host, err := service.CreateRoom(ctx, game.CreateRoomInput{RoomName: "Trivia scoring", HostDisplayName: "Host", Settings: models.RoomSettings{GameKind: kind, TotalRounds: 1, AnswerTimerSeconds: 30, Locale: "en"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, one, err := service.JoinRoom(ctx, game.JoinRoomInput{Code: room.Code, DisplayName: "One"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, two, err := service.JoinRoom(ctx, game.JoinRoomInput{Code: room.Code, DisplayName: "Two"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			started, err := service.StartGame(ctx, game.StartGameInput{Code: room.Code, PlayerToken: host.Token})
+			if err != nil {
+				t.Fatal(err)
+			}
+			round := started.CurrentGame.CurrentRound
+			input := func(player models.Player) game.SubmitGuessInput {
+				value := game.SubmitGuessInput{Code: room.Code, RoundID: round.ID, PlayerToken: player.Token}
+				if kind == models.GameKindTriviaOpen {
+					value.Answer = round.TriviaContent.CanonicalAnswer
+				} else {
+					value.OptionID = round.TriviaContent.CorrectOptionID
+				}
+				return value
+			}
+			results := make(chan error, 2)
+			start := make(chan struct{})
+			for _, player := range []models.Player{one, two} {
+				go func(p models.Player) { <-start; _, err := service.SubmitGuess(ctx, input(p)); results <- err }(player)
+			}
+			close(start)
+			for range 2 {
+				if err := <-results; err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := service.SubmitGuess(ctx, input(one)); !errors.Is(err, game.ErrGuessAlreadySubmitted) {
+				t.Fatalf("repeat error = %v", err)
+			}
+			reloaded, err := db.NewPostgresRoomRepository(pool).GetRoom(ctx, room.Code)
+			if err != nil {
+				t.Fatal(err)
+			}
+			base := round.TriviaContent.BaseScore
+			if totalScore(reloaded) != 2*base {
+				t.Fatalf("score = %d, want %d", totalScore(reloaded), 2*base)
+			}
+			for _, guess := range reloaded.CurrentGame.CurrentRound.Guesses {
+				if guess.Correct == nil || !*guess.Correct || guess.ScoreAwarded != base || guess.Duplicate {
+					t.Fatalf("guess = %#v", guess)
+				}
+			}
+			var events, total int
+			if err := pool.QueryRow(ctx, `SELECT COUNT(*), COALESCE(SUM(delta),0) FROM score_events WHERE round_id=$1 AND reason='trivia_correct_answer'`, round.ID).Scan(&events, &total); err != nil {
+				t.Fatal(err)
+			}
+			if events != 2 || total != 2*base {
+				t.Fatalf("events=%d total=%d", events, total)
+			}
+			revealed, err := service.RevealRound(ctx, game.RevealRoundInput{Code: room.Code, RoundID: round.ID, PlayerToken: host.Token})
+			if err != nil {
+				t.Fatal(err)
+			}
+			incorrect := false
+			overridden, err := service.OverrideMatch(ctx, game.OverrideMatchInput{Code: room.Code, RoundID: round.ID, GuessID: revealed.CurrentGame.CurrentRound.Guesses[0].ID, PlayerToken: host.Token, Correct: &incorrect})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if totalScore(overridden) != base {
+				t.Fatalf("override score = %d, want %d", totalScore(overridden), base)
+			}
+			var overrideDelta, overrideEvents int
+			if err := pool.QueryRow(ctx, `SELECT COALESCE(SUM(delta),0), COUNT(*) FROM score_events WHERE round_id=$1 AND reason='host_override_trivia_correctness'`, round.ID).Scan(&overrideDelta, &overrideEvents); err != nil {
+				t.Fatal(err)
+			}
+			if overrideEvents != 1 || overrideDelta != -base {
+				t.Fatalf("override events=%d delta=%d", overrideEvents, overrideDelta)
+			}
+		})
+	}
+}
+
 func TestPostgresTeamTotalsEqualScoreEventsAfterConcurrentPlayAndReload(t *testing.T) {
 	pool := integrationPool(t)
 	service := game.NewRoomService(db.NewPostgresRoomRepository(pool), nil)

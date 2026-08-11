@@ -12,13 +12,13 @@ import (
 )
 
 const (
+	TriviaBaseScore           = 100
 	triviaChoiceCount         = 4
 	maxTriviaAliases          = 12
 	maxTriviaAnswerRunes      = 120
 	maxTriviaOptionRunes      = 120
 	maxTriviaExplanationRunes = 600
 	maxTriviaSourceRunes      = 300
-	maxTriviaBaseScore        = 1000
 	maxTriviaOptionIDRunes    = 80
 )
 
@@ -55,8 +55,8 @@ func ValidateTriviaContent(content models.TriviaContent) error {
 	if err := boundedRequired("canonical answer", content.CanonicalAnswer, maxTriviaAnswerRunes); err != nil {
 		return err
 	}
-	if content.BaseScore < 1 || content.BaseScore > maxTriviaBaseScore {
-		return triviaInvalid("base score must be between 1 and %d", maxTriviaBaseScore)
+	if content.BaseScore != TriviaBaseScore {
+		return triviaInvalid("base score must be %d", TriviaBaseScore)
 	}
 	if utf8.RuneCountInString(content.Explanation) > maxTriviaExplanationRunes {
 		return triviaInvalid("explanation exceeds %d characters", maxTriviaExplanationRunes)

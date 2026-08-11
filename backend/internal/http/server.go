@@ -56,6 +56,7 @@ type startGameRequest struct {
 type submitGuessRequest struct {
 	PlayerToken string `json:"playerToken"`
 	Answer      string `json:"answer"`
+	OptionID    string `json:"optionId"`
 }
 
 type revealRoundRequest struct {
@@ -89,6 +90,7 @@ type overrideMatchRequest struct {
 	RoundID                   string  `json:"roundId"`
 	GuessID                   string  `json:"guessId"`
 	MatchedPredictionAnswerID *string `json:"matchedPredictionAnswerId"`
+	Correct                   *bool   `json:"correct"`
 	JudgeSuggestionID         string  `json:"judgeSuggestionId"`
 }
 
@@ -633,7 +635,7 @@ func (server *Server) handleSubmitGuess(writer http.ResponseWriter, request *htt
 		writeError(writer, http.StatusBadRequest, "invalid JSON payload")
 		return
 	}
-	if server.abuse.Moderated(payload.Answer) {
+	if payload.Answer != "" && server.abuse.Moderated(payload.Answer) {
 		writeError(writer, http.StatusUnprocessableEntity, "answer must be party-safe")
 		return
 	}
@@ -646,6 +648,7 @@ func (server *Server) handleSubmitGuess(writer http.ResponseWriter, request *htt
 		RoundID:     roundID,
 		PlayerToken: payload.PlayerToken,
 		Answer:      payload.Answer,
+		OptionID:    payload.OptionID,
 	})
 	if err != nil {
 		server.writeDomainError(writer, err)
@@ -735,6 +738,7 @@ func (server *Server) handleOverrideMatch(writer http.ResponseWriter, request *h
 		GuessID:                   payload.GuessID,
 		PlayerToken:               payload.PlayerToken,
 		MatchedPredictionAnswerID: payload.MatchedPredictionAnswerID,
+		Correct:                   payload.Correct,
 		JudgeSuggestionID:         payload.JudgeSuggestionID,
 	})
 	if err != nil {
@@ -1015,6 +1019,7 @@ func projectRoom(room models.Room) publicRoom {
 			projectedGame.CurrentRound.Guesses = append(projectedGame.CurrentRound.Guesses, models.Guess{
 				ID: guess.ID, PlayerID: guess.PlayerID, PlayerDisplayName: guess.PlayerDisplayName,
 				RawAnswer: guess.RawAnswer, CreatedAt: guess.CreatedAt,
+				SelectedOptionID: guess.SelectedOptionID,
 			})
 		}
 	}

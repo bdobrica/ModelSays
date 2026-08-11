@@ -460,6 +460,8 @@ Room settings persist `gameKind` independently from `mode`. The supported matrix
 
 Trivia round solutions use the version-1 JSONB contract recorded in ADR-008. It freezes the canonical answer, ordered explicit aliases, base score, optional explanation/source, and—only for Choice Trivia—four ordered opaque option IDs/labels plus one correct option ID. Validation bounds every field and rejects ambiguous normalized aliases/labels, duplicate option IDs, incorrect option cardinality, and a correct ID outside the option set. SHA-256 covers the complete payload; reconstruction verifies both the embedded value and the separately persisted hash. During answering, REST responses expose only version/kind/base score and Choice Trivia's ordered option IDs/labels. Canonical answers, aliases, correct IDs, explanation, source, and hashes are absent until reveal; SSE remains content-free and completed replays receive the revealed projection.
 
+Guess submission accepts `{"playerToken":"...","answer":"..."}` for Model Says and Open Trivia, or `{"playerToken":"...","optionId":"..."}` for Choice Trivia. The forms are mutually exclusive. Choice labels and option IDs not frozen for the requested round return HTTP 400. One submission per player, authenticated room identity, and the server deadline remain authoritative for every kind. Trivia submission values, correctness, and current-round awards are absent from answering responses.
+
 Room creation accepts individual simultaneous, team, or sequential mode, 1–5 rounds, a 15–120 second answer timer, locale `en`, and the prediction model configured by `DEFAULT_PREDICTION_MODEL` (default `gpt-5.6-luna`). Omitted settings retain the defaults of five rounds and 45 seconds. Room names must contain 3–48 Unicode characters and display names 2–24; control characters are rejected. Route room codes must be six characters from the invite-code alphabet.
 
 Joining creates a new player only while the room is in the lobby. Once start wins the room lock, later joins return HTTP `409` with `game has started; new players cannot join`. Player-token mutations resolve the token only within the requested room and operate only on that room's current requested round.
@@ -503,6 +505,8 @@ Suggestions and their provider audits are stored separately from guesses and sco
 
 Submission scoring is authoritative inside the repository transaction. The transaction locks the round, resolves the match against its frozen board, and checks existing positive-scoring claims before inserting the guess and score event together. Only the earliest transaction to commit a claim receives the answer score; later equivalent guesses remain visible as duplicates and score zero. Host overrides use the same locked claim rule and append an auditable score event when they change a score.
 
+Trivia scoring uses that transaction without the exclusive-claim rule. Open Trivia compares normalized text only with the frozen canonical answer and aliases; Choice Trivia validates and compares the frozen opaque option ID. Every correct player receives the frozen base score, trivia guesses are never duplicates, and incorrect guesses receive zero. After reveal, the override endpoint accepts `correct: true|false` for trivia instead of `matchedPredictionAnswerId`; a changed award appends an auditable score delta without mutating the frozen solution.
+
 ### PostgreSQL integration tests
 
 Set `TEST_DATABASE_URL` to a PostgreSQL database where the test user may create schemas, then run:
@@ -512,7 +516,7 @@ cd backend
 TEST_DATABASE_URL='postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable' go test -race ./...
 ```
 
-Each integration test creates a unique schema, applies all migrations, and removes the schema afterward. The suite includes concurrency and migration checks plus a two-round HTTP lifecycle with a host and two players covering create, joins, start, shared board identity, hidden answering state, session recovery, equivalent-answer duplicate scoring, deadline rejection, reveal, override, next round, completion, and reload through a reconstructed repository and service. It always uses curated content and never needs an OpenAI key. Without `TEST_DATABASE_URL`, PostgreSQL integration tests are skipped while unit tests still run.
+Each integration test creates a unique schema, applies all migrations, and removes the schema afterward. The suite includes concurrency and migration checks, multi-winner Open/Choice Trivia scoring and reconstruction, plus a two-round Model Says HTTP lifecycle covering secrecy, duplicate scoring, deadline rejection, reveal, override, completion, and reload. It always uses curated content and never needs an OpenAI key. Without `TEST_DATABASE_URL`, PostgreSQL integration tests are skipped while unit tests still run.
 
 ## Testing Priorities
 

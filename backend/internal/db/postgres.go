@@ -780,7 +780,8 @@ func (repository *PostgresRoomRepository) SubmitGuess(ctx context.Context, code 
 
 	var lockedRoundID string
 	var roundStatus models.RoundStatus
-	var boardID string
+	var boardID *string
+	var triviaJSON []byte
 	var gameID string
 	var answerPhaseEndsAt time.Time
 	var mode models.GameMode
@@ -791,13 +792,13 @@ func (repository *PostgresRoomRepository) SubmitGuess(ctx context.Context, code 
 		-- lock round for guess submission
 		SELECT r.id, r.status, r.board_id, g.id, r.answer_phase_ends_at, g.mode,
 		       r.turn_order_jsonb, r.current_turn_index,
-		       COALESCE((rooms.settings_jsonb->>'answerTimerSeconds')::integer, 45)
+		       COALESCE((rooms.settings_jsonb->>'answerTimerSeconds')::integer, 45), r.trivia_content_jsonb
 		FROM rounds r
 		INNER JOIN games g ON g.id = r.game_id
 		INNER JOIN rooms ON rooms.code = g.room_code
 		WHERE g.room_code = $1 AND r.id = $2
 		FOR UPDATE
-	`, code, roundID).Scan(&lockedRoundID, &roundStatus, &boardID, &gameID, &answerPhaseEndsAt, &mode, &turnOrder, &currentTurnIndex, &timerSeconds)
+	`, code, roundID).Scan(&lockedRoundID, &roundStatus, &boardID, &gameID, &answerPhaseEndsAt, &mode, &turnOrder, &currentTurnIndex, &timerSeconds, &triviaJSON)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return models.Room{}, game.ErrRoundNotFound
@@ -816,20 +817,35 @@ func (repository *PostgresRoomRepository) SubmitGuess(ctx context.Context, code 
 		return models.Room{}, game.ErrNotPlayersTurn
 	}
 
-	board, err := repository.loadBoard(ctx, tx, boardID)
-	if err != nil {
-		return models.Room{}, err
-	}
 	guesses, err := repository.loadGuesses(ctx, tx, lockedRoundID)
 	if err != nil {
 		return models.Room{}, err
 	}
-	guess := game.ResolveGuess(submission, board.Answers, guesses)
+	var guess models.Guess
+	if len(triviaJSON) > 0 {
+		content, decodeErr := decodeTriviaContent(triviaJSON)
+		if decodeErr != nil {
+			return models.Room{}, decodeErr
+		}
+		guess, err = game.ResolveTriviaGuess(submission, content)
+		if err != nil {
+			return models.Room{}, err
+		}
+	} else {
+		if boardID == nil {
+			return models.Room{}, game.ErrPredictionAnswerNotFound
+		}
+		board, loadErr := repository.loadBoard(ctx, tx, *boardID)
+		if loadErr != nil {
+			return models.Room{}, loadErr
+		}
+		guess = game.ResolveGuess(submission, board.Answers, guesses)
+	}
 
 	_, err = tx.Exec(ctx, `
-		INSERT INTO guesses (id, round_id, player_id, raw_answer, normalized_answer, matched_prediction_answer_id, score_awarded, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-	`, guess.ID, lockedRoundID, guess.PlayerID, guess.RawAnswer, guess.NormalizedAnswer, guess.MatchedPredictionAnswerID, guess.ScoreAwarded, guess.CreatedAt)
+		INSERT INTO guesses (id, round_id, player_id, raw_answer, normalized_answer, matched_prediction_answer_id, score_awarded, created_at, selected_option_id, correct)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+	`, guess.ID, lockedRoundID, guess.PlayerID, guess.RawAnswer, guess.NormalizedAnswer, guess.MatchedPredictionAnswerID, guess.ScoreAwarded, guess.CreatedAt, nullableText(guess.SelectedOptionID), guess.Correct)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return models.Room{}, game.ErrGuessAlreadySubmitted
@@ -842,7 +858,7 @@ func (repository *PostgresRoomRepository) SubmitGuess(ctx context.Context, code 
 		_, err = tx.Exec(ctx, `
 			INSERT INTO score_events (id, game_id, round_id, player_id, delta, reason, created_at)
 			VALUES ($1, $2, $3, $4, $5, $6, $7)
-		`, submission.ScoreEventID, gameID, lockedRoundID, submission.PlayerID, guess.ScoreAwarded, "guess_matched_prediction_answer", submission.CreatedAt)
+		`, submission.ScoreEventID, gameID, lockedRoundID, submission.PlayerID, guess.ScoreAwarded, scoreReason(guess), submission.CreatedAt)
 		if err != nil {
 			return models.Room{}, fmt.Errorf("insert score event: %w", err)
 		}
@@ -1132,16 +1148,17 @@ func (repository *PostgresRoomRepository) OverrideGuess(ctx context.Context, cod
 	}
 	defer tx.Rollback(ctx)
 
-	var boardID string
+	var boardID *string
+	var triviaJSON []byte
 	var gameID string
 	var roundStatus models.RoundStatus
 	err = tx.QueryRow(ctx, `
-		SELECT r.board_id, game.id, r.status
+		SELECT r.board_id, game.id, r.status, r.trivia_content_jsonb
 		FROM rounds r
 		INNER JOIN games game ON game.id = r.game_id
 		WHERE r.id = $1 AND game.room_code = $2
 		FOR UPDATE
-	`, roundID, code).Scan(&boardID, &gameID, &roundStatus)
+	`, roundID, code).Scan(&boardID, &gameID, &roundStatus, &triviaJSON)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return models.Room{}, game.ErrRoundNotFound
@@ -1152,26 +1169,39 @@ func (repository *PostgresRoomRepository) OverrideGuess(ctx context.Context, cod
 		return models.Room{}, game.ErrRoundNotRevealed
 	}
 
-	board, err := repository.loadBoard(ctx, tx, boardID)
-	if err != nil {
-		return models.Room{}, err
-	}
 	guesses, err := repository.loadGuesses(ctx, tx, roundID)
 	if err != nil {
 		return models.Room{}, err
 	}
-	guess, delta, err := game.ResolveOverride(override, board, guesses)
+	var guess models.Guess
+	var delta int
+	if len(triviaJSON) > 0 {
+		content, decodeErr := decodeTriviaContent(triviaJSON)
+		if decodeErr != nil {
+			return models.Room{}, decodeErr
+		}
+		guess, delta, err = game.ResolveTriviaOverride(override, content, guesses)
+	} else {
+		if boardID == nil {
+			return models.Room{}, game.ErrPredictionAnswerNotFound
+		}
+		board, loadErr := repository.loadBoard(ctx, tx, *boardID)
+		if loadErr != nil {
+			return models.Room{}, loadErr
+		}
+		guess, delta, err = game.ResolveOverride(override, board, guesses)
+	}
 	if err != nil {
 		return models.Room{}, err
 	}
 
 	commandTag, err := tx.Exec(ctx, `
 		UPDATE guesses g
-		SET matched_prediction_answer_id = $4, score_awarded = $5
+		SET matched_prediction_answer_id = $4, score_awarded = $5, correct = $6
 		FROM rounds r
 		INNER JOIN games game ON game.id = r.game_id
 		WHERE g.id = $1 AND g.round_id = r.id AND r.id = $2 AND game.room_code = $3
-	`, guess.ID, roundID, code, guess.MatchedPredictionAnswerID, guess.ScoreAwarded)
+	`, guess.ID, roundID, code, guess.MatchedPredictionAnswerID, guess.ScoreAwarded, guess.Correct)
 	if err != nil {
 		return models.Room{}, fmt.Errorf("update overridden guess: %w", err)
 	}
@@ -1183,7 +1213,7 @@ func (repository *PostgresRoomRepository) OverrideGuess(ctx context.Context, cod
 		_, err = tx.Exec(ctx, `
 			INSERT INTO score_events (id, game_id, round_id, player_id, delta, reason, created_at)
 			VALUES ($1, $2, $3, $4, $5, $6, $7)
-		`, override.ScoreEventID, gameID, roundID, guess.PlayerID, delta, "host_override_match", override.CreatedAt)
+		`, override.ScoreEventID, gameID, roundID, guess.PlayerID, delta, overrideReason(guess), override.CreatedAt)
 		if err != nil {
 			return models.Room{}, fmt.Errorf("insert override score event: %w", err)
 		}
@@ -1518,7 +1548,7 @@ func (repository *PostgresRoomRepository) loadBoard(ctx context.Context, querier
 
 func (repository *PostgresRoomRepository) loadGuesses(ctx context.Context, querier queryRower, roundID string) ([]models.Guess, error) {
 	rows, err := querier.Query(ctx, `
-		SELECT g.id, g.player_id, p.display_name, g.raw_answer, g.normalized_answer, g.matched_prediction_answer_id, g.score_awarded, g.created_at
+		SELECT g.id, g.player_id, p.display_name, g.raw_answer, g.normalized_answer, g.matched_prediction_answer_id, g.score_awarded, g.created_at, g.selected_option_id, g.correct
 		FROM guesses g
 		INNER JOIN players p ON p.id = g.player_id
 		WHERE g.round_id = $1
@@ -1532,8 +1562,12 @@ func (repository *PostgresRoomRepository) loadGuesses(ctx context.Context, queri
 	guesses := make([]models.Guess, 0)
 	for rows.Next() {
 		var guess models.Guess
-		if err := rows.Scan(&guess.ID, &guess.PlayerID, &guess.PlayerDisplayName, &guess.RawAnswer, &guess.NormalizedAnswer, &guess.MatchedPredictionAnswerID, &guess.ScoreAwarded, &guess.CreatedAt); err != nil {
+		var selectedOptionID *string
+		if err := rows.Scan(&guess.ID, &guess.PlayerID, &guess.PlayerDisplayName, &guess.RawAnswer, &guess.NormalizedAnswer, &guess.MatchedPredictionAnswerID, &guess.ScoreAwarded, &guess.CreatedAt, &selectedOptionID, &guess.Correct); err != nil {
 			return nil, fmt.Errorf("scan guess: %w", err)
+		}
+		if selectedOptionID != nil {
+			guess.SelectedOptionID = *selectedOptionID
 		}
 		if guess.MatchedPredictionAnswerID != nil && guess.ScoreAwarded == 0 {
 			guess.Duplicate = true
@@ -1661,6 +1695,25 @@ func markSubmittedPlayers(scoreboard []models.ScoreboardEntry, guesses []models.
 func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+}
+
+func nullableText(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
+}
+func scoreReason(guess models.Guess) string {
+	if guess.Correct != nil {
+		return "trivia_correct_answer"
+	}
+	return "guess_matched_prediction_answer"
+}
+func overrideReason(guess models.Guess) string {
+	if guess.Correct != nil {
+		return "host_override_trivia_correctness"
+	}
+	return "host_override_match"
 }
 
 func normalizeDisplayName(displayName string) string {

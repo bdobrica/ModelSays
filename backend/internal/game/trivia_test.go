@@ -3,6 +3,7 @@ package game
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/bogdandobrica/modelsays/backend/internal/models"
 )
@@ -19,6 +20,62 @@ func validTriviaContent(kind models.GameKind) models.TriviaContent {
 	}
 	content.IntegrityHash = ComputeTriviaContentHash(content)
 	return content
+}
+
+func TestResolveOpenTriviaGuessUsesOnlyFrozenNormalizedAnswers(t *testing.T) {
+	content := validTriviaContent(models.GameKindTriviaOpen)
+	tests := []struct {
+		answer  string
+		correct bool
+	}{
+		{"PARIS!!!", true}, {"  City\tof Paris ", true}, {"París", false}, {"Paris France", false}, {"Lyon", false},
+	}
+	for _, test := range tests {
+		guess, err := ResolveTriviaGuess(GuessSubmission{ID: "g", PlayerID: "p", RawAnswer: test.answer, CreatedAt: time.Now()}, &content)
+		if err != nil || guess.Correct == nil || *guess.Correct != test.correct {
+			t.Fatalf("answer %q: guess=%#v err=%v", test.answer, guess, err)
+		}
+		wantScore := 0
+		if test.correct {
+			wantScore = content.BaseScore
+		}
+		if guess.ScoreAwarded != wantScore || guess.Duplicate {
+			t.Fatalf("answer %q score=%d duplicate=%v", test.answer, guess.ScoreAwarded, guess.Duplicate)
+		}
+	}
+}
+
+func TestResolveChoiceTriviaGuessRequiresFrozenOptionID(t *testing.T) {
+	content := validTriviaContent(models.GameKindTriviaChoice)
+	for _, test := range []struct {
+		id      string
+		correct bool
+	}{{"opt-a", true}, {"opt-b", false}} {
+		guess, err := ResolveTriviaGuess(GuessSubmission{ID: "g", PlayerID: "p", SelectedOptionID: test.id}, &content)
+		if err != nil || guess.Correct == nil || *guess.Correct != test.correct || guess.Duplicate {
+			t.Fatalf("option %q: %#v err=%v", test.id, guess, err)
+		}
+	}
+	if _, err := ResolveTriviaGuess(GuessSubmission{SelectedOptionID: "Paris"}, &content); err != ErrAnswerInvalid {
+		t.Fatalf("label error = %v", err)
+	}
+	if _, err := ResolveTriviaGuess(GuessSubmission{SelectedOptionID: "unknown"}, &content); err != ErrAnswerInvalid {
+		t.Fatalf("unknown error = %v", err)
+	}
+}
+
+func TestResolveTriviaOverrideCreatesAuditableDeltaWithoutChangingContent(t *testing.T) {
+	content := validTriviaContent(models.GameKindTriviaOpen)
+	wrong := false
+	guess := models.Guess{ID: "g", PlayerID: "p", Correct: &wrong}
+	correct := true
+	updated, delta, err := ResolveTriviaOverride(GuessOverride{GuessID: "g", Correct: &correct}, &content, []models.Guess{guess})
+	if err != nil || delta != content.BaseScore || updated.Correct == nil || !*updated.Correct {
+		t.Fatalf("override=%#v delta=%d err=%v", updated, delta, err)
+	}
+	if content.CanonicalAnswer != "Paris" {
+		t.Fatal("override changed frozen content")
+	}
 }
 
 func TestValidateTriviaContentBoundaries(t *testing.T) {

@@ -231,11 +231,19 @@ func (repository *InMemoryRoomRepository) SubmitGuess(_ context.Context, code st
 			return models.Room{}, ErrGuessAlreadySubmitted
 		}
 	}
-	if round.Board == nil {
-		return models.Room{}, ErrPredictionAnswerNotFound
+	var guess models.Guess
+	if round.TriviaContent != nil {
+		var err error
+		guess, err = ResolveTriviaGuess(submission, round.TriviaContent)
+		if err != nil {
+			return models.Room{}, err
+		}
+	} else {
+		if round.Board == nil {
+			return models.Room{}, ErrPredictionAnswerNotFound
+		}
+		guess = ResolveGuess(submission, round.Board.Answers, round.Guesses)
 	}
-
-	guess := ResolveGuess(submission, round.Board.Answers, round.Guesses)
 	round.Guesses = append(round.Guesses, guess)
 	applyGuessToScoreboard(room.CurrentGame, guess)
 	if room.CurrentGame.Mode == models.GameModeSequential {
@@ -411,7 +419,14 @@ func (repository *InMemoryRoomRepository) OverrideGuess(_ context.Context, code 
 	}
 
 	round := room.CurrentGame.CurrentRound
-	guess, delta, err := ResolveOverride(override, round.Board, round.Guesses)
+	var guess models.Guess
+	var delta int
+	var err error
+	if round.TriviaContent != nil {
+		guess, delta, err = ResolveTriviaOverride(override, round.TriviaContent, round.Guesses)
+	} else {
+		guess, delta, err = ResolveOverride(override, round.Board, round.Guesses)
+	}
 	if err != nil {
 		return models.Room{}, err
 	}
