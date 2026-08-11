@@ -807,7 +807,7 @@ func (service *RoomService) GetReplay(ctx context.Context, replayID string) (mod
 		return summary.TeamRankings[i].Score > summary.TeamRankings[j].Score
 	})
 	for _, round := range rounds {
-		if round.Status != models.RoundStatusRevealed || round.Board == nil {
+		if round.Status != models.RoundStatusRevealed || (round.Board == nil && round.TriviaContent == nil) {
 			return models.ReplaySummary{}, ErrReplayNotReady
 		}
 		deltas := make(map[string]int)
@@ -822,10 +822,15 @@ func (service *RoomService) GetReplay(ctx context.Context, replayID string) (mod
 		}
 		replayRound := models.ReplayRound{
 			RoundIndex: round.RoundIndex, Question: round.Question.Text,
-			Board:   make([]models.ReplayAnswer, 0, len(round.Board.Answers)),
-			Guesses: make([]models.ReplayGuess, 0, len(round.Guesses)), ScoreDeltas: entries,
+			TriviaContent: ProjectTriviaContent(round.TriviaContent, true),
+			Board:         make([]models.ReplayAnswer, 0),
+			Guesses:       make([]models.ReplayGuess, 0, len(round.Guesses)), ScoreDeltas: entries,
 		}
-		for _, answer := range round.Board.Answers {
+		var answers []models.PredictionAnswer
+		if round.Board != nil {
+			answers = round.Board.Answers
+		}
+		for _, answer := range answers {
 			replayRound.Board = append(replayRound.Board, models.ReplayAnswer{
 				ID: answer.ID, CanonicalAnswer: answer.CanonicalAnswer, Rank: answer.Rank, Score: answer.Score,
 			})

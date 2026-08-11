@@ -80,6 +80,42 @@ type Question struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
+const TriviaContentVersion = 1
+
+type TriviaOption struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
+// TriviaContent is the immutable, server-owned solution frozen for a trivia round.
+// IntegrityHash is derived from every other field and must be verified after loading.
+type TriviaContent struct {
+	Version         int            `json:"version"`
+	Kind            GameKind       `json:"kind"`
+	CanonicalAnswer string         `json:"canonicalAnswer"`
+	AcceptedAliases []string       `json:"acceptedAliases"`
+	BaseScore       int            `json:"baseScore"`
+	Explanation     string         `json:"explanation,omitempty"`
+	Source          string         `json:"source,omitempty"`
+	Options         []TriviaOption `json:"options,omitempty"`
+	CorrectOptionID string         `json:"correctOptionId,omitempty"`
+	IntegrityHash   string         `json:"integrityHash"`
+}
+
+// PublicTriviaContent is safe during answering. Solution fields are populated only
+// once the round reaches the existing reveal boundary.
+type PublicTriviaContent struct {
+	Version         int            `json:"version"`
+	Kind            GameKind       `json:"kind"`
+	BaseScore       int            `json:"baseScore"`
+	Options         []TriviaOption `json:"options,omitempty"`
+	CanonicalAnswer string         `json:"canonicalAnswer,omitempty"`
+	AcceptedAliases []string       `json:"acceptedAliases,omitempty"`
+	CorrectOptionID string         `json:"correctOptionId,omitempty"`
+	Explanation     string         `json:"explanation,omitempty"`
+	Source          string         `json:"source,omitempty"`
+}
+
 type Round struct {
 	ID                   string              `json:"id"`
 	RoundIndex           int                 `json:"roundIndex"`
@@ -87,6 +123,7 @@ type Round struct {
 	Question             Question            `json:"question"`
 	BoardHash            string              `json:"boardHash"`
 	Board                *PredictionBoard    `json:"board,omitempty"`
+	TriviaContent        *TriviaContent      `json:"triviaContent,omitempty"`
 	Guesses              []Guess             `json:"guesses,omitempty"`
 	AnswerPhaseStartedAt time.Time           `json:"answerPhaseStartedAt"`
 	AnswerPhaseEndsAt    time.Time           `json:"answerPhaseEndsAt"`
@@ -180,11 +217,12 @@ type Game struct {
 }
 
 type ReplayRound struct {
-	RoundIndex  int               `json:"roundIndex"`
-	Question    string            `json:"question"`
-	Board       []ReplayAnswer    `json:"board"`
-	Guesses     []ReplayGuess     `json:"guesses"`
-	ScoreDeltas []ScoreboardEntry `json:"scoreDeltas"`
+	RoundIndex    int                  `json:"roundIndex"`
+	Question      string               `json:"question"`
+	Board         []ReplayAnswer       `json:"board"`
+	TriviaContent *PublicTriviaContent `json:"triviaContent,omitempty"`
+	Guesses       []ReplayGuess        `json:"guesses"`
+	ScoreDeltas   []ScoreboardEntry    `json:"scoreDeltas"`
 }
 
 type ReplayAnswer struct {

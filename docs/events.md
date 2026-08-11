@@ -30,6 +30,8 @@ Each message uses SSE event name `room_invalidation`. Its SSE `id` is the decima
 
 Public types are `player_joined`, `game_started`, `submission_progress_changed`, `round_revealed`, `score_changed`, `round_started`, and `game_completed`. Events contain no names, tokens, questions, boards, guesses, match results, scores, provider data, or judge suggestions. They are invalidations only: after an event, refetch `GET /api/rooms/{code}` and use that public projection as the source of truth.
 
+Trivia does not change this envelope. In particular, choice options and all trivia solution fields remain outside SSE events. The authoritative refetch exposes ordered choice option IDs/labels during answering and omits canonical answers, aliases, correct option IDs, explanations, sources, and integrity hashes until reveal.
+
 ## Ordering and recovery
 
 Successful mutations commit before their event is appended. PostgreSQL increments the room revision and inserts the event atomically in a separate transaction. An event-publication failure never rolls back an already successful game mutation; existing polling/refetch remains the recovery path.

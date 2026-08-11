@@ -136,21 +136,22 @@ type publicGame struct {
 }
 
 type publicRound struct {
-	ID                   string                  `json:"id"`
-	RoundIndex           int                     `json:"roundIndex"`
-	Status               models.RoundStatus      `json:"status"`
-	Question             models.Question         `json:"question"`
-	BoardHash            string                  `json:"boardHash"`
-	Board                *models.PredictionBoard `json:"board,omitempty"`
-	Guesses              []models.Guess          `json:"guesses,omitempty"`
-	AnswerPhaseStartedAt time.Time               `json:"answerPhaseStartedAt"`
-	AnswerPhaseEndsAt    time.Time               `json:"answerPhaseEndsAt"`
-	RevealStartedAt      *time.Time              `json:"revealStartedAt,omitempty"`
-	RevealPhaseEndsAt    *time.Time              `json:"revealPhaseEndsAt,omitempty"`
-	TurnOrder            []string                `json:"turnOrder,omitempty"`
-	CurrentTurnIndex     *int                    `json:"currentTurnIndex,omitempty"`
-	TurnEndsAt           *time.Time              `json:"turnEndsAt,omitempty"`
-	CreatedAt            time.Time               `json:"createdAt"`
+	ID                   string                      `json:"id"`
+	RoundIndex           int                         `json:"roundIndex"`
+	Status               models.RoundStatus          `json:"status"`
+	Question             models.Question             `json:"question"`
+	BoardHash            string                      `json:"boardHash"`
+	Board                *models.PredictionBoard     `json:"board,omitempty"`
+	TriviaContent        *models.PublicTriviaContent `json:"triviaContent,omitempty"`
+	Guesses              []models.Guess              `json:"guesses,omitempty"`
+	AnswerPhaseStartedAt time.Time                   `json:"answerPhaseStartedAt"`
+	AnswerPhaseEndsAt    time.Time                   `json:"answerPhaseEndsAt"`
+	RevealStartedAt      *time.Time                  `json:"revealStartedAt,omitempty"`
+	RevealPhaseEndsAt    *time.Time                  `json:"revealPhaseEndsAt,omitempty"`
+	TurnOrder            []string                    `json:"turnOrder,omitempty"`
+	CurrentTurnIndex     *int                        `json:"currentTurnIndex,omitempty"`
+	TurnEndsAt           *time.Time                  `json:"turnEndsAt,omitempty"`
+	CreatedAt            time.Time                   `json:"createdAt"`
 }
 
 type errorResponse struct {
@@ -984,6 +985,7 @@ func projectRoom(room models.Room) publicRoom {
 		Status:               round.Status,
 		Question:             round.Question,
 		BoardHash:            round.BoardHash,
+		TriviaContent:        game.ProjectTriviaContent(round.TriviaContent, round.Status == models.RoundStatusRevealed),
 		AnswerPhaseStartedAt: round.AnswerPhaseStartedAt,
 		AnswerPhaseEndsAt:    round.AnswerPhaseEndsAt,
 		RevealStartedAt:      round.RevealStartedAt,

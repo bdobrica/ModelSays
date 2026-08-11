@@ -111,6 +111,41 @@ func TestReplayHTTPProjectionExcludesPrivateFields(t *testing.T) {
 	}
 }
 
+func TestTriviaRoomProjectionHidesSolutionUntilRevealForEveryViewer(t *testing.T) {
+	content := models.TriviaContent{
+		Version: models.TriviaContentVersion, Kind: models.GameKindTriviaChoice,
+		CanonicalAnswer: "Paris", AcceptedAliases: []string{"City of Paris"}, BaseScore: 100,
+		Explanation: "Capital of France", Source: "Reviewed reference",
+		Options: []models.TriviaOption{{ID: "a", Label: "Paris"}, {ID: "b", Label: "Rome"}, {ID: "c", Label: "Oslo"}, {ID: "d", Label: "Lima"}}, CorrectOptionID: "a",
+	}
+	content.IntegrityHash = game.ComputeTriviaContentHash(content)
+	room := models.Room{Code: "ROOMAA", CurrentGame: &models.Game{GameKind: models.GameKindTriviaChoice, CurrentRound: &models.Round{
+		Status: models.RoundStatusAnswering, TriviaContent: &content,
+	}}}
+	for _, viewer := range []string{"player", "host", "sse refetch"} {
+		projected := projectRoom(room)
+		encoded, err := json.Marshal(projected)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, secret := range []string{"canonicalAnswer", "acceptedAliases", "correctOptionId", "Capital of France", "Reviewed reference", "integrityHash"} {
+			if strings.Contains(string(encoded), secret) {
+				t.Fatalf("%s projection leaked %q: %s", viewer, secret, encoded)
+			}
+		}
+		if !strings.Contains(string(encoded), `"options"`) || !strings.Contains(string(encoded), `"label":"Paris"`) {
+			t.Fatalf("%s lost public choice options: %s", viewer, encoded)
+		}
+	}
+	room.CurrentGame.CurrentRound.Status = models.RoundStatusRevealed
+	encoded, _ := json.Marshal(projectRoom(room))
+	for _, revealed := range []string{"canonicalAnswer", "acceptedAliases", "correctOptionId", "Capital of France", "Reviewed reference"} {
+		if !strings.Contains(string(encoded), revealed) {
+			t.Fatalf("reveal omitted %q: %s", revealed, encoded)
+		}
+	}
+}
+
 func TestAbuseLimitsReturnDeterministicMetadataAndExcludeHealth(t *testing.T) {
 	cfg := config.Config{Abuse: security.DefaultConfig()}
 	cfg.Abuse.Create = security.Policy{Limit: 1, Window: time.Minute}

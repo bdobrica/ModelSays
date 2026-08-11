@@ -2,6 +2,7 @@ package db_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -246,6 +247,65 @@ func TestGameKindsMigrationDefaultsLegacyRowsAndRoundTrips(t *testing.T) {
 	}
 	if roomKind != string(models.GameKindModelSays) || gameKind != string(models.GameKindModelSays) {
 		t.Fatalf("legacy defaults room=%q game=%q", roomKind, gameKind)
+	}
+}
+
+func TestTriviaContentMigrationAndPostgresRoundTrip(t *testing.T) {
+	pool := integrationPool(t)
+	ctx := context.Background()
+	path := migrationPath(t, "000015_trivia_content.sql")
+	executeMigrationSection(t, pool, path, false)
+	var payloadColumnExists bool
+	if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='rounds' AND column_name='trivia_content_jsonb')`).Scan(&payloadColumnExists); err != nil {
+		t.Fatal(err)
+	}
+	if payloadColumnExists {
+		t.Fatal("trivia payload column remains after rollback")
+	}
+	executeMigrationSection(t, pool, path, true)
+
+	repository := db.NewPostgresRoomRepository(pool)
+	service := game.NewRoomService(repository, nil)
+	room, host, err := service.CreateRoom(ctx, game.CreateRoomInput{RoomName: "Trivia persistence", HostDisplayName: "Host", Settings: models.RoomSettings{TotalRounds: 1, AnswerTimerSeconds: 30}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, err := service.StartGame(ctx, game.StartGameInput{Code: room.Code, PlayerToken: host.Token})
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := models.TriviaContent{
+		Version: models.TriviaContentVersion, Kind: models.GameKindTriviaChoice, CanonicalAnswer: "Paris",
+		AcceptedAliases: []string{"City of Paris"}, BaseScore: 100, Explanation: "Capital of France", Source: "Reviewed",
+		Options: []models.TriviaOption{{ID: "o3", Label: "Rome"}, {ID: "o1", Label: "Paris"}, {ID: "o4", Label: "Oslo"}, {ID: "o2", Label: "Lima"}}, CorrectOptionID: "o1",
+	}
+	content.IntegrityHash = game.ComputeTriviaContentHash(content)
+	encoded, err := json.Marshal(content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE rounds SET trivia_content_jsonb=$2,trivia_content_hash=$3 WHERE id=$1`, started.CurrentGame.CurrentRound.ID, encoded, content.IntegrityHash); err != nil {
+		t.Fatal(err)
+	}
+
+	reloaded, err := repository.GetRoom(ctx, room.Code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := reloaded.CurrentGame.CurrentRound.TriviaContent
+	if got == nil || got.IntegrityHash != content.IntegrityHash || got.CorrectOptionID != "o1" || len(got.AcceptedAliases) != 1 || len(got.Options) != 4 || got.Options[0].ID != "o3" || reloaded.CurrentGame.CurrentRound.BoardHash != content.IntegrityHash {
+		t.Fatalf("trivia content did not survive reconstruction: %#v", got)
+	}
+	rounds, err := repository.ListGameRounds(ctx, reloaded.CurrentGame.ID)
+	if err != nil || len(rounds) != 1 || rounds[0].TriviaContent == nil || rounds[0].TriviaContent.Options[0].ID != "o3" {
+		t.Fatalf("list rounds trivia = %#v, %v", rounds, err)
+	}
+
+	if _, err := pool.Exec(ctx, `UPDATE rounds SET trivia_content_hash=$2 WHERE id=$1`, started.CurrentGame.CurrentRound.ID, strings.Repeat("0", 64)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.GetRoom(ctx, room.Code); err == nil || !strings.Contains(err.Error(), "hash mismatch") {
+		t.Fatalf("tampered persisted hash error = %v", err)
 	}
 }
 

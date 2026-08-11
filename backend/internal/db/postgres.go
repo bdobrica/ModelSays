@@ -469,7 +469,7 @@ func (repository *PostgresRoomRepository) ListGameRounds(ctx context.Context, ga
 	rows, err := repository.pool.Query(ctx, `
 		SELECT r.id, r.round_index, r.status, r.board_id, r.answer_phase_started_at,
 		       r.answer_phase_ends_at, r.reveal_started_at, r.created_at,
-		       q.id, q.text, q.locale, q.category, q.created_at
+		       q.id, q.text, q.locale, q.category, q.created_at, r.trivia_content_jsonb, r.trivia_content_hash
 		FROM rounds r
 		INNER JOIN questions q ON q.id = r.question_id
 		WHERE r.game_id = $1
@@ -482,17 +482,28 @@ func (repository *PostgresRoomRepository) ListGameRounds(ctx context.Context, ga
 	result := make([]models.Round, 0)
 	for rows.Next() {
 		var round models.Round
-		var boardID string
+		var boardID *string
+		var triviaJSON []byte
+		var triviaStoredHash *string
 		if err := rows.Scan(&round.ID, &round.RoundIndex, &round.Status, &boardID,
 			&round.AnswerPhaseStartedAt, &round.AnswerPhaseEndsAt, &round.RevealStartedAt, &round.CreatedAt,
-			&round.Question.ID, &round.Question.Text, &round.Question.Locale, &round.Question.Category, &round.Question.CreatedAt); err != nil {
+			&round.Question.ID, &round.Question.Text, &round.Question.Locale, &round.Question.Category, &round.Question.CreatedAt, &triviaJSON, &triviaStoredHash); err != nil {
 			return nil, fmt.Errorf("scan game round: %w", err)
 		}
-		round.Board, err = repository.loadBoard(ctx, repository.pool, boardID)
+		if boardID != nil {
+			round.Board, err = repository.loadBoard(ctx, repository.pool, *boardID)
+			if err != nil {
+				return nil, err
+			}
+		}
+		round.TriviaContent, err = decodeTriviaContent(triviaJSON)
 		if err != nil {
+			return nil, fmt.Errorf("decode round trivia content: %w", err)
+		}
+		if err := verifyStoredTriviaHash(round.TriviaContent, triviaStoredHash); err != nil {
 			return nil, err
 		}
-		round.BoardHash = valueOrBoardHash(round.Board)
+		round.BoardHash = valueOrContentHash(round.Board, round.TriviaContent)
 		round.Guesses, err = repository.loadGuesses(ctx, repository.pool, round.ID)
 		if err != nil {
 			return nil, err
@@ -647,9 +658,6 @@ func (repository *PostgresRoomRepository) StartGame(ctx context.Context, code st
 
 	question := gameState.CurrentRound.Question
 	board := gameState.CurrentRound.Board
-	if board == nil {
-		return models.Room{}, fmt.Errorf("start game missing prediction board")
-	}
 	_, err = tx.Exec(ctx, `
 		INSERT INTO questions (id, text, locale, category, created_at)
 		VALUES ($1, $2, $3, $4, $5)
@@ -659,26 +667,30 @@ func (repository *PostgresRoomRepository) StartGame(ctx context.Context, code st
 		return models.Room{}, fmt.Errorf("insert question: %w", err)
 	}
 
-	_, err = tx.Exec(ctx, `
+	var boardID any
+	if board != nil {
+		boardID = board.ID
+		_, err = tx.Exec(ctx, `
 		INSERT INTO prediction_boards (id, question_id, provider, model_name, prompt_version, board_hash, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
-	`, board.ID, question.ID, board.Provider, board.ModelName, board.PromptVersion, board.BoardHash, board.CreatedAt)
-	if err != nil {
-		return models.Room{}, fmt.Errorf("insert prediction board: %w", err)
-	}
-
-	for _, answer := range board.Answers {
-		aliasesJSON, err := json.Marshal(answer.Aliases)
+		`, board.ID, question.ID, board.Provider, board.ModelName, board.PromptVersion, board.BoardHash, board.CreatedAt)
 		if err != nil {
-			return models.Room{}, fmt.Errorf("marshal prediction answer aliases: %w", err)
+			return models.Room{}, fmt.Errorf("insert prediction board: %w", err)
 		}
 
-		_, err = tx.Exec(ctx, `
+		for _, answer := range board.Answers {
+			aliasesJSON, err := json.Marshal(answer.Aliases)
+			if err != nil {
+				return models.Room{}, fmt.Errorf("marshal prediction answer aliases: %w", err)
+			}
+
+			_, err = tx.Exec(ctx, `
 			INSERT INTO prediction_answers (id, board_id, canonical_answer, aliases_jsonb, rank, score, created_at)
 			VALUES ($1, $2, $3, $4, $5, $6, $7)
 		`, answer.ID, board.ID, answer.CanonicalAnswer, aliasesJSON, answer.Rank, answer.Score, answer.CreatedAt)
-		if err != nil {
-			return models.Room{}, fmt.Errorf("insert prediction answer: %w", err)
+			if err != nil {
+				return models.Room{}, fmt.Errorf("insert prediction answer: %w", err)
+			}
 		}
 	}
 
@@ -695,9 +707,9 @@ func (repository *PostgresRoomRepository) StartGame(ctx context.Context, code st
 	}
 
 	_, err = tx.Exec(ctx, `
-		INSERT INTO rounds (id, game_id, round_index, question_id, board_id, status, answer_phase_started_at, answer_phase_ends_at, reveal_started_at, created_at, turn_order_jsonb, current_turn_index, turn_ends_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11, '[]'::jsonb), $12, $13)
-	`, gameState.CurrentRound.ID, gameState.ID, gameState.CurrentRound.RoundIndex, question.ID, board.ID, gameState.CurrentRound.Status, gameState.CurrentRound.AnswerPhaseStartedAt, gameState.CurrentRound.AnswerPhaseEndsAt, gameState.CurrentRound.RevealStartedAt, gameState.CurrentRound.CreatedAt, gameState.CurrentRound.TurnOrder, gameState.CurrentRound.CurrentTurnIndex, gameState.CurrentRound.TurnEndsAt)
+		INSERT INTO rounds (id, game_id, round_index, question_id, board_id, status, answer_phase_started_at, answer_phase_ends_at, reveal_started_at, created_at, turn_order_jsonb, current_turn_index, turn_ends_at, trivia_content_jsonb, trivia_content_hash)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11, '[]'::jsonb), $12, $13, $14, $15)
+	`, gameState.CurrentRound.ID, gameState.ID, gameState.CurrentRound.RoundIndex, question.ID, boardID, gameState.CurrentRound.Status, gameState.CurrentRound.AnswerPhaseStartedAt, gameState.CurrentRound.AnswerPhaseEndsAt, gameState.CurrentRound.RevealStartedAt, gameState.CurrentRound.CreatedAt, gameState.CurrentRound.TurnOrder, gameState.CurrentRound.CurrentTurnIndex, gameState.CurrentRound.TurnEndsAt, encodeTriviaContent(gameState.CurrentRound.TriviaContent), triviaHash(gameState.CurrentRound.TriviaContent))
 	if err != nil {
 		return models.Room{}, fmt.Errorf("insert round: %w", err)
 	}
@@ -728,31 +740,32 @@ func (repository *PostgresRoomRepository) StartGame(ctx context.Context, code st
 }
 
 func insertPreparedRound(ctx context.Context, tx pgx.Tx, gameID string, round *models.Round) error {
-	if round.Board == nil {
-		return fmt.Errorf("prepared round missing prediction board")
-	}
 	question, board := round.Question, round.Board
 	if _, err := tx.Exec(ctx, `INSERT INTO questions (id,text,locale,category,created_at) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (id) DO NOTHING`,
 		question.ID, question.Text, question.Locale, question.Category, question.CreatedAt); err != nil {
 		return fmt.Errorf("insert prepared question: %w", err)
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO prediction_boards (id,question_id,provider,model_name,prompt_version,board_hash,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-		board.ID, question.ID, board.Provider, board.ModelName, board.PromptVersion, board.BoardHash, board.CreatedAt); err != nil {
-		return fmt.Errorf("insert prepared board: %w", err)
-	}
-	for _, answer := range board.Answers {
-		aliases, err := json.Marshal(answer.Aliases)
-		if err != nil {
-			return err
+	var boardID any
+	if board != nil {
+		boardID = board.ID
+		if _, err := tx.Exec(ctx, `INSERT INTO prediction_boards (id,question_id,provider,model_name,prompt_version,board_hash,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+			board.ID, question.ID, board.Provider, board.ModelName, board.PromptVersion, board.BoardHash, board.CreatedAt); err != nil {
+			return fmt.Errorf("insert prepared board: %w", err)
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO prediction_answers (id,board_id,canonical_answer,aliases_jsonb,rank,score,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-			answer.ID, board.ID, answer.CanonicalAnswer, aliases, answer.Rank, answer.Score, answer.CreatedAt); err != nil {
-			return fmt.Errorf("insert prepared answer: %w", err)
+		for _, answer := range board.Answers {
+			aliases, err := json.Marshal(answer.Aliases)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO prediction_answers (id,board_id,canonical_answer,aliases_jsonb,rank,score,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+				answer.ID, board.ID, answer.CanonicalAnswer, aliases, answer.Rank, answer.Score, answer.CreatedAt); err != nil {
+				return fmt.Errorf("insert prepared answer: %w", err)
+			}
 		}
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO rounds (id,game_id,round_index,question_id,board_id,status,answer_phase_started_at,answer_phase_ends_at,created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$7,$7)`,
-		round.ID, gameID, round.RoundIndex, question.ID, board.ID, models.RoundStatusPending, round.CreatedAt); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO rounds (id,game_id,round_index,question_id,board_id,status,answer_phase_started_at,answer_phase_ends_at,created_at,trivia_content_jsonb,trivia_content_hash)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$7,$7,$8,$9)`,
+		round.ID, gameID, round.RoundIndex, question.ID, boardID, models.RoundStatusPending, round.CreatedAt, encodeTriviaContent(round.TriviaContent), triviaHash(round.TriviaContent)); err != nil {
 		return fmt.Errorf("insert prepared round: %w", err)
 	}
 	return insertProviderAudits(ctx, tx, round.ProviderAudits)
@@ -1036,7 +1049,7 @@ func (repository *PostgresRoomRepository) AdvanceGame(ctx context.Context, code 
 	}
 	defer tx.Rollback(ctx)
 
-	if nextRound != nil && nextRound.Board != nil {
+	if nextRound != nil {
 		question := nextRound.Question
 		board := nextRound.Board
 		_, err = tx.Exec(ctx, `
@@ -1048,32 +1061,36 @@ func (repository *PostgresRoomRepository) AdvanceGame(ctx context.Context, code 
 			return models.Room{}, fmt.Errorf("insert next-round question: %w", err)
 		}
 
-		_, err = tx.Exec(ctx, `
+		var boardID any
+		if board != nil {
+			boardID = board.ID
+			_, err = tx.Exec(ctx, `
 			INSERT INTO prediction_boards (id, question_id, provider, model_name, prompt_version, board_hash, created_at)
 			VALUES ($1, $2, $3, $4, $5, $6, $7)
-		`, board.ID, question.ID, board.Provider, board.ModelName, board.PromptVersion, board.BoardHash, board.CreatedAt)
-		if err != nil {
-			return models.Room{}, fmt.Errorf("insert next-round prediction board: %w", err)
-		}
-
-		for _, answer := range board.Answers {
-			aliasesJSON, err := json.Marshal(answer.Aliases)
+			`, board.ID, question.ID, board.Provider, board.ModelName, board.PromptVersion, board.BoardHash, board.CreatedAt)
 			if err != nil {
-				return models.Room{}, fmt.Errorf("marshal next-round aliases: %w", err)
+				return models.Room{}, fmt.Errorf("insert next-round prediction board: %w", err)
 			}
-			_, err = tx.Exec(ctx, `
+
+			for _, answer := range board.Answers {
+				aliasesJSON, err := json.Marshal(answer.Aliases)
+				if err != nil {
+					return models.Room{}, fmt.Errorf("marshal next-round aliases: %w", err)
+				}
+				_, err = tx.Exec(ctx, `
 				INSERT INTO prediction_answers (id, board_id, canonical_answer, aliases_jsonb, rank, score, created_at)
 				VALUES ($1, $2, $3, $4, $5, $6, $7)
 			`, answer.ID, board.ID, answer.CanonicalAnswer, aliasesJSON, answer.Rank, answer.Score, answer.CreatedAt)
-			if err != nil {
-				return models.Room{}, fmt.Errorf("insert next-round prediction answer: %w", err)
+				if err != nil {
+					return models.Room{}, fmt.Errorf("insert next-round prediction answer: %w", err)
+				}
 			}
 		}
 
 		_, err = tx.Exec(ctx, `
-			INSERT INTO rounds (id, game_id, round_index, question_id, board_id, status, answer_phase_started_at, answer_phase_ends_at, reveal_started_at, created_at, turn_order_jsonb, current_turn_index, turn_ends_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11, '[]'::jsonb), $12, $13)
-		`, nextRound.ID, gameState.ID, nextRound.RoundIndex, question.ID, board.ID, nextRound.Status, nextRound.AnswerPhaseStartedAt, nextRound.AnswerPhaseEndsAt, nextRound.RevealStartedAt, nextRound.CreatedAt, nextRound.TurnOrder, nextRound.CurrentTurnIndex, nextRound.TurnEndsAt)
+			INSERT INTO rounds (id, game_id, round_index, question_id, board_id, status, answer_phase_started_at, answer_phase_ends_at, reveal_started_at, created_at, turn_order_jsonb, current_turn_index, turn_ends_at, trivia_content_jsonb, trivia_content_hash)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11, '[]'::jsonb), $12, $13, $14, $15)
+		`, nextRound.ID, gameState.ID, nextRound.RoundIndex, question.ID, boardID, nextRound.Status, nextRound.AnswerPhaseStartedAt, nextRound.AnswerPhaseEndsAt, nextRound.RevealStartedAt, nextRound.CreatedAt, nextRound.TurnOrder, nextRound.CurrentTurnIndex, nextRound.TurnEndsAt, encodeTriviaContent(nextRound.TriviaContent), triviaHash(nextRound.TriviaContent))
 		if err != nil {
 			return models.Room{}, fmt.Errorf("insert next round: %w", err)
 		}
@@ -1318,6 +1335,8 @@ func (repository *PostgresRoomRepository) loadCurrentGame(ctx context.Context, q
 		turnOrderJSON     []byte
 		currentTurnIndex  *int
 		turnEndsAt        *time.Time
+		triviaJSON        []byte
+		triviaStoredHash  *string
 	)
 
 	err := querier.QueryRow(ctx, `
@@ -1344,6 +1363,8 @@ func (repository *PostgresRoomRepository) loadCurrentGame(ctx context.Context, q
 			r.turn_order_jsonb,
 			r.current_turn_index,
 			r.turn_ends_at,
+			r.trivia_content_jsonb,
+			r.trivia_content_hash,
 			q.id,
 			q.text,
 			q.locale,
@@ -1378,6 +1399,8 @@ func (repository *PostgresRoomRepository) loadCurrentGame(ctx context.Context, q
 		&turnOrderJSON,
 		&currentTurnIndex,
 		&turnEndsAt,
+		&triviaJSON,
+		&triviaStoredHash,
 		&questionID,
 		&questionText,
 		&questionLocale,
@@ -1429,6 +1452,14 @@ func (repository *PostgresRoomRepository) loadCurrentGame(ctx context.Context, q
 			CurrentTurnIndex:     currentTurnIndex,
 			TurnEndsAt:           turnEndsAt,
 		}
+		gameState.CurrentRound.TriviaContent, err = decodeTriviaContent(triviaJSON)
+		if err != nil {
+			return nil, fmt.Errorf("decode current-round trivia content: %w", err)
+		}
+		if err := verifyStoredTriviaHash(gameState.CurrentRound.TriviaContent, triviaStoredHash); err != nil {
+			return nil, err
+		}
+		gameState.CurrentRound.BoardHash = valueOrContentHash(board, gameState.CurrentRound.TriviaContent)
 		if len(turnOrderJSON) > 0 {
 			if err := json.Unmarshal(turnOrderJSON, &gameState.CurrentRound.TurnOrder); err != nil {
 				return nil, fmt.Errorf("decode turn order: %w", err)
@@ -1564,6 +1595,55 @@ func valueOrBoardHash(board *models.PredictionBoard) string {
 	}
 
 	return board.BoardHash
+}
+
+func valueOrContentHash(board *models.PredictionBoard, content *models.TriviaContent) string {
+	if content != nil {
+		return content.IntegrityHash
+	}
+	return valueOrBoardHash(board)
+}
+
+func verifyStoredTriviaHash(content *models.TriviaContent, stored *string) error {
+	if content == nil && stored == nil {
+		return nil
+	}
+	if content == nil || stored == nil || content.IntegrityHash != *stored {
+		return fmt.Errorf("persisted trivia content hash mismatch")
+	}
+	return nil
+}
+
+func encodeTriviaContent(content *models.TriviaContent) any {
+	if content == nil {
+		return nil
+	}
+	encoded, err := json.Marshal(content)
+	if err != nil {
+		panic(fmt.Sprintf("encode trivia content: %v", err))
+	}
+	return encoded
+}
+
+func triviaHash(content *models.TriviaContent) any {
+	if content == nil {
+		return nil
+	}
+	return content.IntegrityHash
+}
+
+func decodeTriviaContent(encoded []byte) (*models.TriviaContent, error) {
+	if len(encoded) == 0 {
+		return nil, nil
+	}
+	var content models.TriviaContent
+	if err := json.Unmarshal(encoded, &content); err != nil {
+		return nil, err
+	}
+	if err := game.ValidateTriviaContent(content); err != nil {
+		return nil, err
+	}
+	return &content, nil
 }
 
 func markSubmittedPlayers(scoreboard []models.ScoreboardEntry, guesses []models.Guess) {

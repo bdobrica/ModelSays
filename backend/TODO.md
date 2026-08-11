@@ -47,6 +47,7 @@ Status note:
 - [x] Create migration for prediction_boards.
 - [x] Create migration for prediction_answers.
 - [x] Create migration for rounds.
+- [x] Persist validated, versioned trivia solutions and integrity hashes on rounds.
 - [x] Create migration for guesses.
 - [x] Create migration for score_events.
 - [x] Add indexes for room code, game id, round id, player id.

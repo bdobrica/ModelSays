@@ -77,6 +77,20 @@ export interface Question {
   createdAt: string
 }
 
+export interface TriviaOption { id: string; label: string }
+
+export interface TriviaContent {
+  version: 1
+  kind: 'trivia_open' | 'trivia_choice'
+  baseScore: number
+  options?: TriviaOption[]
+  canonicalAnswer?: string
+  acceptedAliases?: string[]
+  correctOptionId?: string
+  explanation?: string
+  source?: string
+}
+
 export interface Round {
   id: string
   roundIndex: number
@@ -84,6 +98,7 @@ export interface Round {
   question: Question
   boardHash: string
   board?: PredictionBoard
+  triviaContent?: TriviaContent
   guesses?: Guess[]
   answerPhaseStartedAt: string
   answerPhaseEndsAt: string
@@ -130,6 +145,7 @@ export interface ReplayRound {
   roundIndex: number
   question: string
   board: ReplayAnswer[]
+  triviaContent?: TriviaContent
   guesses: ReplayGuess[]
   scoreDeltas: ScoreboardEntry[]
 }
