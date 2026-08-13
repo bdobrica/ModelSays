@@ -53,6 +53,34 @@ make postgres-down
 
 After the first installation, `make start` starts the stack without reinstalling dependencies.
 
+## Raspberry Pi private-LAN installation
+
+The supported Pi installer targets 64-bit Raspberry Pi OS or Debian (`aarch64`). It installs checksum-verified Go 1.25 and Node.js 22 toolchains when needed, builds reusable executables and client assets, configures the Pi's current LAN address, and enables a boot-persistent systemd service. Docker Engine with Compose v2 must already be installed.
+
+```bash
+git clone https://github.com/bdobrica/ModelSays.git
+cd ModelSays
+make pi-install
+```
+
+The installer preserves an existing `.env`, changing only the browser/API LAN origins. Set a stable address explicitly when automatic detection is unsuitable:
+
+```bash
+MODELSAYS_HOST_IP=192.168.11.192 make pi-install
+```
+
+At completion it prints the game URL. By default no OpenAI key is needed and curated offline content is used. To enable generated content, add `OPENAI_API_KEY` to `.env` and restart the service.
+
+Useful operations:
+
+```bash
+sudo systemctl status modelsays
+sudo systemctl restart modelsays
+journalctl -u modelsays -f
+```
+
+To update later, pull the desired revision and rerun `make pi-install`. PostgreSQL state is retained. The Compose database port binds only to `127.0.0.1`, so it is not exposed to other LAN devices.
+
 ## Play a game
 
 Use separate browser profiles, private windows, or devices so each participant has separate browser storage.

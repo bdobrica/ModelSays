@@ -8,7 +8,9 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
     ports:
-      - "5432:5432"
+      # PostgreSQL is an implementation detail. Keep it off the LAN while
+      # retaining localhost access for migrations and development tools.
+      - "127.0.0.1:5432:5432"
     volumes:
       - modelsays_postgres_data:/var/lib/postgresql/data
     healthcheck:

@@ -16,7 +16,7 @@ CORS_ALLOWED_ORIGINS ?= http://localhost:5173
 GOOSE_VERSION := v3.27.2
 GOOSE := go run github.com/pressly/goose/v3/cmd/goose@$(GOOSE_VERSION)
 
-.PHONY: help install bootstrap start dev postgres-up postgres-down postgres-logs postgres-reset migrate-up migrate-down backend client baseline ops-backup ops-restore ops-retention format check-format vet-backend test-backend test-client build-client check verify
+.PHONY: help install bootstrap start dev postgres-up postgres-down postgres-logs postgres-reset migrate-up migrate-down backend client pi-build pi-run pi-install baseline ops-backup ops-restore ops-retention format check-format vet-backend test-backend test-client build-client check verify
 
 help:
 	@printf '%s\n' \
@@ -34,6 +34,9 @@ help:
 		'  make migrate-down  Roll back the most recent backend migration' \
 		'  make backend       Run the backend only' \
 		'  make client        Run the client only' \
+		'  make pi-build      Build reusable ARM/Linux deployment artifacts' \
+		'  make pi-run        Run the prebuilt private-LAN Pi deployment' \
+		'  make pi-install    Install/update the app and boot service on a Pi' \
 		'  make baseline      Measure 3-, 8-, and 12-player PostgreSQL gameplay workloads' \
 		'  make ops-backup    Create a timestamped PostgreSQL custom-format backup' \
 		'  make ops-restore   Restore BACKUP_FILE into disposable RESTORE_DATABASE (confirmation required)' \
@@ -88,6 +91,17 @@ backend:
 
 client:
 	cd $(CLIENT_DIR) && npm run dev
+
+pi-build: bootstrap build-client
+	mkdir -p bin
+	cd $(BACKEND_DIR) && go build -o ../bin/modelsays ./cmd/server
+	cd $(BACKEND_DIR) && GOBIN='$(abspath bin)' go install github.com/pressly/goose/v3/cmd/goose@$(GOOSE_VERSION)
+
+pi-run:
+	bash ./scripts/run-pi.sh
+
+pi-install:
+	bash ./scripts/install-pi.sh
 
 baseline: build-client
 	cd $(BACKEND_DIR) && go run ./cmd/baseline -database-url '$(DATABASE_URL)' -client-dist ../client/dist

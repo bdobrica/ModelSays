@@ -1,0 +1,21 @@
+[Unit]
+Description=ModelSays private-LAN game server
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@USER@
+Group=@GROUP@
+WorkingDirectory=@REPO_DIR@
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=@REPO_DIR@/scripts/run-pi.sh
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=10min
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
+

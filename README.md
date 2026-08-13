@@ -139,6 +139,8 @@ make install
 
 See [`INSTALL.md`](INSTALL.md) for the complete installation, gameplay, shutdown, and troubleshooting guide. After the first installation, use `make start` to launch without reinstalling dependencies.
 
+For a 64-bit Raspberry Pi on a private LAN, use `make pi-install` after cloning. It configures LAN access, builds reusable artifacts, installs a boot service, and prints the game URL. See [`INSTALL.md`](INSTALL.md#raspberry-pi-private-lan-installation).
+
 When a root `.env` file is present, the Makefile loads it automatically and passes those overrides into the backend, migration commands, and client dev server.
 
 Useful split targets:

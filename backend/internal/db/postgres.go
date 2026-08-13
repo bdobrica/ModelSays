@@ -26,6 +26,11 @@ type PostgresRoomRepository struct {
 	revealPause time.Duration
 }
 
+// LatestSchemaVersion must advance with the highest numbered migration. Keeping
+// the readiness contract here gives migrations, tests, and operators one value
+// to update instead of embedding the expected version in the check itself.
+const LatestSchemaVersion int64 = 16
+
 func (repository *PostgresRoomRepository) SetLivingRoomRevealPause(pause time.Duration) {
 	repository.revealPause = pause
 }
@@ -221,8 +226,8 @@ func (repository *PostgresRoomRepository) Ready(ctx context.Context) error {
 	if err := repository.pool.QueryRow(checkCtx, `SELECT version_id, is_applied = false FROM goose_db_version ORDER BY id DESC LIMIT 1`).Scan(&version, &dirty); err != nil {
 		return fmt.Errorf("migration compatibility: %w", err)
 	}
-	if dirty || version != 13 {
-		return fmt.Errorf("migration compatibility: database version %d dirty=%t, want 13 clean", version, dirty)
+	if dirty || version != LatestSchemaVersion {
+		return fmt.Errorf("migration compatibility: database version %d dirty=%t, want %d clean", version, dirty, LatestSchemaVersion)
 	}
 	return nil
 }
