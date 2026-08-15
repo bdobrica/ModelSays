@@ -29,7 +29,7 @@ type PostgresRoomRepository struct {
 // LatestSchemaVersion must advance with the highest numbered migration. Keeping
 // the readiness contract here gives migrations, tests, and operators one value
 // to update instead of embedding the expected version in the check itself.
-const LatestSchemaVersion int64 = 16
+const LatestSchemaVersion int64 = 17
 
 func (repository *PostgresRoomRepository) SetLivingRoomRevealPause(pause time.Duration) {
 	repository.revealPause = pause

@@ -59,6 +59,8 @@ func main() {
 		roomRepository = postgresRepository
 		dueRepository = postgresRepository
 		logger.Info("using postgres room repository")
+		modelClient = llm.NewBankModelClient(postgresRepository, modelClient)
+		logger.Info("database content banks enabled")
 	}
 
 	roomService := game.NewRoomService(roomRepository, modelClient)

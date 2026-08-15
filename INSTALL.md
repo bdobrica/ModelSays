@@ -81,6 +81,16 @@ journalctl -u modelsays -f
 
 To update later, pull the desired revision and rerun `make pi-install`. PostgreSQL state is retained. The Compose database port binds only to `127.0.0.1`, so it is not exposed to other LAN devices.
 
+### Loading reviewed content banks
+
+Content banks are durable database inputs for Model Says, Open Trivia, or Choice Trivia. Validate and activate a reviewed JSON bank with:
+
+```bash
+make load-bank BANK_FILE=/path/to/reviewed-bank.json
+```
+
+The command starts PostgreSQL, applies migrations, validates every item according to its `gameKind`, and performs an atomic idempotent upsert. Loaded bank content takes precedence for matching game-kind/locale rooms; existing generated/static behavior remains the fallback. See [`data/trivia/README.md`](data/trivia/README.md) for the manifest format and review workflow.
+
 ## Play a game
 
 Use separate browser profiles, private windows, or devices so each participant has separate browser storage.

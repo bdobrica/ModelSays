@@ -402,7 +402,7 @@ func TestCreateRoomValidatesMVPSettings(t *testing.T) {
 		{name: "too many rounds", settings: models.RoomSettings{TotalRounds: 6}},
 		{name: "timer too short", settings: models.RoomSettings{AnswerTimerSeconds: 14}},
 		{name: "timer too long", settings: models.RoomSettings{AnswerTimerSeconds: 121}},
-		{name: "unsupported locale", settings: models.RoomSettings{Locale: "ro"}},
+		{name: "unsupported locale", settings: models.RoomSettings{Locale: "fr"}},
 		{name: "unsupported model", settings: models.RoomSettings{PredictionModel: "expensive-model"}},
 	}
 	for _, test := range tests {

@@ -113,7 +113,10 @@ export function CreateRoomPage() {
 
                 <label>
                     Locale
-                    <input value={locale} onChange={(event) => setLocale(event.target.value)} />
+                    <select value={locale} onChange={(event) => setLocale(event.target.value)}>
+                        <option value="en">English</option>
+                        <option value="ro">Română</option>
+                    </select>
                 </label>
 
                 <label>

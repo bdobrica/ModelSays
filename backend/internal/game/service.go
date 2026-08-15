@@ -1233,8 +1233,8 @@ func (service *RoomService) validateSettings(settings models.RoomSettings) error
 	if settings.AnswerTimerSeconds < minAnswerTimerSeconds || settings.AnswerTimerSeconds > maxAnswerTimerSeconds {
 		return fmt.Errorf("%w: answer timer must be between %d and %d seconds", ErrRoomSettingsInvalid, minAnswerTimerSeconds, maxAnswerTimerSeconds)
 	}
-	if settings.Locale != "en" {
-		return fmt.Errorf("%w: locale must be en", ErrRoomSettingsInvalid)
+	if settings.Locale != "en" && settings.Locale != "ro" {
+		return fmt.Errorf("%w: locale must be en or ro", ErrRoomSettingsInvalid)
 	}
 	if settings.PredictionModel != service.predictionModel {
 		return fmt.Errorf("%w: prediction model must be %s", ErrRoomSettingsInvalid, service.predictionModel)
@@ -1996,6 +1996,12 @@ func validatePredictionBoard(board models.PredictionBoard) error {
 		return fmt.Errorf("%w: %w", ErrGeneratedContentInvalid, err)
 	}
 	return nil
+}
+
+// ValidatePredictionBoard validates a complete frozen Model Says answer board.
+// Content-bank tooling uses the same contract as provider-generated rounds.
+func ValidatePredictionBoard(board models.PredictionBoard) error {
+	return validatePredictionBoard(board)
 }
 
 func resetSubmissionFlags(scoreboard []models.ScoreboardEntry) {

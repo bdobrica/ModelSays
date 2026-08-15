@@ -763,7 +763,7 @@ func TestCreateRoomRejectsInvalidSettingsAndMalformedBodies(t *testing.T) {
 		{name: "unsupported mode", body: strings.Replace(valid, `"simultaneous"`, `"cooperative"`, 1)},
 		{name: "unsupported game kind", body: strings.Replace(valid, `"model_says"`, `"survey"`, 1)},
 		{name: "unsupported ruleset mode combination", body: strings.Replace(strings.Replace(valid, `"model_says"`, `"trivia_open"`, 1), `"simultaneous"`, `"sequential"`, 1)},
-		{name: "unsupported locale", body: strings.Replace(valid, `"locale":"en"`, `"locale":"ro"`, 1)},
+		{name: "unsupported locale", body: strings.Replace(valid, `"locale":"en"`, `"locale":"fr"`, 1)},
 		{name: "unsupported model", body: strings.Replace(valid, `"gpt-5.6-luna"`, `"other-model"`, 1)},
 		{name: "unknown field", body: strings.Replace(valid, `"roomName"`, `"unexpected":true,"roomName"`, 1)},
 		{name: "trailing JSON", body: valid + `{}`},
