@@ -15,7 +15,7 @@ set -a
 source .env
 set +a
 
-docker compose up -d postgres
+docker compose up -d --wait postgres
 "$repo_dir/bin/goose" -dir backend/migrations postgres "$DATABASE_URL" up
 
 backend_pid=''
@@ -25,7 +25,13 @@ stop_children() {
   [[ -z "$client_pid" ]] || kill "$client_pid" 2>/dev/null || true
   wait "$backend_pid" "$client_pid" 2>/dev/null || true
 }
-trap stop_children INT TERM EXIT
+shutdown() {
+  trap - EXIT
+  stop_children
+  exit 0
+}
+trap shutdown INT TERM
+trap stop_children EXIT
 
 "$repo_dir/bin/modelsays" &
 backend_pid=$!
@@ -33,4 +39,3 @@ npm --prefix client run serve:pi &
 client_pid=$!
 
 wait -n "$backend_pid" "$client_pid"
-

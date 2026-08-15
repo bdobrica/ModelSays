@@ -7,6 +7,10 @@ repo_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 install_user=${SUDO_USER:-$(id -un)}
 install_group=$(id -gn "$install_user")
 
+# Prefer the toolchains managed by this installer over version managers or
+# newer system installations inherited from an interactive login shell.
+export PATH=/usr/local/bin:/usr/bin:/bin
+
 if [[ $(uname -s) != Linux || $(uname -m) != aarch64 ]]; then
   printf '%s\n' 'This installer currently supports 64-bit Raspberry Pi OS/Linux (aarch64).' >&2
   exit 1
@@ -52,6 +56,7 @@ if ! command -v node >/dev/null || [[ $(node --version 2>/dev/null || true) != "
   for executable in node npm npx corepack; do
     sudo ln -sf "/opt/nodejs/node-v${node_version}-linux-arm64/bin/$executable" "/usr/local/bin/$executable"
   done
+  hash -r
 fi
 
 if ! command -v docker >/dev/null || ! docker compose version >/dev/null 2>&1; then
