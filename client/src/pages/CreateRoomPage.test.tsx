@@ -7,11 +7,14 @@ import { CreateRoomPage } from './CreateRoomPage'
 
 vi.mock('../lib/api', async () => {
   const actual = await vi.importActual<typeof import('../lib/api')>('../lib/api')
-  return { ...actual, createRoom: vi.fn() }
+  return { ...actual, createRoom: vi.fn(), getPublicConfig: vi.fn() }
 })
 
 describe('CreateRoomPage', () => {
-  beforeEach(() => vi.resetAllMocks())
+  beforeEach(() => {
+    vi.resetAllMocks()
+    vi.mocked(api.getPublicConfig).mockResolvedValue({ availableLocales: ['en', 'ro'] })
+  })
 
   it('keeps rules and pacing distinct and creates Open Trivia rooms', async () => {
     vi.mocked(api.createRoom).mockResolvedValue({
@@ -40,5 +43,15 @@ describe('CreateRoomPage', () => {
     fireEvent.click(screen.getByLabelText(/Choice Trivia/))
     fireEvent.click(screen.getByRole('button', { name: 'Create room' }))
     await waitFor(() => expect(api.createRoom).toHaveBeenCalledWith(expect.objectContaining({ settings: expect.objectContaining({ gameKind: 'trivia_choice', mode: 'simultaneous' }) })))
+  })
+
+  it('renders locales supplied by server configuration', async () => {
+    vi.mocked(api.getPublicConfig).mockResolvedValue({ availableLocales: ['ro', 'de'] })
+    render(<MemoryRouter><CreateRoomPage /></MemoryRouter>)
+    const locale = screen.getByRole('combobox', { name: 'Locale' })
+    await waitFor(() => expect(locale).toHaveValue('ro'))
+    expect(screen.getByRole('option', { name: 'RO' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'DE' })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: 'EN' })).not.toBeInTheDocument()
   })
 })

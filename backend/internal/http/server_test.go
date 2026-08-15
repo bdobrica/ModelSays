@@ -783,6 +783,15 @@ func TestCreateRoomRejectsInvalidSettingsAndMalformedBodies(t *testing.T) {
 	}
 }
 
+func TestPublicConfigReturnsAvailableLocales(t *testing.T) {
+	server := NewServer(config.Config{AvailableLocales: []string{"en", "ro", "de"}}, slog.New(slog.NewTextHandler(io.Discard, nil)), game.NewInMemoryRoomService())
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/config", nil))
+	if response.Code != http.StatusOK || response.Body.String() != "{\"availableLocales\":[\"en\",\"ro\",\"de\"]}\n" {
+		t.Fatalf("public config = %d %s", response.Code, response.Body.String())
+	}
+}
+
 func TestCreateRoomDefaultsAndReturnsTypedGameKinds(t *testing.T) {
 	t.Parallel()
 

@@ -1,7 +1,7 @@
-import { FormEvent, useState } from 'react'
+import { FormEvent, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
-import { createRoom, type GameKind } from '../lib/api'
+import { createRoom, getPublicConfig, type GameKind } from '../lib/api'
 import { saveSession } from '../lib/session'
 
 export function CreateRoomPage() {
@@ -11,12 +11,24 @@ export function CreateRoomPage() {
     const [totalRounds, setTotalRounds] = useState(5)
     const [answerTimerSeconds, setAnswerTimerSeconds] = useState(45)
     const [locale, setLocale] = useState('en')
+    const [availableLocales, setAvailableLocales] = useState<string[]>(['en'])
     const [predictionModel, setPredictionModel] = useState('gpt-5.6-luna')
     const [teamSafeMode, setTeamSafeMode] = useState(false)
     const [mode, setMode] = useState<'simultaneous' | 'teams' | 'sequential' | 'livingroom'>('simultaneous')
     const [gameKind, setGameKind] = useState<GameKind>('model_says')
     const [isSubmitting, setIsSubmitting] = useState(false)
     const [errorMessage, setErrorMessage] = useState<string | null>(null)
+
+    useEffect(() => {
+        const controller = new AbortController()
+        getPublicConfig(controller.signal).then((configuration) => {
+            if (configuration.availableLocales.length > 0) {
+                setAvailableLocales(configuration.availableLocales)
+                setLocale((current) => configuration.availableLocales.includes(current) ? current : configuration.availableLocales[0])
+            }
+        }).catch(() => undefined)
+        return () => controller.abort()
+    }, [])
 
     async function handleSubmit(event: FormEvent<HTMLFormElement>) {
         event.preventDefault()
@@ -114,8 +126,9 @@ export function CreateRoomPage() {
                 <label>
                     Locale
                     <select value={locale} onChange={(event) => setLocale(event.target.value)}>
-                        <option value="en">English</option>
-                        <option value="ro">Română</option>
+                        {availableLocales.map((availableLocale) => (
+                            <option key={availableLocale} value={availableLocale}>{availableLocale.toUpperCase()}</option>
+                        ))}
                     </select>
                 </label>
 

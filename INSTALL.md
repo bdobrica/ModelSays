@@ -91,6 +91,14 @@ make load-bank BANK_FILE=/path/to/reviewed-bank.json
 
 The command starts PostgreSQL, applies migrations, validates every item according to its `gameKind`, and performs an atomic idempotent upsert. Loaded bank content takes precedence for matching game-kind/locale rooms; existing generated/static behavior remains the fallback. See [`data/trivia/README.md`](data/trivia/README.md) for the manifest format and review workflow.
 
+The room-creation locale selector and backend allowlist use one server-owned setting in `.env`:
+
+```bash
+AVAILABLE_LOCALES=en,ro
+```
+
+Values are comma-separated lowercase BCP 47 language tags such as `en`, `ro`, or `pt-br`. Restart ModelSays after changing the setting. A locale being available does not guarantee content exists for every game type; when neither a matching loaded bank nor a configured provider can supply it, round creation returns content unavailable.
+
 ## Play a game
 
 Use separate browser profiles, private windows, or devices so each participant has separate browser storage.

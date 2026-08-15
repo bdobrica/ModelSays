@@ -209,10 +209,19 @@ func (server *Server) routes() {
 	server.mux.HandleFunc("GET /healthz", server.handleHealth)
 	server.mux.HandleFunc("GET /readyz", server.handleReady)
 	server.mux.HandleFunc("GET /metrics", server.handleMetrics)
+	server.mux.HandleFunc("GET /api/config", server.handlePublicConfig)
 	server.mux.HandleFunc("POST /api/rooms", server.handleCreateRoom)
 	server.mux.HandleFunc("GET /api/replays/", server.handleReplay)
 	server.mux.HandleFunc("GET /api/rooms/", server.handleRoomRoutes)
 	server.mux.HandleFunc("POST /api/rooms/", server.handleRoomRoutes)
+}
+
+func (server *Server) handlePublicConfig(writer http.ResponseWriter, _ *http.Request) {
+	locales := append([]string(nil), server.config.AvailableLocales...)
+	if len(locales) == 0 {
+		locales = []string{"en", "ro"}
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"availableLocales": locales})
 }
 
 func (server *Server) handleMetrics(writer http.ResponseWriter, request *http.Request) {

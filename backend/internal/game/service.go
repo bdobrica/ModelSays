@@ -144,15 +144,16 @@ type OverrideMatchInput struct {
 }
 
 type RoomService struct {
-	repository      RoomRepository
-	modelClient     llm.ModelClient
-	fallbackClient  llm.ModelClient
-	clock           Clock
-	predictionModel string
-	judgeModel      string
-	modelPolicy     llm.Policy
-	providerGate    ProviderGate
-	providerObserve func(models.ProviderCallAudit)
+	repository       RoomRepository
+	modelClient      llm.ModelClient
+	fallbackClient   llm.ModelClient
+	clock            Clock
+	predictionModel  string
+	judgeModel       string
+	modelPolicy      llm.Policy
+	providerGate     ProviderGate
+	providerObserve  func(models.ProviderCallAudit)
+	availableLocales map[string]struct{}
 }
 
 type ProviderGate interface {
@@ -223,13 +224,14 @@ func NewRoomServiceWithClock(repository RoomRepository, modelClient llm.ModelCli
 	}
 
 	return &RoomService{
-		repository:      repository,
-		modelClient:     modelClient,
-		fallbackClient:  llm.NewStaticModelClient(),
-		clock:           clock,
-		predictionModel: defaultPredictionModel,
-		judgeModel:      defaultPredictionModel,
-		modelPolicy:     llm.DefaultPolicy(),
+		repository:       repository,
+		modelClient:      modelClient,
+		fallbackClient:   llm.NewStaticModelClient(),
+		clock:            clock,
+		predictionModel:  defaultPredictionModel,
+		judgeModel:       defaultPredictionModel,
+		modelPolicy:      llm.DefaultPolicy(),
+		availableLocales: map[string]struct{}{"en": {}, "ro": {}},
 	}
 }
 
@@ -254,6 +256,18 @@ func (service *RoomService) SetProviderObserver(observer func(models.ProviderCal
 func (service *RoomService) SetPredictionModel(model string) {
 	if model = strings.TrimSpace(model); model != "" {
 		service.predictionModel = model
+	}
+}
+
+func (service *RoomService) SetAvailableLocales(locales []string) {
+	available := make(map[string]struct{}, len(locales))
+	for _, locale := range locales {
+		if locale = strings.ToLower(strings.TrimSpace(locale)); locale != "" {
+			available[locale] = struct{}{}
+		}
+	}
+	if len(available) > 0 {
+		service.availableLocales = available
 	}
 }
 
@@ -1200,7 +1214,7 @@ func normalizeSettings(settings models.RoomSettings) models.RoomSettings {
 	if strings.TrimSpace(settings.Locale) == "" {
 		settings.Locale = "en"
 	}
-	settings.Locale = strings.TrimSpace(settings.Locale)
+	settings.Locale = strings.ToLower(strings.TrimSpace(settings.Locale))
 	if strings.TrimSpace(settings.PredictionModel) == "" {
 		settings.PredictionModel = defaultPredictionModel
 	}
@@ -1233,8 +1247,8 @@ func (service *RoomService) validateSettings(settings models.RoomSettings) error
 	if settings.AnswerTimerSeconds < minAnswerTimerSeconds || settings.AnswerTimerSeconds > maxAnswerTimerSeconds {
 		return fmt.Errorf("%w: answer timer must be between %d and %d seconds", ErrRoomSettingsInvalid, minAnswerTimerSeconds, maxAnswerTimerSeconds)
 	}
-	if settings.Locale != "en" && settings.Locale != "ro" {
-		return fmt.Errorf("%w: locale must be en or ro", ErrRoomSettingsInvalid)
+	if _, available := service.availableLocales[strings.ToLower(settings.Locale)]; !available {
+		return fmt.Errorf("%w: locale %q is not available", ErrRoomSettingsInvalid, settings.Locale)
 	}
 	if settings.PredictionModel != service.predictionModel {
 		return fmt.Errorf("%w: prediction model must be %s", ErrRoomSettingsInvalid, service.predictionModel)

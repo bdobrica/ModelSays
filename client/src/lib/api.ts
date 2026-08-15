@@ -2,6 +2,7 @@ import { env } from './env'
 
 export type GameMode = 'simultaneous' | 'teams' | 'sequential' | 'livingroom'
 export type GameKind = 'model_says' | 'trivia_open' | 'trivia_choice'
+export interface PublicConfig { availableLocales: string[] }
 
 export interface RoomSettings {
   mode: GameMode
@@ -232,6 +233,10 @@ export async function createRoom(payload: CreateRoomPayload): Promise<RoomRespon
     method: 'POST',
     body: JSON.stringify(payload),
   })
+}
+
+export async function getPublicConfig(signal?: AbortSignal): Promise<PublicConfig> {
+  return request<PublicConfig>('/api/config', { signal })
 }
 
 export async function joinRoom(code: string, payload: JoinRoomPayload): Promise<RoomResponse> {

@@ -18,6 +18,7 @@ type Config struct {
 	OpenAIAPIKey          string
 	HTTPAddr              string
 	CORSAllowedOrigins    []string
+	AvailableLocales      []string
 	DefaultModels         DefaultModels
 	ModelPolicy           llm.Policy
 	EventPollInterval     time.Duration
@@ -49,6 +50,7 @@ func Load() Config {
 		OpenAIAPIKey:          getEnv("OPENAI_API_KEY", ""),
 		HTTPAddr:              getEnv("HTTP_ADDR", ":8080"),
 		CORSAllowedOrigins:    splitCSV(getEnv("CORS_ALLOWED_ORIGINS", "http://localhost:5173")),
+		AvailableLocales:      normalizedCSV(getEnv("AVAILABLE_LOCALES", "en,ro")),
 		EventPollInterval:     time.Duration(getEnvInt("EVENT_POLL_INTERVAL_MS", 250)) * time.Millisecond,
 		EventHeartbeat:        time.Duration(getEnvInt("EVENT_HEARTBEAT_SECONDS", 15)) * time.Second,
 		EventMaxConnections:   getEnvInt("EVENT_MAX_CONNECTIONS", 100),
@@ -105,6 +107,24 @@ func (config Config) Validate() error {
 	}
 	if len(config.CORSAllowedOrigins) == 0 {
 		return fmt.Errorf("CORS_ALLOWED_ORIGINS must contain at least one origin")
+	}
+	if len(config.AvailableLocales) == 0 {
+		return fmt.Errorf("AVAILABLE_LOCALES must contain at least one locale")
+	}
+	seenLocales := make(map[string]struct{}, len(config.AvailableLocales))
+	for _, locale := range config.AvailableLocales {
+		if len(locale) < 2 || len(locale) > 16 {
+			return fmt.Errorf("AVAILABLE_LOCALES contains invalid locale %q", locale)
+		}
+		for _, character := range locale {
+			if (character < 'a' || character > 'z') && character != '-' {
+				return fmt.Errorf("AVAILABLE_LOCALES contains invalid locale %q", locale)
+			}
+		}
+		if _, exists := seenLocales[locale]; exists {
+			return fmt.Errorf("AVAILABLE_LOCALES contains duplicate locale %q", locale)
+		}
+		seenLocales[locale] = struct{}{}
 	}
 	for _, origin := range config.CORSAllowedOrigins {
 		parsed, err := url.Parse(origin)
@@ -177,4 +197,12 @@ func splitCSV(value string) []string {
 	}
 
 	return origins
+}
+
+func normalizedCSV(value string) []string {
+	values := splitCSV(value)
+	for index := range values {
+		values[index] = strings.ToLower(values[index])
+	}
+	return values
 }

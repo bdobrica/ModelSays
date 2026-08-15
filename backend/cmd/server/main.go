@@ -67,6 +67,7 @@ func main() {
 	roomService.SetPredictionModel(cfg.DefaultModels.Prediction)
 	roomService.SetJudgeModel(cfg.DefaultModels.Judge)
 	roomService.SetModelPolicy(cfg.ModelPolicy)
+	roomService.SetAvailableLocales(cfg.AvailableLocales)
 	server := httpapi.NewServer(cfg, logger, roomService)
 	roomService.SetProviderObserver(func(audit models.ProviderCallAudit) {
 		server.Metrics().Inc("modelsays_provider_calls_total", "purpose", audit.Purpose, "outcome", audit.Outcome, "path", audit.Path)

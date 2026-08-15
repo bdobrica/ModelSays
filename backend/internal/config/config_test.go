@@ -73,3 +73,22 @@ func TestLoadAbuseConfiguration(t *testing.T) {
 		t.Fatalf("provider/moderation config = %#v", cfg.Abuse)
 	}
 }
+
+func TestAvailableLocalesConfiguration(t *testing.T) {
+	t.Setenv("AVAILABLE_LOCALES", " en, RO ,pt-br")
+	cfg := Load()
+	if strings.Join(cfg.AvailableLocales, ",") != "en,ro,pt-br" {
+		t.Fatalf("AvailableLocales = %#v", cfg.AvailableLocales)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("valid locales: %v", err)
+	}
+	cfg.AvailableLocales = []string{"en", "en"}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "duplicate") {
+		t.Fatalf("duplicate locale validation = %v", err)
+	}
+	cfg.AvailableLocales = []string{"en_US"}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "invalid locale") {
+		t.Fatalf("invalid locale validation = %v", err)
+	}
+}
