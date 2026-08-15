@@ -38,7 +38,7 @@ export function RoomPage() {
   const [isMutating, setIsMutating] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [guessAnswer, setGuessAnswer] = useState('')
-  const [selectedOptionId, setSelectedOptionId] = useState('')
+  const [choiceSelection, setChoiceSelection] = useState<{ roundId: string; optionId: string } | null>(null)
   const [overrideSelections, setOverrideSelections] = useState<Record<string, string>>({})
   const [judgeSuggestions, setJudgeSuggestions] = useState<JudgeSuggestion[]>([])
   const [connectionState, setConnectionState] = useState<RoomConnectionState>('connecting')
@@ -191,7 +191,7 @@ export function RoomPage() {
 
   useEffect(() => {
     setGuessAnswer('')
-    setSelectedOptionId('')
+    setChoiceSelection(null)
     setOverrideSelections({})
     setNow(Date.now())
   }, [currentRound?.id])
@@ -304,7 +304,7 @@ export function RoomPage() {
     if (!activePlayerToken || !currentRound) return setErrorMessage('Missing player session or round state')
     if (hasSubmitted || mutationInFlight.current) return
     if (hasLocallyExpired) return setErrorMessage('Answer time has expired; waiting for the round result')
-    setSelectedOptionId(optionId)
+    setChoiceSelection({ roundId: currentRound.id, optionId })
     await mutateRoom(() => submitGuess(code, currentRound.id, {
       playerToken: activePlayerToken,
       optionId,
@@ -412,6 +412,9 @@ export function RoomPage() {
   const showRevealState = currentRound?.status === 'revealed'
   const activeGuess = currentRound?.guesses?.find((guess) => guess.playerId === activePlayer?.id)
   const choiceOptions = currentRound?.triviaContent?.options ?? []
+  const selectedOptionId = choiceSelection && choiceSelection.roundId === currentRound?.id
+    ? choiceSelection.optionId
+    : ''
   const revealedSelectedOptionId = activeGuess?.selectedOptionId ?? selectedOptionId
   const selectedChoiceLabel = choiceOptions.find((option) => option.id === revealedSelectedOptionId)?.label
   const correctChoiceLabel = choiceOptions.find((option) => option.id === currentRound?.triviaContent?.correctOptionId)?.label

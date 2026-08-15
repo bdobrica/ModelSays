@@ -268,6 +268,35 @@ describe('RoomPage', () => {
     expect(await screen.findByText('Choice submitted. Your selection is locked until the result.')).toBeInTheDocument()
   })
 
+  it('does not carry a reused option ID into the next round', async () => {
+    saveSession('ABC234', player)
+    let current = choiceTriviaState('answering')
+    vi.mocked(api.recoverSession).mockResolvedValue({ room: current, player })
+    vi.mocked(api.getRoom).mockImplementation(async () => ({ room: current }))
+    vi.mocked(api.submitGuess).mockImplementation(async () => {
+      current = choiceTriviaState('answering')
+      current.revision = 4
+      current.currentGame!.currentRoundIndex = 2
+      current.currentGame!.currentRound!.id = 'round-2'
+      current.currentGame!.currentRound!.roundIndex = 2
+      current.currentGame!.currentRound!.question = { ...question, id: 'question-2', text: 'What is the capital of Italy?' }
+      current.currentGame!.currentRound!.triviaContent!.options = [
+        { id: 'opt-c', label: 'Paris' },
+        { id: 'opt-a', label: 'Rome' },
+        { id: 'opt-d', label: 'Madrid' },
+        { id: 'opt-b', label: 'Berlin' },
+      ]
+      return { room: current }
+    })
+    renderRoom()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Paris' }))
+
+    expect(await screen.findByText('What is the capital of Italy?')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Rome' })).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.queryByText('Selected')).not.toBeInTheDocument()
+  })
+
   it('reveals every Choice Trivia option with textual correctness, selection, award, and ranking', async () => {
     saveSession('ABC234', player)
     const current = choiceTriviaState('revealed')
