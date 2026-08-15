@@ -18,6 +18,7 @@ import {
   type JudgeSuggestion,
   type Room,
 } from '../lib/api'
+import { copyText } from '../lib/clipboard'
 import { RoomEventClient, type RoomConnectionState } from '../lib/roomEvents'
 import { clearSession, loadSession, saveSession } from '../lib/session'
 
@@ -347,7 +348,7 @@ export function RoomPage() {
         await navigator.share({ title: `${room?.name ?? 'Model Says'} results`, url })
         setShareStatus('Results shared')
       } else {
-        await navigator.clipboard.writeText(url)
+        await copyText(url)
         setShareStatus('Replay link copied')
       }
     } catch (error) {
@@ -357,7 +358,7 @@ export function RoomPage() {
 
   async function handleCopyInvite() {
     try {
-      await navigator.clipboard.writeText(`${window.location.origin}/join?code=${code}`)
+      await copyText(joinURL)
       setShareStatus('Invite link copied')
     } catch {
       setShareStatus(`Copy unavailable. Share room code ${code}.`)
