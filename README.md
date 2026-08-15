@@ -152,6 +152,114 @@ make backend
 make client
 ```
 
+## Loading Content Banks
+
+Reviewed content banks can supply questions for all three game types: `model_says`, `trivia_open`, and `trivia_choice`. A bank is a JSON file with a stable name, a positive version, a default review status, and one or more entries. Unknown fields are rejected.
+
+After reviewing a bank, change its top-level status from:
+
+```json
+"reviewStatus": "unreviewed"
+```
+
+to:
+
+```json
+"reviewStatus": "reviewed"
+```
+
+Then load and activate it:
+
+```bash
+make load-bank BANK_FILE=data/trivia/ro-choice.unreviewed.json
+```
+
+`make load-bank` starts PostgreSQL, applies all migrations (including the content-bank schema introduced in migration 17), validates every entry against its game-type contract, and imports the bank in one transaction. Reloading a stable `bankName` updates entries instead of duplicating them and disables entries omitted from the new version. Imported reviewed entries are immediately available to newly generated rounds; rounds already played retain their frozen content.
+
+An entry inherits the top-level `reviewStatus`, but may override it. This allows a reviewed bank to retain rejected or unfinished entries without activating them:
+
+```json
+"reviewStatus": "unreviewed"
+```
+
+For private testing before review only, opt in explicitly:
+
+```bash
+make load-bank \
+  BANK_FILE=data/trivia/ro-choice.unreviewed.json \
+  ALLOW_UNREVIEWED=yes
+```
+
+Do not use `ALLOW_UNREVIEWED=yes` to publish a bank. Without that override, the loader refuses an unreviewed bank and skips entry-level unreviewed items in an otherwise reviewed bank.
+
+### Bank file schema
+
+The following example shows the complete shape and the fields used by each game type:
+
+```json
+{
+  "version": 1,
+  "bankName": "example-general-knowledge",
+  "reviewStatus": "reviewed",
+  "entries": [
+    {
+      "id": "model-says-example-1",
+      "gameKind": "model_says",
+      "locale": "en",
+      "category": "general",
+      "question": "Name something people take on a picnic.",
+      "answers": [
+        { "canonicalAnswer": "Sandwiches", "aliases": ["Sandwich"], "rank": 1, "score": 50 },
+        { "canonicalAnswer": "Fruit", "aliases": [], "rank": 2, "score": 40 },
+        { "canonicalAnswer": "Drinks", "aliases": ["A drink"], "rank": 3, "score": 30 },
+        { "canonicalAnswer": "A blanket", "aliases": ["Blanket"], "rank": 4, "score": 20 },
+        { "canonicalAnswer": "A basket", "aliases": ["Picnic basket"], "rank": 5, "score": 10 }
+      ]
+    },
+    {
+      "id": "open-trivia-example-1",
+      "gameKind": "trivia_open",
+      "locale": "en",
+      "category": "geography",
+      "question": "What is the capital of France?",
+      "canonicalAnswer": "Paris",
+      "acceptedAliases": ["Paris, France"],
+      "baseScore": 100,
+      "explanation": "Paris is the capital and largest city of France.",
+      "source": "Reviewed general-knowledge bank"
+    },
+    {
+      "id": "choice-trivia-example-1",
+      "gameKind": "trivia_choice",
+      "locale": "en",
+      "category": "geography",
+      "question": "What is the capital of Italy?",
+      "canonicalAnswer": "Rome",
+      "acceptedAliases": [],
+      "options": [
+        { "id": "option-a", "label": "Madrid" },
+        { "id": "option-b", "label": "Rome" },
+        { "id": "option-c", "label": "Paris" },
+        { "id": "option-d", "label": "Berlin" }
+      ],
+      "correctOptionId": "option-b",
+      "baseScore": 100,
+      "explanation": "Rome is the capital of Italy.",
+      "source": "Reviewed general-knowledge bank"
+    }
+  ]
+}
+```
+
+Every entry requires a unique stable `id`, one of the three supported `gameKind` values, a `locale`, a `category`, and a `question` of at most 500 characters. The locale must also be enabled through `AVAILABLE_LOCALES` for rooms to select it.
+
+- `model_says` requires exactly five `answers`, ordered by ranks 1 through 5. Scores must be positive, no greater than 100, and strictly descending. Each answer requires `canonicalAnswer`, may have up to eight `aliases`, and must not contain trivia solution fields.
+- `trivia_open` requires `canonicalAnswer` and `baseScore: 100`, permits up to 12 normalization-distinct `acceptedAliases`, and cannot contain `options` or `correctOptionId`.
+- `trivia_choice` requires `canonicalAnswer`, exactly four uniquely identified and normalization-distinct `options`, a `correctOptionId` matching one option, and `baseScore: 100`. `acceptedAliases` is optional.
+- `explanation` and `source` are optional for both trivia types. An optional entry-level `reviewStatus` must be `reviewed` or `unreviewed`.
+
+For the Romanian CSV preparation and review workflow, see [`data/trivia/README.md`](data/trivia/README.md).
+
 Verification:
 
 ```bash
