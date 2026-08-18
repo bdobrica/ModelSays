@@ -407,7 +407,7 @@ describe('RoomPage', () => {
     expect(await screen.findByText('Home')).toBeInTheDocument()
   })
 
-  it('lets the living-room display create a fresh lobby with retained settings', async () => {
+  it('lets the living-room display reset the same room with all players retained', async () => {
     const display = { ...host, role: 'host_display' as const }
     const completed = choiceTriviaState('revealed')
     completed.status = 'completed'
@@ -416,14 +416,14 @@ describe('RoomPage', () => {
     completed.currentGame = { ...completed.currentGame!, status: 'completed', mode: 'livingroom', gameKind: 'trivia_choice', replayId: 'replay-id' }
     saveSession('ABC234', display)
     vi.mocked(api.recoverSession).mockResolvedValue({ room: completed, player: display })
-    vi.mocked(api.playAgain).mockResolvedValue({
-      room: { ...roomState('lobby'), code: 'NEW234', settings: { ...settings, mode: 'livingroom', gameKind: 'trivia_choice' } },
-      player: { ...display, id: 'new-display', token: 'new-token' },
-    })
+    const reset = { ...roomState('lobby'), players: completed.players, settings: completed.settings }
+    vi.mocked(api.playAgain).mockResolvedValue({ room: reset, player: display })
+    vi.mocked(api.getRoom).mockResolvedValueOnce({ room: completed }).mockResolvedValue({ room: reset })
 
     renderRoom()
     fireEvent.click(await screen.findByRole('button', { name: 'Play again' }))
     await waitFor(() => expect(api.playAgain).toHaveBeenCalledWith('ABC234', { playerToken: display.token }))
+    expect(await screen.findByRole('heading', { name: '1 players joined' })).toBeInTheDocument()
   })
 
   it('shows Choice Trivia options on TV without correctness during answering', async () => {
@@ -614,7 +614,8 @@ describe('RoomPage', () => {
       { teamId: 'gold', name: 'Gold', score: 50 },
     ]
     vi.mocked(api.recoverSession).mockResolvedValue({ room: completed, player })
-    vi.mocked(api.getRoom).mockResolvedValue({ room: completed })
+    const reset = roomState('lobby')
+    vi.mocked(api.getRoom).mockResolvedValueOnce({ room: completed }).mockResolvedValue({ room: reset })
 
     renderRoom()
     expect(await screen.findByRole('heading', { name: 'Final scoreboard' })).toBeInTheDocument()
@@ -708,15 +709,13 @@ describe('RoomPage', () => {
   it('copies completed results and lets only the host create a clean next lobby', async () => {
     saveSession('ABC234', host)
     const completed = roomState('completed', true)
+    const reset = roomState('lobby')
     vi.mocked(api.recoverSession).mockResolvedValue({ room: completed, player: host })
-    vi.mocked(api.getRoom).mockResolvedValue({ room: completed })
+    vi.mocked(api.getRoom).mockResolvedValueOnce({ room: completed }).mockResolvedValue({ room: reset })
     const writeText = vi.fn().mockResolvedValue(undefined)
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
     Object.defineProperty(navigator, 'share', { configurable: true, value: undefined })
-    vi.mocked(api.playAgain).mockResolvedValue({
-      room: { ...roomState('lobby'), code: 'NEW234', name: 'Test room' },
-      player: { ...host, id: 'new-host', token: 'new-token' },
-    })
+    vi.mocked(api.playAgain).mockResolvedValue({ room: reset, player: host })
 
     renderRoom()
     fireEvent.click(await screen.findByRole('button', { name: 'Share results' }))
@@ -725,6 +724,7 @@ describe('RoomPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Play again' }))
     await waitFor(() => expect(api.playAgain).toHaveBeenCalledWith('ABC234', { playerToken: host.token }))
+    expect(await screen.findByRole('button', { name: 'Start game' })).toBeInTheDocument()
   })
 
   it('lets the host create and assign teams in the lobby', async () => {

@@ -47,6 +47,11 @@ var curatedTriviaByKindAndLocale = map[models.GameKind]map[string][]curatedTrivi
 		openTrivia("trivia-open-en-003", "What is the capital city of Japan?", "Tokyo", nil, "Tokyo is Japan's capital and largest city."),
 		openTrivia("trivia-open-en-004", "Who painted the Mona Lisa?", "Leonardo da Vinci", []string{"da Vinci", "Leonardo"}, "Leonardo da Vinci painted the Mona Lisa."),
 		openTrivia("trivia-open-en-005", "How many sides does a hexagon have?", "six", []string{"6"}, "A hexagon is a six-sided polygon."),
+		openTrivia("trivia-open-en-006", "Which river flows through Paris?", "Seine", []string{"the Seine"}, "The Seine flows through Paris and into the English Channel."),
+		openTrivia("trivia-open-en-007", "What is the hardest natural substance?", "diamond", nil, "Diamond is the hardest naturally occurring substance."),
+		openTrivia("trivia-open-en-008", "Which language has the most native speakers?", "Mandarin Chinese", []string{"Mandarin", "Chinese"}, "Mandarin Chinese has the largest number of native speakers."),
+		openTrivia("trivia-open-en-009", "What is the smallest prime number?", "two", []string{"2"}, "Two is the first and only even prime number."),
+		openTrivia("trivia-open-en-010", "Which organ pumps blood around the human body?", "heart", []string{"the heart"}, "The heart pumps blood through the circulatory system."),
 	}},
 	models.GameKindTriviaChoice: {"en": {
 		choiceTrivia("trivia-choice-en-001", "Which ocean is the largest?", "Pacific Ocean", "Atlantic Ocean", "Indian Ocean", "Pacific Ocean", "Arctic Ocean"),
@@ -54,6 +59,11 @@ var curatedTriviaByKindAndLocale = map[models.GameKind]map[string][]curatedTrivi
 		choiceTrivia("trivia-choice-en-003", "In which continent is the Sahara Desert?", "Africa", "Asia", "Africa", "Australia", "South America"),
 		choiceTrivia("trivia-choice-en-004", "What is the freezing point of water in Celsius?", "0 degrees", "0 degrees", "10 degrees", "32 degrees", "100 degrees"),
 		choiceTrivia("trivia-choice-en-005", "Which instrument typically has 88 keys?", "Piano", "Violin", "Piano", "Flute", "Trumpet"),
+		choiceTrivia("trivia-choice-en-006", "Which gas do plants absorb from the atmosphere?", "Carbon dioxide", "Oxygen", "Nitrogen", "Carbon dioxide", "Hydrogen"),
+		choiceTrivia("trivia-choice-en-007", "Which country is home to the city of Petra?", "Jordan", "Egypt", "Jordan", "Greece", "Turkey"),
+		choiceTrivia("trivia-choice-en-008", "How many players does a soccer team field at the start of a match?", "Eleven", "Nine", "Ten", "Eleven", "Twelve"),
+		choiceTrivia("trivia-choice-en-009", "Which metal is liquid at standard room temperature?", "Mercury", "Iron", "Mercury", "Aluminum", "Copper"),
+		choiceTrivia("trivia-choice-en-010", "Who wrote Pride and Prejudice?", "Jane Austen", "Mary Shelley", "Jane Austen", "George Eliot", "Virginia Woolf"),
 	}},
 }
 

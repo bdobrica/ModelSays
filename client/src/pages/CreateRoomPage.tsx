@@ -8,7 +8,8 @@ export function CreateRoomPage() {
     const navigate = useNavigate()
     const [roomName, setRoomName] = useState('Friday Night')
     const [hostDisplayName, setHostDisplayName] = useState('Host')
-    const [totalRounds, setTotalRounds] = useState(5)
+    const [totalRounds, setTotalRounds] = useState(10)
+    const [maxRounds, setMaxRounds] = useState(10)
     const [answerTimerSeconds, setAnswerTimerSeconds] = useState(45)
     const [locale, setLocale] = useState('en')
     const [availableLocales, setAvailableLocales] = useState<string[]>(['en'])
@@ -26,6 +27,8 @@ export function CreateRoomPage() {
                 setAvailableLocales(configuration.availableLocales)
                 setLocale((current) => configuration.availableLocales.includes(current) ? current : configuration.availableLocales[0])
             }
+            if (Number.isSafeInteger(configuration.maxRounds)) setMaxRounds(configuration.maxRounds)
+            if (Number.isSafeInteger(configuration.defaultRounds)) setTotalRounds(configuration.defaultRounds)
         }).catch(() => undefined)
         return () => controller.abort()
     }, [])
@@ -106,7 +109,7 @@ export function CreateRoomPage() {
                     <input
                         type="number"
                         min={1}
-                        max={5}
+                        max={maxRounds}
                         value={totalRounds}
                         onChange={(event) => setTotalRounds(Number(event.target.value))}
                     />

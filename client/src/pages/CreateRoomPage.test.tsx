@@ -13,7 +13,7 @@ vi.mock('../lib/api', async () => {
 describe('CreateRoomPage', () => {
   beforeEach(() => {
     vi.resetAllMocks()
-    vi.mocked(api.getPublicConfig).mockResolvedValue({ availableLocales: ['en', 'ro'] })
+    vi.mocked(api.getPublicConfig).mockResolvedValue({ availableLocales: ['en', 'ro'], defaultRounds: 10, maxRounds: 10 })
   })
 
   it('keeps rules and pacing distinct and creates Open Trivia rooms', async () => {
@@ -46,7 +46,7 @@ describe('CreateRoomPage', () => {
   })
 
   it('renders locales supplied by server configuration', async () => {
-    vi.mocked(api.getPublicConfig).mockResolvedValue({ availableLocales: ['ro', 'de'] })
+    vi.mocked(api.getPublicConfig).mockResolvedValue({ availableLocales: ['ro', 'de'], defaultRounds: 10, maxRounds: 10 })
     render(<MemoryRouter><CreateRoomPage /></MemoryRouter>)
     const locale = screen.getByRole('combobox', { name: 'Locale' })
     await waitFor(() => expect(locale).toHaveValue('ro'))

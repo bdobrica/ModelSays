@@ -40,8 +40,8 @@ func TestCuratedTriviaBankHasFiveUniqueRoundsPerKind(t *testing.T) {
 	t.Parallel()
 	for _, kind := range []models.GameKind{models.GameKindTriviaOpen, models.GameKindTriviaChoice} {
 		entries := curatedTriviaByKindAndLocale[kind]["en"]
-		if len(entries) < 5 {
-			t.Fatalf("%s curated count = %d, want at least 5", kind, len(entries))
+		if len(entries) < 10 {
+			t.Fatalf("%s curated count = %d, want at least 10", kind, len(entries))
 		}
 		questions := map[string]bool{}
 		for _, entry := range entries {
@@ -63,7 +63,7 @@ func TestStaticTriviaSelectsWithoutRepeatingAndRejectsUnsupportedLocale(t *testi
 	t.Parallel()
 	client := &StaticModelClient{randomIndex: func(int) (int, error) { return 0, nil }}
 	excluded := []string{}
-	for round := 0; round < 5; round++ {
+	for round := 0; round < 10; round++ {
 		response, err := client.GenerateTrivia(context.Background(), GenerateTriviaRequest{
 			Kind: models.GameKindTriviaOpen, Locale: "en", ExcludedText: excluded,
 		})
@@ -108,8 +108,8 @@ func TestStaticQuestionsExcludeQuestionsUsedEarlierInGame(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateQuestions returned error: %v", err)
 	}
-	if len(response.Questions) != 3 {
-		t.Fatalf("question count = %d, want 3", len(response.Questions))
+	if len(response.Questions) != 5 {
+		t.Fatalf("question count = %d, want 5", len(response.Questions))
 	}
 	for _, question := range response.Questions {
 		if containsFold([]string{

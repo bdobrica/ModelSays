@@ -221,7 +221,14 @@ func (server *Server) handlePublicConfig(writer http.ResponseWriter, _ *http.Req
 	if len(locales) == 0 {
 		locales = []string{"en", "ro"}
 	}
-	writeJSON(writer, http.StatusOK, map[string]any{"availableLocales": locales})
+	defaultRounds, maxRounds := server.config.DefaultRounds, server.config.MaxRounds
+	if defaultRounds == 0 {
+		defaultRounds = 10
+	}
+	if maxRounds == 0 {
+		maxRounds = 10
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"availableLocales": locales, "defaultRounds": defaultRounds, "maxRounds": maxRounds})
 }
 
 func (server *Server) handleMetrics(writer http.ResponseWriter, request *http.Request) {
@@ -613,7 +620,7 @@ func (server *Server) handleJoinRoom(writer http.ResponseWriter, request *http.R
 		return
 	}
 
-	writeJSON(writer, http.StatusCreated, roomResponse{Room: projectRoom(room), Player: &player})
+	writeJSON(writer, http.StatusOK, roomResponse{Room: projectRoom(room), Player: &player})
 }
 
 func (server *Server) handleStartGame(writer http.ResponseWriter, request *http.Request, code string) {

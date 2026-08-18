@@ -9,6 +9,7 @@ export const roomEventTypes = [
   'score_changed',
   'round_started',
   'game_completed',
+  'game_reset',
 ] as const
 
 export type RoomEventType = (typeof roomEventTypes)[number]
@@ -59,7 +60,7 @@ export class RoomEventClient {
       onConnected: options.onConnected ?? (async () => options.initialRevision),
       fetch: options.fetch ?? window.fetch.bind(window),
       minBackoffMilliseconds: options.minBackoffMilliseconds ?? 500,
-      maxBackoffMilliseconds: options.maxBackoffMilliseconds ?? 15_000,
+      maxBackoffMilliseconds: options.maxBackoffMilliseconds ?? 5_000,
       coalesceMilliseconds: options.coalesceMilliseconds ?? 25,
     }
     this.lastAppliedRevision = options.initialRevision

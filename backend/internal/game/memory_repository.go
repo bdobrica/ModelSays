@@ -16,6 +16,7 @@ type InMemoryRoomRepository struct {
 	suggestions map[string][]models.JudgeSuggestion
 	events      map[string][]models.RoomEvent
 	rounds      map[string][]models.Round
+	replayRooms map[string]models.Room
 }
 
 func NewInMemoryRoomRepository() *InMemoryRoomRepository {
@@ -24,6 +25,7 @@ func NewInMemoryRoomRepository() *InMemoryRoomRepository {
 		suggestions: make(map[string][]models.JudgeSuggestion),
 		events:      make(map[string][]models.RoomEvent),
 		rounds:      make(map[string][]models.Round),
+		replayRooms: make(map[string]models.Room),
 	}
 }
 
@@ -98,6 +100,9 @@ func (repository *InMemoryRoomRepository) GetRoomByReplayID(_ context.Context, r
 		if room.CurrentGame != nil && room.CurrentGame.ReplayID == replayID {
 			return cloneRoom(*room), nil
 		}
+	}
+	if room, ok := repository.replayRooms[replayID]; ok {
+		return cloneRoom(room), nil
 	}
 	return models.Room{}, ErrReplayNotFound
 }
@@ -204,6 +209,23 @@ func (repository *InMemoryRoomRepository) StartGame(_ context.Context, code stri
 	repository.audits[code] = append(repository.audits[code], gameState.CurrentRound.ProviderAudits...)
 	room.UpdatedAt = time.Now().UTC()
 
+	return cloneRoom(*room), nil
+}
+
+func (repository *InMemoryRoomRepository) ResetRoom(_ context.Context, code string, occurredAt time.Time) (models.Room, error) {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	room, ok := repository.rooms[code]
+	if !ok {
+		return models.Room{}, ErrRoomNotFound
+	}
+	if room.CurrentGame == nil || room.CurrentGame.Status != models.GameStatusCompleted {
+		return models.Room{}, ErrReplayNotReady
+	}
+	repository.replayRooms[room.CurrentGame.ReplayID] = cloneRoom(*room)
+	room.Status = models.RoomStatusLobby
+	room.CurrentGame = nil
+	room.UpdatedAt = occurredAt
 	return cloneRoom(*room), nil
 }
 

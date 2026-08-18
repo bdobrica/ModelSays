@@ -571,6 +571,11 @@ func curatedEquivalentAnswers(t *testing.T, questionID string) (string, string, 
 		"question-en-003": {canonical: "dieting", alias: "diet", score: 40},
 		"question-en-004": {canonical: "their keys", alias: "keys", score: 50},
 		"question-en-005": {canonical: "no clear agenda", alias: "no agenda", score: 50},
+		"question-en-006": {canonical: "toothbrush", alias: "their toothbrush", score: 50},
+		"question-en-007": {canonical: "noise", alias: "loud neighbors", score: 50},
+		"question-en-008": {canonical: "check their phone", alias: "scroll", score: 50},
+		"question-en-009": {canonical: "sneeze", alias: "sneezing", score: 50},
+		"question-en-010": {canonical: "a bottle of wine", alias: "champagne", score: 50},
 	}
 	result, ok := answers[questionID]
 	if !ok {
@@ -757,7 +762,7 @@ func TestCreateRoomRejectsInvalidSettingsAndMalformedBodies(t *testing.T) {
 		name string
 		body string
 	}{
-		{name: "zero rounds after explicit invalid timer", body: strings.Replace(valid, `"totalRounds":1`, `"totalRounds":6`, 1)},
+		{name: "too many rounds", body: strings.Replace(valid, `"totalRounds":1`, `"totalRounds":11`, 1)},
 		{name: "timer below lower bound", body: strings.Replace(valid, `"answerTimerSeconds":15`, `"answerTimerSeconds":14`, 1)},
 		{name: "timer above upper bound", body: strings.Replace(valid, `"answerTimerSeconds":15`, `"answerTimerSeconds":121`, 1)},
 		{name: "unsupported mode", body: strings.Replace(valid, `"simultaneous"`, `"cooperative"`, 1)},
@@ -787,7 +792,7 @@ func TestPublicConfigReturnsAvailableLocales(t *testing.T) {
 	server := NewServer(config.Config{AvailableLocales: []string{"en", "ro", "de"}}, slog.New(slog.NewTextHandler(io.Discard, nil)), game.NewInMemoryRoomService())
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/config", nil))
-	if response.Code != http.StatusOK || response.Body.String() != "{\"availableLocales\":[\"en\",\"ro\",\"de\"]}\n" {
+	if response.Code != http.StatusOK || response.Body.String() != "{\"availableLocales\":[\"en\",\"ro\",\"de\"],\"defaultRounds\":10,\"maxRounds\":10}\n" {
 		t.Fatalf("public config = %d %s", response.Code, response.Body.String())
 	}
 }

@@ -459,15 +459,28 @@ func (repository *PostgresRoomRepository) GetRoom(ctx context.Context, code stri
 }
 
 func (repository *PostgresRoomRepository) GetRoomByReplayID(ctx context.Context, replayID string) (models.Room, error) {
-	var code string
-	err := repository.pool.QueryRow(ctx, `SELECT room_code FROM games WHERE replay_id = $1`, replayID).Scan(&code)
+	var code, gameID string
+	err := repository.pool.QueryRow(ctx, `SELECT room_code,id FROM games WHERE replay_id = $1`, replayID).Scan(&code, &gameID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return models.Room{}, game.ErrReplayNotFound
 	}
 	if err != nil {
 		return models.Room{}, fmt.Errorf("query replay room: %w", err)
 	}
-	return repository.loadRoom(ctx, repository.pool, code)
+	room, err := repository.loadRoom(ctx, repository.pool, code)
+	if err != nil {
+		return models.Room{}, err
+	}
+	room.CurrentGame, err = repository.loadCurrentGame(ctx, repository.pool, code, gameID)
+	if err != nil {
+		return models.Room{}, err
+	}
+	room.CurrentGame.Scoreboard, err = repository.loadScoreboard(ctx, repository.pool, gameID, room.Players)
+	if err != nil {
+		return models.Room{}, err
+	}
+	room.CurrentGame.TeamScoreboard = deriveTeamScoreboard(room.Teams, room.Players, room.CurrentGame.Scoreboard)
+	return room, nil
 }
 
 func (repository *PostgresRoomRepository) ListGameRounds(ctx context.Context, gameID string) ([]models.Round, error) {
@@ -742,6 +755,21 @@ func (repository *PostgresRoomRepository) StartGame(ctx context.Context, code st
 	}
 
 	return room, nil
+}
+
+func (repository *PostgresRoomRepository) ResetRoom(ctx context.Context, code string, occurredAt time.Time) (models.Room, error) {
+	tag, err := repository.pool.Exec(ctx, `
+		UPDATE rooms SET status=$2, updated_at=$3
+		WHERE code=$1 AND status=$4
+		  AND EXISTS (SELECT 1 FROM games WHERE room_code=$1 AND status=$5)
+	`, code, models.RoomStatusLobby, occurredAt, models.RoomStatusInGame, models.GameStatusCompleted)
+	if err != nil {
+		return models.Room{}, fmt.Errorf("reset room: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return models.Room{}, game.ErrReplayNotReady
+	}
+	return repository.GetRoom(ctx, code)
 }
 
 func insertPreparedRound(ctx context.Context, tx pgx.Tx, gameID string, round *models.Round) error {
@@ -1315,7 +1343,9 @@ func (repository *PostgresRoomRepository) loadRoom(ctx context.Context, querier 
 		return models.Room{}, err
 	}
 	teamRows.Close()
-	room.CurrentGame, err = repository.loadCurrentGame(ctx, querier, code)
+	if room.Status != models.RoomStatusLobby {
+		room.CurrentGame, err = repository.loadCurrentGame(ctx, querier, code, "")
+	}
 	if err != nil {
 		return models.Room{}, err
 	}
@@ -1349,7 +1379,7 @@ func deriveTeamScoreboard(teams []models.Team, players []models.Player, scores [
 	return result
 }
 
-func (repository *PostgresRoomRepository) loadCurrentGame(ctx context.Context, querier queryRower, code string) (*models.Game, error) {
+func (repository *PostgresRoomRepository) loadCurrentGame(ctx context.Context, querier queryRower, code, gameID string) (*models.Game, error) {
 	var (
 		gameState         models.Game
 		endedAt           *time.Time
@@ -1408,10 +1438,10 @@ func (repository *PostgresRoomRepository) loadCurrentGame(ctx context.Context, q
 		FROM games g
 		LEFT JOIN rounds r ON r.game_id = g.id AND r.round_index = g.current_round_index
 		LEFT JOIN questions q ON q.id = r.question_id
-		WHERE g.room_code = $1
+		WHERE g.room_code = $1 AND ($2 = '' OR g.id = $2)
 		ORDER BY g.started_at DESC
 		LIMIT 1
-	`, code).Scan(
+	`, code, gameID).Scan(
 		&gameState.ID,
 		&gameState.ReplayID,
 		&gameState.Status,

@@ -23,7 +23,7 @@ import { RoomEventClient, type RoomConnectionState } from '../lib/roomEvents'
 import { clearSession, loadSession, saveSession } from '../lib/session'
 
 const liveSafetyPollMilliseconds = 30_000
-const fallbackPollMilliseconds = 5_000
+const fallbackPollMilliseconds = 2_000
 const hiddenPollMilliseconds = 30_000
 
 export function RoomPage() {
@@ -149,10 +149,7 @@ export function RoomPage() {
   const activePlayerToken = activePlayer?.token ?? ''
 
   useEffect(() => {
-    if (!activePlayerToken || !room || isGameCompleted) {
-      if (isGameCompleted) setConnectionState('stopped')
-      return
-    }
+    if (!activePlayerToken || !room) return
     const client = new RoomEventClient({
       roomCode: code,
       playerToken: activePlayerToken,
@@ -174,7 +171,7 @@ export function RoomPage() {
     }
     // The stream cursor is updated through setAppliedRevision; room changes must not recreate it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activePlayerToken, code, isGameCompleted, room != null, refreshRoom])
+  }, [activePlayerToken, code, room != null, refreshRoom])
 
   useEffect(() => {
     if (!Number.isFinite(answerPhaseEndsAt) || hasLocallyExpired) return
@@ -217,7 +214,6 @@ export function RoomPage() {
   }, [activePlayerToken, code, currentRound?.id, currentRound?.status, isHost, isTrivia, room?.updatedAt])
 
   useEffect(() => {
-    if (isGameCompleted) return
     let timer: number | undefined
     let cancelled = false
 
@@ -251,7 +247,7 @@ export function RoomPage() {
       document.removeEventListener('visibilitychange', handleVisibility)
       window.removeEventListener('online', handleOnline)
     }
-  }, [connectionState, isGameCompleted, refreshRoom])
+  }, [connectionState, refreshRoom])
 
   async function mutateRoom(action: () => Promise<unknown>) {
     mutationInFlight.current = true
@@ -328,16 +324,7 @@ export function RoomPage() {
 
   async function handlePlayAgain() {
     if (!activePlayerToken) return setErrorMessage('Missing player session token')
-    setIsMutating(true)
-    try {
-      const response = await playAgain(code, { playerToken: activePlayerToken })
-      if (!response.player?.token) throw new Error('New host session was not returned')
-      saveSession(response.room.code, response.player)
-      navigate(`/room/${response.room.code}`)
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : 'Unable to create a new room')
-      setIsMutating(false)
-    }
+    await mutateRoom(() => playAgain(code, { playerToken: activePlayerToken }))
   }
 
   async function handleShareResults() {

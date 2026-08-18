@@ -657,7 +657,7 @@ func TestPostgresTriviaLivingRoomEarlyDeadlineReplayAndPlayAgain(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if fresh.Settings.GameKind != kind || fresh.Settings.Mode != models.GameModeLivingRoom || fresh.CurrentGame != nil || len(fresh.Players) != 1 || freshDisplay.Role != models.PlayerRoleHostDisplay {
+			if fresh.Code != room.Code || fresh.Settings.GameKind != kind || fresh.Settings.Mode != models.GameModeLivingRoom || fresh.CurrentGame != nil || len(fresh.Players) != 3 || freshDisplay.ID != display.ID || freshDisplay.Role != models.PlayerRoleHostDisplay {
 				t.Fatalf("fresh trivia lobby inherited state or settings changed: %#v", fresh)
 			}
 		})
@@ -802,16 +802,16 @@ func TestPostgresReplayAndPlayAgainIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fresh.Code == room.Code || freshHost.Token == host.Token || fresh.CurrentGame != nil {
-		t.Fatal("fresh lifecycle reused original state")
+	if fresh.Code != room.Code || freshHost.Token != host.Token || fresh.CurrentGame != nil || len(fresh.Players) != 2 {
+		t.Fatal("fresh lifecycle did not retain the room and players")
+	}
+	if replayAfterReset, err := reloadedService.GetReplay(ctx, completed.CurrentGame.ReplayID); err != nil || replayAfterReset.ID != replay.ID {
+		t.Fatalf("replay after reset=%#v err=%v", replayAfterReset, err)
 	}
 	if fresh.Settings.GameKind != models.GameKindModelSays {
 		t.Fatalf("play again game kind = %q", fresh.Settings.GameKind)
 	}
-	_, freshPlayer, err := reloadedService.JoinRoom(ctx, game.JoinRoomInput{Code: fresh.Code, DisplayName: "Player"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	freshPlayer := player
 	secondStarted, err := reloadedService.StartGame(ctx, game.StartGameInput{Code: fresh.Code, PlayerToken: freshHost.Token})
 	if err != nil {
 		t.Fatal(err)

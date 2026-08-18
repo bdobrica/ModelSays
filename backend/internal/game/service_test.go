@@ -399,7 +399,7 @@ func TestCreateRoomValidatesMVPSettings(t *testing.T) {
 		{name: "unsupported game kind", settings: models.RoomSettings{GameKind: "survey"}},
 		{name: "open trivia sequential", settings: models.RoomSettings{Mode: models.GameModeSequential, GameKind: models.GameKindTriviaOpen}},
 		{name: "choice trivia sequential", settings: models.RoomSettings{Mode: models.GameModeSequential, GameKind: models.GameKindTriviaChoice}},
-		{name: "too many rounds", settings: models.RoomSettings{TotalRounds: 6}},
+		{name: "too many rounds", settings: models.RoomSettings{TotalRounds: 11}},
 		{name: "timer too short", settings: models.RoomSettings{AnswerTimerSeconds: 14}},
 		{name: "timer too long", settings: models.RoomSettings{AnswerTimerSeconds: 121}},
 		{name: "unsupported locale", settings: models.RoomSettings{Locale: "fr"}},
@@ -1483,6 +1483,11 @@ func curatedTopAnswer(t *testing.T, questionID string) (canonical string, alias 
 		"question-en-003": {canonical: "dieting", alias: "diet", score: 40},
 		"question-en-004": {canonical: "their keys", alias: "keys", score: 50},
 		"question-en-005": {canonical: "no clear agenda", alias: "no agenda", score: 50},
+		"question-en-006": {canonical: "toothbrush", alias: "their toothbrush", score: 50},
+		"question-en-007": {canonical: "noise", alias: "loud neighbors", score: 50},
+		"question-en-008": {canonical: "check their phone", alias: "scroll", score: 50},
+		"question-en-009": {canonical: "sneeze", alias: "sneezing", score: 50},
+		"question-en-010": {canonical: "a bottle of wine", alias: "champagne", score: 50},
 	}
 	answer, ok := answers[questionID]
 	if !ok {
@@ -1748,18 +1753,21 @@ func TestCompletedReplayAndPlayAgainArePublicSafeAndIsolated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fresh.Code == original.Code || freshHost.ID == host.ID || freshHost.Token == host.Token {
-		t.Fatal("play again reused original room, player, or credential")
+	if fresh.Code != original.Code || freshHost.ID != host.ID || freshHost.Token != host.Token {
+		t.Fatal("play again did not preserve room, player, and credential")
 	}
-	if fresh.CurrentGame != nil || len(fresh.Players) != 1 || fresh.Status != models.RoomStatusLobby {
+	if fresh.CurrentGame != nil || len(fresh.Players) != 2 || fresh.Status != models.RoomStatusLobby {
 		t.Fatalf("fresh room inherited game state: %#v", fresh)
 	}
 	if fresh.Settings.GameKind != original.Settings.GameKind {
 		t.Fatalf("play again game kind = %q, want %q", fresh.Settings.GameKind, original.Settings.GameKind)
 	}
 	originalReloaded, err := service.GetRoom(context.Background(), original.Code)
-	if err != nil || originalReloaded.CurrentGame.Status != models.GameStatusCompleted {
-		t.Fatalf("original game changed: room=%#v err=%v", originalReloaded, err)
+	if err != nil || originalReloaded.CurrentGame != nil || originalReloaded.Status != models.RoomStatusLobby {
+		t.Fatalf("room was not reset: room=%#v err=%v", originalReloaded, err)
+	}
+	if replayAfterReset, err := service.GetReplay(context.Background(), completed.CurrentGame.ReplayID); err != nil || replayAfterReset.ID != replay.ID {
+		t.Fatalf("replay after room reset = %#v, %v", replayAfterReset, err)
 	}
 }
 

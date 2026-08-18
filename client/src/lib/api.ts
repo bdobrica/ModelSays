@@ -2,7 +2,7 @@ import { env } from './env'
 
 export type GameMode = 'simultaneous' | 'teams' | 'sequential' | 'livingroom'
 export type GameKind = 'model_says' | 'trivia_open' | 'trivia_choice'
-export interface PublicConfig { availableLocales: string[] }
+export interface PublicConfig { availableLocales: string[]; defaultRounds: number; maxRounds: number }
 
 export interface RoomSettings {
   mode: GameMode

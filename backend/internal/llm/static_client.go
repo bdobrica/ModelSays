@@ -123,6 +123,56 @@ var curatedRoundDataByLocale = map[string][]curatedRoundData{
 				},
 			},
 		},
+		{
+			question: models.Question{ID: "question-en-006", Text: "Name something people often forget when packing for a trip.", Locale: "en", Category: "party"},
+			board: models.PredictionBoard{Provider: "static", ModelName: "curated-bank", PromptVersion: "v1", Answers: []models.PredictionAnswer{
+				{CanonicalAnswer: "toothbrush", Aliases: []string{"their toothbrush"}, Rank: 1, Score: 50},
+				{CanonicalAnswer: "phone charger", Aliases: []string{"charger", "charging cable"}, Rank: 2, Score: 40},
+				{CanonicalAnswer: "underwear", Aliases: []string{"clean underwear"}, Rank: 3, Score: 30},
+				{CanonicalAnswer: "sunscreen", Aliases: []string{"sun cream", "sunblock"}, Rank: 4, Score: 20},
+				{CanonicalAnswer: "medication", Aliases: []string{"medicine", "prescriptions"}, Rank: 5, Score: 10},
+			}},
+		},
+		{
+			question: models.Question{ID: "question-en-007", Text: "Name something that can ruin a good night's sleep.", Locale: "en", Category: "party"},
+			board: models.PredictionBoard{Provider: "static", ModelName: "curated-bank", PromptVersion: "v1", Answers: []models.PredictionAnswer{
+				{CanonicalAnswer: "noise", Aliases: []string{"loud neighbors", "snoring"}, Rank: 1, Score: 50},
+				{CanonicalAnswer: "stress", Aliases: []string{"worry", "anxiety"}, Rank: 2, Score: 40},
+				{CanonicalAnswer: "a bad mattress", Aliases: []string{"uncomfortable bed", "mattress"}, Rank: 3, Score: 30},
+				{CanonicalAnswer: "room temperature", Aliases: []string{"too hot", "too cold"}, Rank: 4, Score: 20},
+				{CanonicalAnswer: "screen time", Aliases: []string{"phone", "late-night scrolling"}, Rank: 5, Score: 10},
+			}},
+		},
+		{
+			question: models.Question{ID: "question-en-008", Text: "Name something people do while waiting in a long line.", Locale: "en", Category: "party"},
+			board: models.PredictionBoard{Provider: "static", ModelName: "curated-bank", PromptVersion: "v1", Answers: []models.PredictionAnswer{
+				{CanonicalAnswer: "check their phone", Aliases: []string{"use their phone", "scroll"}, Rank: 1, Score: 50},
+				{CanonicalAnswer: "talk", Aliases: []string{"chat", "have a conversation"}, Rank: 2, Score: 40},
+				{CanonicalAnswer: "people-watch", Aliases: []string{"watch people", "people watching"}, Rank: 3, Score: 30},
+				{CanonicalAnswer: "complain", Aliases: []string{"grumble"}, Rank: 4, Score: 20},
+				{CanonicalAnswer: "listen to music", Aliases: []string{"music", "wear headphones"}, Rank: 5, Score: 10},
+			}},
+		},
+		{
+			question: models.Question{ID: "question-en-009", Text: "Name something that is difficult to do quietly.", Locale: "en", Category: "party"},
+			board: models.PredictionBoard{Provider: "static", ModelName: "curated-bank", PromptVersion: "v1", Answers: []models.PredictionAnswer{
+				{CanonicalAnswer: "sneeze", Aliases: []string{"sneezing"}, Rank: 1, Score: 50},
+				{CanonicalAnswer: "eat crunchy food", Aliases: []string{"eat chips", "crunch food"}, Rank: 2, Score: 40},
+				{CanonicalAnswer: "laugh", Aliases: []string{"laughing"}, Rank: 3, Score: 30},
+				{CanonicalAnswer: "open a snack bag", Aliases: []string{"open a packet", "open chips"}, Rank: 4, Score: 20},
+				{CanonicalAnswer: "move furniture", Aliases: []string{"drag a chair", "moving furniture"}, Rank: 5, Score: 10},
+			}},
+		},
+		{
+			question: models.Question{ID: "question-en-010", Text: "Name something people save for a special occasion.", Locale: "en", Category: "party"},
+			board: models.PredictionBoard{Provider: "static", ModelName: "curated-bank", PromptVersion: "v1", Answers: []models.PredictionAnswer{
+				{CanonicalAnswer: "a bottle of wine", Aliases: []string{"wine", "champagne"}, Rank: 1, Score: 50},
+				{CanonicalAnswer: "nice clothes", Aliases: []string{"special outfit", "formal clothes"}, Rank: 2, Score: 40},
+				{CanonicalAnswer: "money", Aliases: []string{"savings", "cash"}, Rank: 3, Score: 30},
+				{CanonicalAnswer: "fancy dishes", Aliases: []string{"fine china", "best plates"}, Rank: 4, Score: 20},
+				{CanonicalAnswer: "a gift", Aliases: []string{"present"}, Rank: 5, Score: 10},
+			}},
+		},
 	},
 }
 

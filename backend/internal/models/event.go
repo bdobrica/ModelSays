@@ -15,6 +15,7 @@ const (
 	RoomEventScoreChanged       RoomEventType = "score_changed"
 	RoomEventRoundStarted       RoomEventType = "round_started"
 	RoomEventGameCompleted      RoomEventType = "game_completed"
+	RoomEventGameReset          RoomEventType = "game_reset"
 )
 
 // RoomEvent is deliberately an invalidation envelope. It never contains board,

@@ -70,7 +70,8 @@ const (
 	maxBoardMetadataRunes    = 80
 	maxPredictionAnswerScore = 100
 	minTotalRounds           = 1
-	maxTotalRounds           = 5
+	defaultTotalRounds       = 10
+	defaultMaxTotalRounds    = 10
 	minAnswerTimerSeconds    = 15
 	maxAnswerTimerSeconds    = 120
 	defaultPredictionModel   = "gpt-5.6-luna"
@@ -154,6 +155,8 @@ type RoomService struct {
 	providerGate     ProviderGate
 	providerObserve  func(models.ProviderCallAudit)
 	availableLocales map[string]struct{}
+	defaultRounds    int
+	maxRounds        int
 }
 
 type ProviderGate interface {
@@ -209,6 +212,7 @@ type RoomRepository interface {
 	CreateTeam(ctx context.Context, code string, team models.Team) (models.Room, error)
 	AssignPlayerTeam(ctx context.Context, code, playerID, teamID string) (models.Room, error)
 	PassTurn(ctx context.Context, code, roundID, playerID string, occurredAt time.Time) (models.Room, error)
+	ResetRoom(ctx context.Context, code string, occurredAt time.Time) (models.Room, error)
 }
 
 func NewRoomService(repository RoomRepository, modelClient llm.ModelClient) *RoomService {
@@ -232,6 +236,8 @@ func NewRoomServiceWithClock(repository RoomRepository, modelClient llm.ModelCli
 		judgeModel:       defaultPredictionModel,
 		modelPolicy:      llm.DefaultPolicy(),
 		availableLocales: map[string]struct{}{"en": {}, "ro": {}},
+		defaultRounds:    defaultTotalRounds,
+		maxRounds:        defaultMaxTotalRounds,
 	}
 }
 
@@ -271,6 +277,13 @@ func (service *RoomService) SetAvailableLocales(locales []string) {
 	}
 }
 
+func (service *RoomService) SetRoundLimits(defaultRounds, maxRounds int) {
+	if defaultRounds >= minTotalRounds && maxRounds >= defaultRounds {
+		service.defaultRounds = defaultRounds
+		service.maxRounds = maxRounds
+	}
+}
+
 func NewInMemoryRoomService() *RoomService {
 	return NewRoomService(NewInMemoryRoomRepository(), llm.NewStaticModelClient())
 }
@@ -287,7 +300,7 @@ func (service *RoomService) CreateRoom(ctx context.Context, input CreateRoomInpu
 		return models.Room{}, models.Player{}, err
 	}
 
-	settings := normalizeSettings(input.Settings)
+	settings := service.normalizeSettings(input.Settings)
 	if err := service.validateSettings(settings); err != nil {
 		return models.Room{}, models.Player{}, err
 	}
@@ -966,9 +979,12 @@ func (service *RoomService) PlayAgain(ctx context.Context, input PlayAgainInput)
 	if room.CurrentGame == nil || room.CurrentGame.Status != models.GameStatusCompleted {
 		return models.Room{}, models.Player{}, ErrReplayNotReady
 	}
-	return service.CreateRoom(ctx, CreateRoomInput{
-		RoomName: room.Name, HostDisplayName: host.DisplayName, Settings: room.Settings,
-	})
+	reset, err := service.repository.ResetRoom(ctx, code, service.clock.Now())
+	if err != nil {
+		return models.Room{}, models.Player{}, err
+	}
+	reset = service.publishRoomEvent(ctx, reset, models.RoomEventGameReset)
+	return reset, host, nil
 }
 
 func (service *RoomService) OverrideMatch(ctx context.Context, input OverrideMatchInput) (models.Room, error) {
@@ -1198,7 +1214,7 @@ func (service *RoomService) newSkippedJudgeAudit(room models.Room, category stri
 	}
 }
 
-func normalizeSettings(settings models.RoomSettings) models.RoomSettings {
+func (service *RoomService) normalizeSettings(settings models.RoomSettings) models.RoomSettings {
 	if settings.Mode == "" {
 		settings.Mode = models.GameModeSimultaneous
 	}
@@ -1206,7 +1222,7 @@ func normalizeSettings(settings models.RoomSettings) models.RoomSettings {
 		settings.GameKind = models.GameKindModelSays
 	}
 	if settings.TotalRounds == 0 {
-		settings.TotalRounds = 5
+		settings.TotalRounds = service.defaultRounds
 	}
 	if settings.AnswerTimerSeconds == 0 {
 		settings.AnswerTimerSeconds = 45
@@ -1241,8 +1257,8 @@ func (service *RoomService) validateSettings(settings models.RoomSettings) error
 	if settings.GameKind != models.GameKindModelSays && settings.Mode == models.GameModeSequential {
 		return fmt.Errorf("%w: game kind %s does not support mode sequential", ErrRoomSettingsInvalid, settings.GameKind)
 	}
-	if settings.TotalRounds < minTotalRounds || settings.TotalRounds > maxTotalRounds {
-		return fmt.Errorf("%w: total rounds must be between %d and %d", ErrRoomSettingsInvalid, minTotalRounds, maxTotalRounds)
+	if settings.TotalRounds < minTotalRounds || settings.TotalRounds > service.maxRounds {
+		return fmt.Errorf("%w: total rounds must be between %d and %d", ErrRoomSettingsInvalid, minTotalRounds, service.maxRounds)
 	}
 	if settings.AnswerTimerSeconds < minAnswerTimerSeconds || settings.AnswerTimerSeconds > maxAnswerTimerSeconds {
 		return fmt.Errorf("%w: answer timer must be between %d and %d seconds", ErrRoomSettingsInvalid, minAnswerTimerSeconds, maxAnswerTimerSeconds)

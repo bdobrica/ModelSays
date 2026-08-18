@@ -19,6 +19,8 @@ type Config struct {
 	HTTPAddr              string
 	CORSAllowedOrigins    []string
 	AvailableLocales      []string
+	DefaultRounds         int
+	MaxRounds             int
 	DefaultModels         DefaultModels
 	ModelPolicy           llm.Policy
 	EventPollInterval     time.Duration
@@ -51,6 +53,8 @@ func Load() Config {
 		HTTPAddr:              getEnv("HTTP_ADDR", ":8080"),
 		CORSAllowedOrigins:    splitCSV(getEnv("CORS_ALLOWED_ORIGINS", "http://localhost:5173")),
 		AvailableLocales:      normalizedCSV(getEnv("AVAILABLE_LOCALES", "en,ro")),
+		DefaultRounds:         getEnvInt("DEFAULT_ROUNDS", 10),
+		MaxRounds:             getEnvInt("MAX_ROUNDS", 10),
 		EventPollInterval:     time.Duration(getEnvInt("EVENT_POLL_INTERVAL_MS", 250)) * time.Millisecond,
 		EventHeartbeat:        time.Duration(getEnvInt("EVENT_HEARTBEAT_SECONDS", 15)) * time.Second,
 		EventMaxConnections:   getEnvInt("EVENT_MAX_CONNECTIONS", 100),
@@ -110,6 +114,9 @@ func (config Config) Validate() error {
 	}
 	if len(config.AvailableLocales) == 0 {
 		return fmt.Errorf("AVAILABLE_LOCALES must contain at least one locale")
+	}
+	if config.DefaultRounds > config.MaxRounds {
+		return fmt.Errorf("DEFAULT_ROUNDS must not exceed MAX_ROUNDS")
 	}
 	seenLocales := make(map[string]struct{}, len(config.AvailableLocales))
 	for _, locale := range config.AvailableLocales {

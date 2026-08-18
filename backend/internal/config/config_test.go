@@ -92,3 +92,19 @@ func TestAvailableLocalesConfiguration(t *testing.T) {
 		t.Fatalf("invalid locale validation = %v", err)
 	}
 }
+
+func TestRoundLimitConfiguration(t *testing.T) {
+	t.Setenv("DEFAULT_ROUNDS", "8")
+	t.Setenv("MAX_ROUNDS", "12")
+	cfg := Load()
+	if cfg.DefaultRounds != 8 || cfg.MaxRounds != 12 {
+		t.Fatalf("round configuration = default %d max %d", cfg.DefaultRounds, cfg.MaxRounds)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("valid round configuration: %v", err)
+	}
+	cfg.DefaultRounds = 13
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "DEFAULT_ROUNDS") {
+		t.Fatalf("invalid round configuration = %v", err)
+	}
+}
